@@ -1,0 +1,6 @@
+[polza.ai]
+API_KEY = your_deepseek_api_key_here
+URL = https://polza.ai/api/v1
+MODEL = deepseek/deepseek-r1
+REASONING = True
+STREAM = False
