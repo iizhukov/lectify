@@ -69,8 +69,14 @@ Thumbs.db
 *.log
 
 #folders
-tests/
 data/
+logs/
 key.json
 config.cfg
 *.db
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+test_data/

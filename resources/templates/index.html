@@ -1,409 +1,544 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" class="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Конспектирование Лекций - Панель Управления</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
-      --accent: #6c63ff; --accent-hover: #5a52e0;
-      --text: #e8eaf6; --text-muted: #8b8fa8; --border: #2e3250;
-      --success: #4caf82; --error: #e05c5c; --running: #f0a830;
-    }
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg); color: var(--text);
-      min-height: 100vh; padding: 40px 24px;
-    }
-    .container {
-      max-width: 1200px; margin: 0 auto;
-      display: grid; grid-template-columns: 1fr 2fr; gap: 32px;
-    }
-    @media (max-width: 900px) {
-      .container { grid-template-columns: 1fr; }
-    }
-    
-    /* Left Panel: Upload & List */
-    .left-panel { display: flex; flex-direction: column; gap: 24px; }
-    
-    .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 24px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-    }
-    
-    .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-    .logo-icon {
-      width: 40px; height: 40px;
-      background: linear-gradient(135deg, var(--accent), #a78bfa);
-      border-radius: 10px; display: flex; align-items: center;
-      justify-content: center; font-size: 20px;
-    }
-    h1 { font-size: 1.3rem; font-weight: 700; }
-    h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; }
-    
-    .drop-zone {
-      border: 2px dashed var(--border); border-radius: 10px;
-      padding: 24px 16px; text-align: center; cursor: pointer;
-      transition: border-color 0.2s, background 0.2s; position: relative;
-    }
-    .drop-zone:hover, .drop-zone.drag-over {
-      border-color: var(--accent); background: rgba(108,99,255,0.06);
-    }
-    .drop-zone input[type=file] {
-      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
-    }
-    .drop-icon { font-size: 2rem; margin-bottom: 8px; }
-    .drop-text { font-size: 0.9rem; color: var(--text-muted); }
-    .drop-text span { color: var(--accent); font-weight: 600; }
-    .file-selected { color: var(--success); font-size: 0.85rem; margin-top: 8px; font-weight: 500; }
-    
-    .lang-section { margin-top: 16px; }
-    .lang-label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; }
-    .lang-buttons { display: flex; gap: 8px; }
-    .lang-btn {
-      flex: 1; padding: 8px; border: 1px solid var(--border);
-      border-radius: 8px; background: var(--surface2); color: var(--text);
-      font-size: 0.85rem; cursor: pointer; transition: all 0.15s;
-    }
-    .lang-btn.active {
-      border-color: var(--accent); background: rgba(108,99,255,0.18);
-      color: #a5b4fc; font-weight: 600;
-    }
-    
-    .submit-btn {
-      width: 100%; margin-top: 16px; padding: 12px;
-      background: var(--accent); color: #fff; border: none;
-      border-radius: 10px; font-size: 0.95rem; font-weight: 600;
-      cursor: pointer; transition: background 0.2s;
-    }
-    .submit-btn:hover:not(:disabled) { background: var(--accent-hover); }
-    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    
-    /* Files list */
-    .file-list { display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; }
-    .file-item {
-      padding: 12px; border: 1px solid var(--border); border-radius: 10px;
-      background: var(--surface2); cursor: pointer; transition: border-color 0.15s;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .file-item:hover, .file-item.active { border-color: var(--accent); }
-    .file-info { display: flex; flex-direction: column; gap: 4px; }
-    .file-name { font-size: 0.9rem; font-weight: 600; word-break: break-all; }
-    .file-meta { font-size: 0.75rem; color: var(--text-muted); }
-    .status-badge {
-      font-size: 0.75rem; padding: 4px 8px; border-radius: 99px; font-weight: 600;
-    }
-    .status-pending { background: #475569; color: #cbd5e1; }
-    .status-processing { background: rgba(240,168,48,0.2); color: var(--running); }
-    .status-completed { background: rgba(76,175,130,0.2); color: var(--success); }
-    .status-failed { background: rgba(224,92,92,0.2); color: var(--error); }
-    
-    /* Right Panel: Graph & Artifacts */
-    .right-panel { display: flex; flex-direction: column; gap: 24px; }
-    .right-panel-empty {
-      height: 100%; display: flex; align-items: center; justify-content: center;
-      color: var(--text-muted); border: 2px dashed var(--border); border-radius: 16px;
-      padding: 40px; text-align: center;
-    }
-    
-    /* Workflow Graph */
-    .graph-container {
-      display: flex; flex-direction: column; align-items: center; gap: 24px;
-      margin: 20px 0; padding: 20px; background: rgba(0,0,0,0.2); border-radius: 12px;
-    }
-    .graph-row { display: flex; justify-content: center; gap: 40px; width: 100%; position: relative; }
-    .graph-node {
-      background: var(--surface2); border: 2px solid var(--border);
-      border-radius: 12px; padding: 14px 20px; min-width: 180px; text-align: center;
-      transition: all 0.3s ease; cursor: pointer;
-    }
-    .graph-node.pending { border-color: var(--border); opacity: 0.6; }
-    .graph-node.running {
-      border-color: var(--running); box-shadow: 0 0 15px rgba(240,168,48,0.4);
-      animation: pulse 1.5s infinite alternate;
-    }
-    .graph-node.completed { border-color: var(--success); }
-    .graph-node.failed { border-color: var(--error); }
-    
-    .node-title { font-size: 0.85rem; font-weight: 700; }
-    .node-status-text { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
-    
-    @keyframes pulse {
-      0% { transform: scale(1); }
-      100% { transform: scale(1.03); }
-    }
-    
-    /* Artifacts styling */
-    .artifacts-section { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
-    .artifact-card {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 10px; padding: 16px; display: flex; align-items: center; justify-content: space-between;
-    }
-    .artifact-meta { display: flex; flex-direction: column; gap: 4px; }
-    .artifact-name { font-size: 0.85rem; font-weight: 600; }
-    .artifact-format { font-size: 0.75rem; color: var(--text-muted); }
-    .dl-btn {
-      padding: 6px 14px; background: var(--accent); color: #fff; text-decoration: none;
-      border-radius: 6px; font-size: 0.8rem; font-weight: 600; transition: background 0.2s;
-    }
-    .dl-btn:hover { background: var(--accent-hover); }
-  </style>
-</head>
-<body>
-  <div class="container">
-    
-    <!-- Left panel: Upload & List -->
-    <div class="left-panel">
-      <div class="card">
-        <div class="logo">
-          <div class="logo-icon">&#127891;</div>
-          <div>
-            <h1>Конспектирование ИИ</h1>
-          </div>
-        </div>
-        
-        <div class="drop-zone" id="drop-zone">
-          <input type="file" id="file-input" accept=".mp3,.m4a,.wav,.ogg,.flac,.aac,.opus,.wma" />
-          <div class="drop-icon">&#127925;</div>
-          <div class="drop-text"><span>Выбери файл</span> или перетащи сюда</div>
-          <div class="file-selected" id="file-name"></div>
-        </div>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-        <div class="lang-section">
-          <div class="lang-label">Язык лекции</div>
-          <div class="lang-buttons">
-            <button class="lang-btn active" id="btn-ru" onclick="selectLang('ru')">🇷🇺 Русский</button>
-            <button class="lang-btn" id="btn-en" onclick="selectLang('en')">🇬🇧 English</button>
-          </div>
-        </div>
+  <title>ИИ Конспектирование</title>
 
-        <button class="submit-btn" id="submit-btn" onclick="startUpload()" disabled>
-          Начать конспектирование
-        </button>
-      </div>
-      
-      <div class="card">
-        <h2>Загруженные лекции</h2>
-        <div class="file-list" id="file-list">
-          <!-- Динамический список файлов -->
-        </div>
-      </div>
-    </div>
-    
-    <!-- Right panel: Workflow details -->
-    <div class="right-panel" id="right-panel">
-      <div class="right-panel-empty" id="empty-state">
-        <div>
-          <div style="font-size: 3rem; margin-bottom: 12px;">📈</div>
-          <h3>Выберите лекцию из списка</h3>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 6px;">Чтобы посмотреть граф выполнения нод ИИ и скачать полученные конспекты</p>
-        </div>
-      </div>
-      
-      <div class="card" id="details-card" style="display: none;">
-        <h2 id="details-title" style="margin-bottom: 4px; word-break: break-all;">Лекция</h2>
-        <p id="details-meta" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 24px;"></p>
-        
-        <h3>Граф выполнения нод</h3>
-        <div class="graph-container">
-          <!-- Ряд 1: s2t -->
-          <div class="graph-row">
-            <div class="graph-node" id="node-s2t">
-              <div class="node-title">🎙️ Речь в Текст</div>
-              <div class="node-status-text" id="status-s2t">В ожидании</div>
-            </div>
-          </div>
-          
-          <!-- Ряд 2: md & latex -->
-          <div class="graph-row">
-            <div class="graph-node" id="node-text_to_md">
-              <div class="node-title">📝 Markdown Конспект</div>
-              <div class="node-status-text" id="status-text_to_md">В ожидании</div>
-            </div>
-            <div class="graph-node" id="node-text_to_latex">
-              <div class="node-title">📐 LaTeX Конспект</div>
-              <div class="node-status-text" id="status-text_to_latex">В ожидании</div>
-            </div>
-          </div>
-          
-          <!-- Ряд 3: pdf -->
-          <div class="graph-row">
-            <div class="graph-node" id="node-latex_to_pdf">
-              <div class="node-title">📄 Генерация PDF</div>
-              <div class="node-status-text" id="status-latex_to_pdf">В ожидании</div>
-            </div>
-          </div>
-        </div>
-        
-        <h3>Артефакты работы</h3>
-        <div class="artifacts-section" id="artifacts-list">
-          <!-- Сюда будут рендериться кнопки скачивания md, tex, pdf -->
-        </div>
-      </div>
-    </div>
-    
-  </div>
+  <script src="https://cdn.tailwindcss.com"></script>
 
   <script>
-    let selectedLang = 'ru';
-    let currentActiveFileId = null;
-    let pollInterval = null;
-
-    const fileInput = document.getElementById('file-input');
-    const dropZone = document.getElementById('drop-zone');
-    const fileNameEl = document.getElementById('file-name');
-    const submitBtn = document.getElementById('submit-btn');
-
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files[0]) {
-        fileNameEl.textContent = '✓ ' + fileInput.files[0].name;
-        submitBtn.disabled = false;
-      }
-    });
-
-    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-    dropZone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropZone.classList.remove('drag-over');
-      if (e.dataTransfer.files[0]) {
-        fileInput.files = e.dataTransfer.files;
-        fileNameEl.textContent = '✓ ' + e.dataTransfer.files[0].name;
-        submitBtn.disabled = false;
-      }
-    });
-
-    function selectLang(lang) {
-      selectedLang = lang;
-      document.getElementById('btn-ru').classList.toggle('active', lang === 'ru');
-      document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+    tailwind.config = {
+      darkMode: 'class'
     }
-
-    async function loadFiles() {
-      const res = await fetch('/api/files');
-      const files = await res.json();
-      const listEl = document.getElementById('file-list');
-      listEl.innerHTML = '';
-      
-      files.forEach(f => {
-        const item = document.createElement('div');
-        item.className = `file-item ${f.id === currentActiveFileId ? 'active' : ''}`;
-        item.onclick = () => selectFile(f.id);
-        
-        let statusText = 'В очереди';
-        let statusClass = 'status-pending';
-        if(f.status === 'processing') { statusText = 'Обработка'; statusClass = 'status-processing'; }
-        else if(f.status === 'completed') { statusText = 'Готово'; statusClass = 'status-completed'; }
-        else if(f.status === 'failed') { statusText = 'Ошибка'; statusClass = 'status-failed'; }
-        
-        item.innerHTML = `
-          <div class="file-info">
-            <div class="file-name">${f.filename}</div>
-            <div class="file-meta">${new Date(f.created_at).toLocaleString()}</div>
-          </div>
-          <span class="status-badge ${statusClass}">${statusText}</span>
-        `;
-        listEl.appendChild(item);
-      });
-    }
-
-    async function selectFile(fileId) {
-      currentActiveFileId = fileId;
-      document.getElementById('empty-state').style.display = 'none';
-      document.getElementById('details-card').style.display = 'block';
-      
-      // Сбросим выделение в списке и выделим нужный
-      document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
-      loadFiles(); // перерисует список с активным классом
-      
-      if (pollInterval) clearInterval(pollInterval);
-      await updateDetails();
-      pollInterval = setInterval(updateDetails, 2000);
-    }
-
-    async function updateDetails() {
-      if (!currentActiveFileId) return;
-      const res = await fetch(`/api/files/${currentActiveFileId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      
-      document.getElementById('details-title').textContent = data.filename;
-      document.getElementById('details-meta').textContent = `ID: ${data.id} | Язык: ${data.language === 'ru' ? 'Русский' : 'English'} | Загружен: ${new Date(data.created_at).toLocaleString()}`;
-      
-      // Обновляем ноды на графе
-      data.nodes.forEach(n => {
-        const nodeEl = document.getElementById(`node-${n.node_id}`);
-        const statusEl = document.getElementById(`status-${n.node_id}`);
-        if (nodeEl && statusEl) {
-          nodeEl.className = `graph-node ${n.status}`;
-          
-          let statusText = 'В ожидании';
-          if (n.status === 'running') statusText = n.message || 'Выполняется...';
-          else if (n.status === 'completed') statusText = 'Выполнено успешно';
-          else if (n.status === 'failed') statusText = n.message || 'Ошибка выполнения';
-          
-          statusEl.textContent = statusText;
-        }
-      });
-      
-      // Отрендерим артефакты
-      const artList = document.getElementById('artifacts-list');
-      artList.innerHTML = '';
-      
-      const completedNodes = data.nodes.filter(n => n.status === 'completed');
-      if (completedNodes.length === 0) {
-        artList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">Артефакты появятся по мере выполнения нод...</p>';
-      } else {
-        completedNodes.forEach(n => {
-          let extension = '';
-          let name = '';
-          if (n.node_id === 's2t') { extension = 'txt'; name = 'Распознанный текст лекции (TXT)'; }
-          else if (n.node_id === 'text_to_md') { extension = 'md'; name = 'Полный конспект (Markdown)'; }
-          else if (n.node_id === 'text_to_latex') { extension = 'tex'; name = 'LaTeX-исходник конспекта'; }
-          else if (n.node_id === 'latex_to_pdf') { extension = 'pdf'; name = 'Готовый PDF-документ (Печать)'; }
-          
-          if (extension) {
-            const card = document.createElement('div');
-            card.className = 'artifact-card';
-            card.innerHTML = `
-              <div class="artifact-meta">
-                <div class="artifact-name">${name}</div>
-                <div class="artifact-format">Формат: ${extension.toUpperCase()}</div>
-              </div>
-              <a href="/download/${data.id}/${extension}" class="dl-btn">Скачать .${extension}</a>
-            `;
-            artList.appendChild(card);
-          }
-        });
-      }
-    }
-
-    async function startUpload() {
-      const file = fileInput.files[0];
-      if (!file) return;
-      
-      submitBtn.disabled = true;
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('language', selectedLang);
-      
-      const res = await fetch('/upload', { method: 'POST', body: formData });
-      const data = await res.json();
-      
-      // Сброс поля
-      fileInput.value = '';
-      fileNameEl.textContent = '';
-      
-      loadFiles();
-      selectFile(data.file_id);
-    }
-
-    // Инициализация при загрузке
-    loadFiles();
-    setInterval(loadFiles, 10000); // автообновление списка раз в 10с
   </script>
+
+  <script
+    src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"
+    defer
+  ></script>
+
+  <style>
+    .glass {
+      backdrop-filter: blur(12px);
+    }
+  </style>
+</head>
+
+<body class="bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors">
+
+<div
+  x-data="app()"
+  x-init="init()"
+  class="min-h-screen"
+>
+
+  <!-- HEADER -->
+  <header class="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 glass">
+
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+
+      <div>
+        <h1 class="text-3xl font-bold">
+          ИИ Конспектирование
+        </h1>
+
+        <p class="text-sm text-zinc-500 mt-1">
+          Видео → Markdown → LaTeX → PDF
+        </p>
+      </div>
+
+      <div class="flex items-center gap-3">
+
+        <button
+          @click="openUploadModal()"
+          class="px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition"
+        >
+          Загрузить
+        </button>
+
+        <button
+          @click="toggleTheme()"
+          class="px-4 py-3 rounded-2xl bg-zinc-200 dark:bg-zinc-800 hover:scale-105 transition"
+        >
+          🌙 / ☀️
+        </button>
+
+      </div>
+
+    </div>
+
+  </header>
+
+  <!-- FILES -->
+  <main class="max-w-7xl mx-auto px-6 py-10">
+
+    <!-- QUEUE STATUS -->
+    <div class="mb-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-lg">
+      
+      <div class="flex items-center justify-between">
+        
+        <div>
+          <h3 class="text-xl font-bold mb-2">
+            Статус обработки
+          </h3>
+          <p class="text-sm text-zinc-500">
+            Система может обрабатывать до <span x-text="queueStatus.max_concurrent"></span> файлов одновременно
+          </p>
+        </div>
+
+        <div class="flex items-center gap-6">
+          
+          <div class="text-center">
+            <div class="text-3xl font-bold text-orange-500" x-text="queueStatus.active_workflows"></div>
+            <div class="text-sm text-zinc-500 mt-1">Активных</div>
+          </div>
+
+          <div class="text-center">
+            <div class="text-3xl font-bold text-blue-500" x-text="queueStatus.queue_size"></div>
+            <div class="text-sm text-zinc-500 mt-1">В очереди</div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <div class="flex items-center justify-between mb-8">
+
+      <div>
+        <h2 class="text-4xl font-bold">
+          Загруженные файлы
+        </h2>
+
+        <p class="text-zinc-500 mt-2">
+          История обработанных лекций и workflow
+        </p>
+      </div>
+
+      <button
+        @click="loadFiles()"
+        class="px-4 py-3 rounded-2xl bg-zinc-200 dark:bg-zinc-800"
+      >
+        Обновить
+      </button>
+
+    </div>
+
+    <div
+      class="space-y-4"
+    >
+
+      <template x-for="file in files" :key="file.id">
+
+        <a
+          :href="'/files/' + file.id"
+          class="group flex items-center justify-between rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-lg hover:shadow-2xl transition"
+        >
+
+          <div class="flex items-center gap-5 min-w-0">
+
+            <div
+              class="w-4 h-4 rounded-full shrink-0"
+              :class="statusColor(file.status)"
+            ></div>
+
+            <div class="min-w-0">
+
+              <h3
+                class="font-bold text-lg truncate"
+                x-text="file.filename"
+              ></h3>
+
+              <div class="flex flex-wrap gap-4 mt-2 text-sm text-zinc-500">
+
+                <span>
+                  ID:
+                  <span x-text="file.id"></span>
+                </span>
+
+                <span>
+                  Язык:
+                  <span x-text="file.language"></span>
+                </span>
+
+                <span>
+                  Размер:
+                  <span x-text="formatSize(file.size_bytes)"></span>
+                </span>
+
+              </div>
+
+            </div>
+
+          </div>
+
+          <div class="text-right shrink-0 ml-6">
+
+            <div
+              class="inline-flex px-3 py-1 rounded-xl text-sm font-semibold"
+              :class="statusBadge(file.status)"
+              x-text="file.status"
+            ></div>
+
+            <p
+              class="text-sm text-zinc-500 mt-2"
+              x-text="formatDate(file.created_at)"
+            ></p>
+
+          </div>
+
+        </a>
+
+      </template>
+
+      <template x-if="files.length === 0">
+
+        <div class="rounded-3xl border border-dashed border-zinc-300 dark:border-zinc-700 p-20 text-center">
+
+          <h3 class="text-2xl font-bold mb-3">
+            Пока нет файлов
+          </h3>
+
+          <p class="text-zinc-500 mb-6">
+            Загрузите первую лекцию для обработки
+          </p>
+
+          <button
+            @click="openUploadModal()"
+            class="px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+          >
+            Загрузить файл
+          </button>
+
+        </div>
+
+      </template>
+
+    </div>
+
+  </main>
+
+  <!-- UPLOAD MODAL -->
+  <div
+    x-show="showUploadModal"
+    x-transition
+    class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6"
+  >
+
+    <div
+      @click.outside="closeUploadModal()"
+      class="w-full max-w-xl rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl p-8"
+    >
+
+      <div class="flex items-start justify-between mb-8">
+
+        <div>
+          <h2 class="text-3xl font-bold">
+            Загрузка лекции
+          </h2>
+
+          <p class="text-zinc-500 mt-2">
+            Поддерживаются видео и аудио файлы
+          </p>
+        </div>
+
+        <button
+          @click="closeUploadModal()"
+          class="text-2xl"
+        >
+          ✕
+        </button>
+
+      </div>
+
+      <form
+        @submit.prevent="uploadFile()"
+        class="space-y-6"
+      >
+
+        <div>
+
+          <label class="block mb-2 text-sm font-medium">
+            Файл (можно выбрать несколько)
+          </label>
+
+          <input
+            type="file"
+            multiple
+            @change="onFileChange"
+            class="block w-full rounded-2xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 p-4"
+          />
+
+        </div>
+
+        <div>
+
+          <label class="block mb-2 text-sm font-medium">
+            Язык
+          </label>
+
+          <select
+            x-model="language"
+            class="w-full rounded-2xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 p-4"
+          >
+            <option value="ru">
+              Русский
+            </option>
+
+            <option value="en">
+              English
+            </option>
+
+          </select>
+
+        </div>
+
+        <template x-if="selectedFiles.length > 0">
+
+          <div class="rounded-2xl bg-zinc-100 dark:bg-zinc-800 p-4 text-sm space-y-3">
+
+            <div class="flex justify-between font-semibold">
+              <span class="text-zinc-500">Выбрано файлов</span>
+              <span x-text="selectedFiles.length"></span>
+            </div>
+
+            <template x-for="file in selectedFiles" :key="file.name">
+              <div class="flex justify-between text-xs">
+                <span class="truncate mr-2" x-text="file.name"></span>
+                <span class="text-zinc-500 shrink-0" x-text="formatSize(file.size)"></span>
+              </div>
+            </template>
+
+          </div>
+
+        </template>
+
+        <button
+          type="submit"
+          :disabled="uploading"
+          class="w-full px-5 py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold transition"
+        >
+
+          <span x-show="!uploading">
+            Загрузить
+          </span>
+
+          <span x-show="uploading">
+            Загрузка...
+          </span>
+
+        </button>
+
+      </form>
+
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+
+function app() {
+
+  return {
+
+    files: [],
+
+    queueStatus: {
+      active_workflows: 0,
+      max_concurrent: 3,
+      queue_size: 0
+    },
+
+    showUploadModal: false,
+
+    selectedFiles: [],
+
+    uploading: false,
+
+    language: "ru",
+
+    pollInterval: null,
+
+    init() {
+
+      this.loadFiles()
+      this.loadQueueStatus()
+
+      this.pollInterval = setInterval(() => {
+        this.loadFiles()
+        this.loadQueueStatus()
+      }, 3000)
+
+    },
+
+    async loadFiles() {
+
+      const response = await fetch("/api/files")
+
+      this.files = await response.json()
+
+    },
+
+    async loadQueueStatus() {
+
+      try {
+        const response = await fetch("/api/queue/status")
+        this.queueStatus = await response.json()
+      } catch (e) {
+        console.error("Failed to load queue status", e)
+      }
+
+    },
+
+    openUploadModal() {
+      this.showUploadModal = true
+    },
+
+    closeUploadModal() {
+      this.showUploadModal = false
+    },
+
+    onFileChange(event) {
+
+      this.selectedFiles = Array.from(event.target.files)
+
+    },
+
+    async uploadFile() {
+
+      if (this.selectedFiles.length === 0) {
+        alert("Выберите хотя бы один файл")
+        return
+      }
+
+      this.uploading = true
+
+      let successCount = 0
+      let failCount = 0
+
+      for (const file of this.selectedFiles) {
+        
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("language", this.language)
+
+        try {
+          const response = await fetch("/upload", {
+            method: "POST",
+            body: formData
+          })
+
+          if (response.ok) {
+            successCount++
+          } else {
+            failCount++
+          }
+        } catch (e) {
+          failCount++
+        }
+      }
+
+      this.uploading = false
+
+      if (failCount > 0) {
+        alert(`Загружено: ${successCount}, Ошибок: ${failCount}`)
+      } else {
+        alert(`Успешно загружено ${successCount} файл(ов)`)
+      }
+
+      this.selectedFiles = []
+
+      this.closeUploadModal()
+
+      await this.loadFiles()
+
+    },
+
+    statusColor(status) {
+
+      switch(status) {
+
+        case "completed":
+          return "bg-green-500"
+
+        case "processing":
+        case "running":
+          return "bg-orange-500"
+
+        case "failed":
+          return "bg-red-500"
+
+        default:
+          return "bg-zinc-400"
+
+      }
+
+    },
+
+    statusBadge(status) {
+
+      switch(status) {
+
+        case "completed":
+          return "bg-green-500/10 text-green-500"
+
+        case "processing":
+        case "running":
+          return "bg-orange-500/10 text-orange-500"
+
+        case "failed":
+          return "bg-red-500/10 text-red-500"
+
+        default:
+          return "bg-zinc-500/10 text-zinc-500"
+
+      }
+
+    },
+
+    formatDate(date) {
+
+      if (!date)
+        return "-"
+
+      return new Date(date).toLocaleString()
+
+    },
+
+    formatSize(bytes) {
+
+      if (!bytes)
+        return "0 B"
+
+      const units = ["B", "KB", "MB", "GB"]
+
+      let i = 0
+
+      while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024
+        i++
+      }
+
+      return bytes.toFixed(1) + " " + units[i]
+
+    },
+
+    toggleTheme() {
+
+      document.documentElement.classList.toggle("dark")
+
+    }
+
+  }
+
+}
+
+</script>
+
 </body>
 </html>

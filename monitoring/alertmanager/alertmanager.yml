@@ -1,0 +1,79 @@
+global:
+  resolve_timeout: 5m
+  # Настройте SMTP для отправки email уведомлений
+  # smtp_smarthost: 'smtp.gmail.com:587'
+  # smtp_from: 'alerts@lectify.com'
+  # smtp_auth_username: 'your-email@gmail.com'
+  # smtp_auth_password: 'your-app-password'
+
+# Шаблоны для уведомлений
+templates:
+  - '/etc/alertmanager/*.tmpl'
+
+# Маршрутизация алертов
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+  
+  routes:
+    # Критические алерты - немедленно
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      repeat_interval: 5m
+    
+    # Предупреждения - с группировкой
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      repeat_interval: 1h
+    
+    # Информационные - раз в день
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      repeat_interval: 24h
+
+# Получатели уведомлений
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://host.docker.internal:5001/api/alerts/webhook'
+        send_resolved: true
+
+  - name: 'critical-alerts'
+    webhook_configs:
+      - url: 'http://host.docker.internal:5001/api/alerts/webhook'
+        send_resolved: true
+    # Раскомментируйте для email уведомлений
+    # email_configs:
+    #   - to: 'admin@lectify.com'
+    #     headers:
+    #       Subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+
+  - name: 'warning-alerts'
+    webhook_configs:
+      - url: 'http://host.docker.internal:5001/api/alerts/webhook'
+        send_resolved: true
+    # email_configs:
+    #   - to: 'team@lectify.com'
+    #     headers:
+    #       Subject: '⚠️  WARNING: {{ .GroupLabels.alertname }}'
+
+  - name: 'info-alerts'
+    webhook_configs:
+      - url: 'http://host.docker.internal:5001/api/alerts/webhook'
+        send_resolved: true
+
+# Подавление дублирующихся алертов
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']

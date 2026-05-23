@@ -1,0 +1,102 @@
+groups:
+  - name: lectify_alerts
+    interval: 30s
+    rules:
+      # Алерт при высокой загрузке CPU
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Высокая загрузка CPU на {{ $labels.instance }}"
+          description: "CPU загружен на {{ $value }}% более 5 минут"
+
+      # Алерт при высоком использовании памяти
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Высокое использование памяти на {{ $labels.instance }}"
+          description: "Память использована на {{ $value }}%"
+
+      # Алерт при недоступности приложения
+      - alert: LectifyDown
+        expr: up{job="lectify"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "Приложение Lectify недоступно"
+          description: "Приложение не отвечает более 1 минуты"
+
+      # Алерт при большом количестве ошибок
+      - alert: HighErrorRate
+        expr: rate(lectify_errors_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "Высокий уровень ошибок в Lectify"
+          description: "{{ $value }} ошибок в секунду за последние 5 минут"
+
+      # Алерт при переполнении очереди
+      - alert: WorkflowQueueOverflow
+        expr: lectify_workflow_queue_size > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: workflow
+        annotations:
+          summary: "Очередь воркфлоу переполнена"
+          description: "В очереди {{ $value }} воркфлоу, возможны задержки"
+
+      # Алерт при долгом выполнении воркфлоу
+      - alert: SlowWorkflowExecution
+        expr: lectify_workflow_duration_seconds > 3600
+        for: 5m
+        labels:
+          severity: info
+          component: workflow
+        annotations:
+          summary: "Медленное выполнение воркфлоу"
+          description: "Воркфлоу выполняется более {{ $value }} секунд"
+
+      # Алерт при высоком проценте неудачных воркфлоу
+      - alert: HighWorkflowFailureRate
+        expr: (rate(lectify_workflows_failed_total[10m]) / rate(lectify_workflows_total[10m])) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: workflow
+        annotations:
+          summary: "Высокий процент неудачных воркфлоу"
+          description: "{{ $value }}% воркфлоу завершаются с ошибкой"
+
+      # Алерт при недоступности диска
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Мало свободного места на диске"
+          description: "Осталось {{ $value }}% свободного места"
+
+      # Алерт при проблемах с LLM API
+      - alert: LLMAPIErrors
+        expr: rate(lectify_llm_api_errors_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "Проблемы с LLM API"
+          description: "{{ $value }} ошибок API в секунду"

@@ -1,0 +1,27 @@
+apiVersion: 1
+
+datasources:
+  # Prometheus для метрик
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s
+      queryTimeout: 60s
+
+  # Loki для логов
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: Prometheus
+          matcherRegex: "workflow_id=(\\w+)"
+          name: WorkflowID
+          url: "/d/lectify-workflows?var-workflow_id=$${__value.raw}"

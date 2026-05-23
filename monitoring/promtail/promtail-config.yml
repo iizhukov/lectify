@@ -1,0 +1,67 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Логи приложения Lectify
+  - job_name: lectify
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: lectify
+          app: lectify
+          __path__: /var/log/lectify/*.log
+    
+    pipeline_stages:
+      # Парсинг JSON логов
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            logger: logger
+            message: message
+            workflow_id: workflow_id
+            node_id: node_id
+            file_id: file_id
+            error: error
+      
+      # Установка времени из лога
+      - timestamp:
+          source: timestamp
+          format: RFC3339
+      
+      # Установка уровня лога
+      - labels:
+          level:
+          logger:
+          workflow_id:
+          node_id:
+      
+      # Фильтрация по уровню (опционально)
+      # - match:
+      #     selector: '{level="DEBUG"}'
+      #     action: drop
+
+  # Системные логи
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: system
+          __path__: /var/log/host/syslog
+    
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\S+\s+\d+\s+\S+)\s+(?P<hostname>\S+)\s+(?P<process>\S+?)(\[(?P<pid>\d+)\])?: (?P<message>.*)$'
+      
+      - labels:
+          hostname:
+          process:

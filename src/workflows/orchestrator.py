@@ -1,14 +1,20 @@
 import os
-import sys
 import time
 import pathlib
 import threading
+from queue import Queue
+from typing import Dict, Tuple
 
 from src.db.repository import DBRepository
 from src.db.models import NodeStatus
 from src.workflows.registry import WORKFLOW_REGISTRY
 from src.workflows.converter import get_converter
 from src.nodes.media_converter.models import MediaConverterInput
+from src.utils.logging import get_logger
+from src.utils.metrics import get_metrics
+
+logger = get_logger(__name__)
+metrics = get_metrics()
 
 
 class LectureOrchestrator:
@@ -32,59 +38,107 @@ class LectureOrchestrator:
         self.client = deepseek_client
         self._repository = DBRepository()
         self.workflow = WORKFLOW_REGISTRY["lecture_workflow"]
+        self.active_workflows = set()
+        self._results_lock = threading.Lock()
+        self._queue_lock = threading.Lock()
+        self._workflow_queue: Queue[Tuple[str, str, str, str]] = Queue()
+        self.max_concurrent_workflows = 3
+        self._queue_processor_thread = None
         self._initialized = True
+        self._start_queue_processor()
 
-    def init_workflow(self, file_id: str, filename: str, language: str):
-        self._repository.create_file(file_id, filename, language)
-
+    def init_workflow(self, file_id: str):
         self._repository.create_workflow(
-            workflow_id=file_id, # Используем ID файла как ID этого инстанса воркфлоу
+            workflow_id=file_id,
             file_id=file_id,
             name=self.workflow.name
         )
 
-        nodes_data = [
-            {"node_id": node.node_id, "node_name": node.name} 
-            for node in self.workflow.all_nodes
-        ]
+        nodes_data = []
 
-        self._repository.create_workflow_nodes(file_id, nodes_data)
+        for node in self.workflow.all_nodes:
 
-    def start_orchestration(self, file_id: str, file_path: str, language: str):
-        t = threading.Thread(target=self._run_orchestrator, args=(file_id, file_path, language), daemon=True)
-        t.start()
+            dependencies = []
 
-    def resume_interrupted_workflows(self):
-        interrupted = self._repository.get_interrupted_files()
-        for file_info in interrupted:
-            fid = file_info["id"]
-            filename = file_info["filename"]
-            language = file_info["language"]
-            
-            possible_path = None
-            for item in pathlib.Path("data").glob(f"*{filename}"):
-                if fid in item.name:
-                    possible_path = str(item)
-                    break
+            for parent in self.workflow.all_nodes:
+                for child in parent.children:
+                    if child.node_id == node.node_id:
+                        dependencies.append(parent.node_id)
 
-            if possible_path and os.path.exists(possible_path):
-                print(f"🔄 Восстановление работы воркфлоу для {filename} ({fid})")
-                self.start_orchestration(fid, possible_path, language)
+            nodes_data.append({
+                "node_id": node.node_id,
+                "node_name": node.name,
+                "dependencies": dependencies
+            })
 
-    def _run_orchestrator(self, file_id: str, file_path: str, language: str):
+        self._repository.create_workflow_nodes(
+            workflow_id=file_id,
+            file_id=file_id,
+            nodes=nodes_data
+        )
+
+        return file_id
+
+    def start_orchestration(
+        self,
+        workflow_id: str,
+        file_id: str,
+        file_path: str,
+        language: str
+    ):
+        details = self._repository.get_workflow_details(file_id)
+
+        if details and details.graph:
+            for node in details.graph.nodes:
+                if node.status == NodeStatus.RUNNING:
+
+                    self._repository.update_node(
+                        workflow_id=file_id,
+                        node_id=node.node_id,
+                        status=NodeStatus.PENDING,
+                        message="Recovered after restart"
+                    )
+
+        if workflow_id in self.active_workflows:
+            return
+
+        # Добавляем в очередь вместо немедленного запуска
+        self._workflow_queue.put((workflow_id, file_id, file_path, language))
+        queue_size = self._workflow_queue.qsize()
+        
+        logger.info(
+            "workflow_queued",
+            workflow_id=workflow_id,
+            file_id=file_id,
+            queue_size=queue_size
+        )
+        
+        metrics.workflows_total.inc()
+        metrics.workflow_queue_size.set(queue_size)
+
+    def _run_orchestrator(
+        self,
+        workflow_id: str,
+        file_id: str,
+        file_path: str,
+        language: str
+    ):
         results = {
             "root_input": MediaConverterInput(file_id=file_id, file_path=file_path)
         }
         running_threads = {}
         
-        self._repository.update_workflow(file_id, NodeStatus.RUNNING)
+        self._repository.update_workflow_status(
+            workflow_id,
+            NodeStatus.RUNNING
+        )
         
         while True:
-            file_details = self._repository.get_file_details(file_id)
-            if not file_details:
+            workflow_details = self._repository.get_workflow_details(workflow_id)
+            if not workflow_details or not workflow_details.graph:
                 break
                 
-            node_states = {node.node_id: node.status for node in file_details.nodes}
+            node_states = {node.node_id: node.status for node in workflow_details.graph.nodes}
             
             all_done = True
             for nid, status in node_states.items():
@@ -97,16 +151,10 @@ class LectureOrchestrator:
                 if any(s == "failed" for s in node_states.values()):
                     overall_status = NodeStatus.FAILED
                 
-                final_path = None
-                pdf_node = next((n for n in file_details.nodes if n.node_id == "latex_to_pdf"), None)
-                md_node = next((n for n in file_details.nodes if n.node_id == "text_to_md"), None)
-
-                if pdf_node and pdf_node.artifact_path:
-                    final_path = pdf_node.artifact_path
-                elif md_node and md_node.artifact_path:
-                    final_path = md_node.artifact_path
-                
-                self._repository.update_workflow(file_id, overall_status, final_artifact_path=final_path)
+                self._repository.update_workflow_status(
+                    workflow_id,
+                    overall_status
+                )
                 break
 
             self._traverse_and_trigger(
@@ -120,6 +168,20 @@ class LectureOrchestrator:
             )
             time.sleep(1)
 
+        with self._queue_lock:
+            self.active_workflows.discard(workflow_id)
+            active_count = len(self.active_workflows)
+        
+        logger.info(
+            "workflow_completed",
+            workflow_id=workflow_id,
+            file_id=file_id,
+            active_count=active_count
+        )
+        
+        metrics.workflows_completed.inc()
+        metrics.workflow_active_count.set(active_count)
+
     def _traverse_and_trigger(self, node, file_id, language, node_states, running_threads, results, parent_node=None):
         current_status = node_states.get(node.node_id)
         
@@ -128,11 +190,22 @@ class LectureOrchestrator:
             db_node = next((n for n in file_details.nodes if n.node_id == node.node_id), None)
 
             if db_node and db_node.artifact_path:
-                path_field_name = list(node.output_model.model_fields.keys())[1]
-                kwargs = {"file_id": file_id, path_field_name: db_node.artifact_path}
-                results[node.node_id] = node.output_model(**kwargs)
+                fields = node.output_model.model_fields
+                path_field_name = None
+                for field_name, field_info in fields.items():
+                    if field_name != "file_id" and "path" in field_name.lower():
+                        path_field_name = field_name
+                        break
+                
+                if path_field_name:
+                    kwargs = {"file_id": file_id, path_field_name: db_node.artifact_path}
+                    with self._results_lock:
+                        results[node.node_id] = node.output_model(**kwargs)
 
-        if current_status == "pending" and node.node_id not in running_threads:
+        if (
+            current_status in ["pending", "failed"]
+            and node.node_id not in running_threads
+        ):
             parent_id = parent_node.node_id if parent_node else "root_input"
             
             if parent_id in results:
@@ -159,6 +232,105 @@ class LectureOrchestrator:
     def _execute_node_thread(self, node, file_id, language, node_input, results):
         try:
             output_data = node.run(node_input, self.client)
-            results[node.node_id] = output_data
+            with self._results_lock:
+                results[node.node_id] = output_data
         except Exception as e:
-            pass
+            error_msg = f"Ошибка выполнения ноды: {str(e)}"
+            
+            logger.error(
+                "node_execution_failed",
+                node_id=node.node_id,
+                file_id=file_id,
+                error=str(e),
+                exc_info=True
+            )
+            
+            metrics.node_failures.labels(node_id=node.node_id).inc()
+            metrics.workflows_failed.inc()
+            
+            node.update_status(file_id, NodeStatus.FAILED, error_msg)
+
+    def _start_queue_processor(self):
+        """Запускает фоновый поток для обработки очереди воркфлоу"""
+        def process_queue():
+            while True:
+                try:
+                    # Проверяем, можем ли запустить новый воркфлоу
+                    with self._queue_lock:
+                        active_count = len(self.active_workflows)
+                    
+                    if active_count < self.max_concurrent_workflows:
+                        # Пытаемся взять воркфлоу из очереди (неблокирующий вызов)
+                        try:
+                            workflow_id, file_id, file_path, language = self._workflow_queue.get(timeout=1)
+                            
+                            # Запускаем воркфлоу
+                            with self._queue_lock:
+                                self.active_workflows.add(workflow_id)
+                            
+                            logger.info(
+                                "workflow_started",
+                                workflow_id=workflow_id,
+                                file_id=file_id,
+                                active_count=active_count + 1,
+                                max_concurrent=self.max_concurrent_workflows
+                            )
+                            
+                            metrics.workflow_active_count.set(active_count + 1)
+                            metrics.workflow_queue_size.set(self._workflow_queue.qsize())
+                            
+                            t = threading.Thread(
+                                target=self._run_orchestrator,
+                                args=(workflow_id, file_id, file_path, language),
+                                daemon=True
+                            )
+                            t.start()
+                            
+                        except:
+                            # Очередь пуста, ждём
+                            time.sleep(1)
+                    else:
+                        # Достигнут лимит, ждём
+                        time.sleep(1)
+                        
+                except Exception as e:
+                    print(f"❌ Ошибка в обработчике очереди: {e}")
+                    time.sleep(1)
+        
+        self._queue_processor_thread = threading.Thread(target=process_queue, daemon=True)
+        self._queue_processor_thread.start()
+        
+        logger.info(
+            "queue_processor_started",
+            max_concurrent=self.max_concurrent_workflows
+        )
+
+    def resume_interrupted_workflows(self):
+        """Восстанавливает прерванные воркфлоу после перезапуска приложения"""
+        interrupted = self._repository.get_interrupted_files()
+
+        for file_info in interrupted:
+            file_id = file_info.id
+            file_path = file_info.original_path
+
+            if not os.path.exists(file_path):
+                logger.warning(
+                    "workflow_resume_skipped",
+                    file_id=file_id,
+                    filename=file_info.filename,
+                    reason="file_not_found"
+                )
+                continue
+
+            logger.info(
+                "workflow_resuming",
+                file_id=file_id,
+                filename=file_info.filename
+            )
+
+            self.start_orchestration(
+                workflow_id=file_id,
+                file_id=file_id,
+                file_path=file_path,
+                language=file_info.language
+            )

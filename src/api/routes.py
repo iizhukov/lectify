@@ -3,118 +3,248 @@ import pathlib
 import uuid
 
 from typing import List
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+
+from fastapi import (
+    APIRouter,
+    UploadFile,
+    File,
+    Form,
+    HTTPException
+)
+
 from fastapi.responses import FileResponse
 
+from src.db.models import (
+    FileModel,
+    WorkflowStateModel,
+    ArtifactModel
+)
+
 from src.db.repository import DBRepository
-from src.db.models import FileModel, WorkflowStateModel
-from src.workflows.registry import WORKFLOW_REGISTRY
+
 from src.workflows.orchestrator import LectureOrchestrator
 
 
 api_router = APIRouter()
+
 repository = DBRepository()
 
 
-@api_router.get("/api/workflows/history", response_model=List[WorkflowStateModel])
-async def get_workflows_history():
-    """Возвращает историю запусков всех воркфлоу в системе"""
-    return repository.get_all_workflows()
-
-
-@api_router.get("/api/workflows/history/{workflow_id}", response_model=WorkflowStateModel)
-async def get_workflow_instance_details(workflow_id: str):
-    """Детали конкретного запуска воркфлоу по его ID"""
-    wf = repository.get_workflow_details(workflow_id)
-    if not wf:
-        raise HTTPException(status_code=404, detail="Запуск воркфлоу не найден")
-    return wf
-
-
 @api_router.post("/upload")
-async def upload(file: UploadFile = File(...), language: str = Form("ru")):
+async def upload(
+    file: UploadFile = File(...),
+    language: str = Form("ru")
+):
+
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Пустое имя файла")
+        raise HTTPException(
+            status_code=400,
+            detail="Empty filename"
+        )
 
-    allowed_ext = {'.mp3', '.m4a', '.wav', '.ogg', '.flac', '.aac', '.opus', '.wma'}
-    file_ext = pathlib.Path(file.filename).suffix.lower()
-    if file_ext not in allowed_ext:
-        raise HTTPException(status_code=400, detail=f"Формат {file_ext} не поддерживается")
+    allowed_ext = {
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov",
+        ".webm",
+        ".mp3",
+        ".wav",
+        ".m4a"
+    }
 
-    os.makedirs("data", exist_ok=True)
-    
+    ext = pathlib.Path(file.filename).suffix.lower()
+
+    if ext not in allowed_ext:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format: {ext}"
+        )
+
+    os.makedirs("data/uploads", exist_ok=True)
+
     file_id = str(uuid.uuid4())
+
     safe_name = f"{file_id}_{pathlib.Path(file.filename).name}"
-    file_path = f"data/{safe_name}"
-    
-    with open(file_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
 
-    # Получаем инстанс синглтона оркестратора
+    path = f"data/uploads/{safe_name}"
+
+    content = await file.read()
+
+    with open(path, "wb") as f:
+        f.write(content)
+
+    repository.create_file(
+        file_id=file_id,
+        filename=file.filename,
+        original_path=path,
+        language=language,
+        size_bytes=len(content),
+        mime_type=file.content_type or "application/octet-stream"
+    )
+
     orchestrator = LectureOrchestrator()
-    orchestrator.init_workflow(file_id, file.filename, language)
-    orchestrator.start_orchestration(file_id, file_path, language)
 
-    return {"file_id": file_id}
+    workflow_id = orchestrator.init_workflow(
+        file_id=file_id
+    )
+
+    orchestrator.start_orchestration(
+        workflow_id=workflow_id,
+        file_id=file_id,
+        file_path=path,
+        language=language
+    )
+
+    return {
+        "file_id": file_id,
+        "workflow_id": workflow_id
+    }
 
 
-@api_router.get("/api/files", response_model=List[FileModel])
+@api_router.get(
+    "/api/files",
+    response_model=List[FileModel]
+)
 async def get_files():
     return repository.get_all_files()
 
 
-@api_router.get("/api/files/{file_id}", response_model=FileModel)
-async def get_file_details(file_id: str):
-    file_details = repository.get_file_details(file_id)
-    if not file_details:
-        raise HTTPException(status_code=404, detail="Лекция не найдена")
-    return file_details
+@api_router.get(
+    "/api/files/{file_id}",
+    response_model=FileModel
+)
+async def get_file_details(
+    file_id: str
+):
+
+    file = repository.get_file_details(file_id)
+
+    if not file:
+        raise HTTPException(
+            status_code=404,
+            detail="File not found"
+        )
+
+    return file
 
 
-@api_router.get("/api/workflows")
-async def get_workflows():
-    workflows_data = []
-    for wf_id, wf in WORKFLOW_REGISTRY.items():
-        workflows_data.append({
-            "id": wf_id,
-            "name": wf.name,
-            "nodes": [
-                {
-                    "node_id": node.node_id, 
-                    "node_name": node.name, 
-                    # Для совместимости с UI генерируем зависимости на лету из графа (или пишем пустой список, если корень)
-                    "dependencies": [p.node_id for p in wf.all_nodes if node in p.children]
-                } 
-                for node in wf.all_nodes
-            ]
-        })
-    return workflows_data
+@api_router.get(
+    "/api/workflows/history",
+    response_model=List[WorkflowStateModel]
+)
+async def get_workflows_history():
+    return repository.get_all_workflows()
 
 
-@api_router.get("/download/{file_id}/{ext}")
-async def download_artifact(file_id: str, ext: str):
-    node_mapping = {
-        "txt": "speech_to_text",
-        "md": "text_to_md",
-        "tex": "text_to_latex",
-        "pdf": "latex_to_pdf"
-    }
+@api_router.get(
+    "/api/workflows/history/{workflow_id}",
+    response_model=WorkflowStateModel
+)
+async def get_workflow_details(
+    workflow_id: str
+):
+
+    workflow = repository.get_workflow_details(
+        workflow_id
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found"
+        )
+
+    return workflow
+
+
+@api_router.get(
+    "/api/artifacts/{artifact_id}",
+    response_model=ArtifactModel
+)
+async def get_artifact(
+    artifact_id: str
+):
+
+    artifact = repository.get_artifact(
+        artifact_id
+    )
+
+    if not artifact:
+        raise HTTPException(
+            status_code=404,
+            detail="Artifact not found"
+        )
+
+    return artifact
+
+
+@api_router.get(
+    "/download/artifacts/{artifact_id}"
+)
+async def download_artifact(
+    artifact_id: str
+):
+
+    artifact = repository.get_artifact(
+        artifact_id
+    )
+
+    if not artifact:
+        raise HTTPException(
+            status_code=404,
+            detail="Artifact not found"
+        )
+
+    if not os.path.exists(artifact.path):
+        raise HTTPException(
+            status_code=404,
+            detail="File deleted"
+        )
+
+    return FileResponse(
+        artifact.path,
+        media_type=artifact.mime_type,
+        filename=artifact.name
+    )
+
+
+@api_router.get("/api/queue/status")
+async def get_queue_status():
+    """Возвращает статус очереди воркфлоу"""
+    orchestrator = LectureOrchestrator()
     
-    node_id = node_mapping.get(ext)
-    if not node_id:
-        raise HTTPException(status_code=400, detail="Неверное расширение")
+    return {
+        "active_workflows": len(orchestrator.active_workflows),
+        "max_concurrent": orchestrator.max_concurrent_workflows,
+        "queue_size": orchestrator._workflow_queue.qsize(),
+        "active_workflow_ids": list(orchestrator.active_workflows)
+    }
+
+
+@api_router.post("/api/alerts/webhook")
+async def receive_alert(alert_data: dict):
+    """
+    Webhook для получения алертов от Alertmanager
+    """
+    from src.utils.logging import get_logger
+    
+    logger = get_logger(__name__)
+    
+    # Логируем полученные алерты
+    for alert in alert_data.get("alerts", []):
+        status = alert.get("status")
+        labels = alert.get("labels", {})
+        annotations = alert.get("annotations", {})
         
-    file_details = repository.get_file_details(file_id)
-    if not file_details:
-        raise HTTPException(status_code=404, detail="Файл не найден")
-        
-    target_node = next((n for n in file_details.nodes if n.node_id == node_id), None)
-    if not target_node or not target_node.artifact_path:
-        raise HTTPException(status_code=404, detail="Артефакт еще не готов")
-        
-    path = target_node.artifact_path
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Файл удален или отсутствует на сервере")
-        
-    return FileResponse(path, media_type="application/octet-stream", filename=pathlib.Path(path).name)
+        logger.warning(
+            "alert_received",
+            status=status,
+            alertname=labels.get("alertname"),
+            severity=labels.get("severity"),
+            component=labels.get("component"),
+            summary=annotations.get("summary"),
+            description=annotations.get("description")
+        )
+    
+    return {"status": "ok", "received": len(alert_data.get("alerts", []))}

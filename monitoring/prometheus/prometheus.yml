@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'lectify'
+    environment: 'production'
+
+# Правила алертинга
+rule_files:
+  - 'alerts.yml'
+
+# Конфигурация Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Сбор метрик
+scrape_configs:
+  # Метрики самого Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Метрики приложения Lectify
+  - job_name: 'lectify'
+    static_configs:
+      - targets: ['host.docker.internal:5001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Метрики Node Exporter (системные метрики)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Метрики Loki
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+
+  # Метрики Grafana
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']

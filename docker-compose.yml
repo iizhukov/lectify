@@ -1,0 +1,179 @@
+version: '3.8'
+
+services:
+  # Grafana - дашборды и визуализация
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: lectify-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # Prometheus - сбор метрик
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: lectify-prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # Loki - агрегация логов
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: lectify-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # Promtail - отправка логов в Loki
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: lectify-promtail
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/lectify
+      - /var/log:/var/log/host:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # Alertmanager - управление алертами
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: lectify-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # Node Exporter - метрики хоста
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: lectify-node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # MinIO - объектное хранилище для логов и артефактов
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: lectify-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO Client - инициализация бакетов
+  minio-init:
+    image: minio/mc:RELEASE.2024-01-16T16-06-34Z
+    container_name: lectify-minio-init
+    depends_on:
+      - minio
+    networks:
+      - monitoring
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/logs --ignore-existing;
+      /usr/bin/mc mb myminio/artifacts --ignore-existing;
+      /usr/bin/mc mb myminio/loki-data --ignore-existing;
+      /usr/bin/mc anonymous set download myminio/artifacts;
+      echo 'MinIO buckets created successfully';
+      exit 0;
+      "
+
+  # PostgreSQL - основная база данных
+  postgres:
+    image: postgres:16-alpine
+    container_name: lectify-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: lectify
+      POSTGRES_USER: lectify
+      POSTGRES_PASSWORD: lectify_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lectify"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  grafana-data:
+  prometheus-data:
+  loki-data:
+  alertmanager-data:
+  minio-data:
+  postgres-data:
