@@ -12,16 +12,17 @@ from src.db.models.auth import (
     TokenRefreshResponse,
     MessageResponse,
 )
+from src.utils.passwords import hash_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _require_auth(x_auth_token: str = Header(None)) -> str:
-    repo = Repository()
-    user = repo.verify_session(x_auth_token)
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return x_auth_token
+def _extract_token(authorization: str = Header(None)) -> str | None:
+    if not authorization:
+        return None
+    if authorization.startswith("Bearer "):
+        return authorization[7:]
+    return authorization
 
 
 @router.post("/register", response_model=AuthResponse)
@@ -36,7 +37,7 @@ def register(req: RegisterRequest):
         user_id=user_id,
         username=req.username,
         email=req.email,
-        password_hash=req.password,
+        password_hash=hash_password(req.password),
         full_name=req.full_name,
     )
 
@@ -49,8 +50,8 @@ def register(req: RegisterRequest):
 def login(req: LoginRequest):
     repo = Repository()
 
-    user = repo.get_by_username(req.username)
-    if not user or user.password_hash != req.password:
+    user = repo.verify_credentials(req.username, req.password)
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     _, token = repo.create_session(user.id)
@@ -59,11 +60,12 @@ def login(req: LoginRequest):
 
 
 @router.post("/logout", response_model=MessageResponse)
-def logout(x_auth_token: str = Header(None)):
-    if not x_auth_token:
+def logout(authorization: str = Header(None)):
+    token = _extract_token(authorization)
+    if not token:
         raise HTTPException(status_code=401, detail="Unauthorized")
     repo = Repository()
-    repo.delete_session(x_auth_token)
+    repo.delete_session(token)
     return MessageResponse(message="Logged out successfully")
 
 
@@ -86,21 +88,22 @@ def reset_password(req: ResetPasswordRequest):
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired token")
 
-    repo.update(user.id, password_hash=req.new_password)
+    repo.update(user.id, password_hash=hash_password(req.new_password))
     repo.consume_reset_token(req.token)
 
     return MessageResponse(message="Password reset successfully")
 
 
 @router.post("/refresh", response_model=TokenRefreshResponse)
-def refresh(x_auth_token: str = Header(None)):
+def refresh(authorization: str = Header(None)):
+    token = _extract_token(authorization)
     repo = Repository()
 
-    user = repo.verify_session(x_auth_token)
+    user = repo.verify_session(token)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    repo.delete_session(x_auth_token)
+    repo.delete_session(token)
     _, new_token = repo.create_session(user.id)
 
     return TokenRefreshResponse(token=new_token)

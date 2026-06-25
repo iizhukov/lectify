@@ -1,7 +1,3 @@
-"""
-Prompt API endpoints
-"""
-
 import uuid
 from typing import List, Optional
 
@@ -36,7 +32,6 @@ async def list_prompts(user_id: Optional[str] = None):
     """
     repo = PromptRepository()
 
-    # MIGRATED: use PromptRepository.get_global() / get_by_user()
     if user_id:
         global_prompts = repo.get_global()
         user_prompts = repo.get_by_user(user_id)
