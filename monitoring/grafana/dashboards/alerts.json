@@ -1,0 +1,278 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": [],
+      "targetBlank": true,
+      "title": "← Overview",
+      "type": "link",
+      "url": "/d/overview"
+    },
+    {
+      "icon": "external link",
+      "tags": [],
+      "targetBlank": true,
+      "title": "Alertmanager →",
+      "type": "link",
+      "url": "http://localhost:9093"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "count(ALERTS{alertstate=\"firing\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Firing Alerts",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "count(ALERTS{alertstate=\"pending\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Pending Alerts",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "count(ALERTS{alertstate=\"resolved\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Resolved (last 1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "options": {
+        "content": "## Telegram Setup\n\nAlerts are routed to Telegram via Alertmanager webhook.\n\nConfigure in `monitoring/alertmanager/alertmanager.yml`",
+        "mode": "markdown"
+      },
+      "title": "Notification Status",
+      "type": "text"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "filterable": true
+          }
+        }
+      },
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 4},
+      "id": 5,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "State"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "ALERTS",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active Alerts",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "alertname": "Alert",
+              "alertstate": "State",
+              "severity": "Severity",
+              "instance": "Instance",
+              "job": "Job"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "id": 6,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "expr": "sum(ALERTS{alertstate=\"firing\"}) by (alertname)",
+          "legendFormat": "{{alertname}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Firing Alerts History",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "lineWidth": 0,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "id": 7,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(alertmanager_alerts_total{state=\"firing\"}[5m])) by (alertname)",
+          "legendFormat": "{{alertname}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Alert Frequency (last 24h)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["lectify", "alerts"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "Alerts",
+  "uid": "alerts",
+  "version": 1
+}

@@ -7,13 +7,9 @@ server:
 common:
   path_prefix: /loki
   storage:
-    s3:
-      endpoint: minio:9000
-      bucketnames: loki-data
-      access_key_id: minioadmin
-      secret_access_key: minioadmin
-      insecure: true
-      s3forcepathstyle: true
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
   replication_factor: 1
   ring:
     instance_addr: 127.0.0.1
@@ -22,16 +18,13 @@ common:
 
 schema_config:
   configs:
-    - from: 2020-10-24
+    - from: 2024-01-01
       store: boltdb-shipper
-      object_store: s3
+      object_store: filesystem
       schema: v11
       index:
         prefix: index_
         period: 24h
-
-ruler:
-  alertmanager_url: http://alertmanager:9093
 
 # Лимиты для предотвращения перегрузки
 limits_config:
@@ -61,3 +54,8 @@ compactor:
   retention_enabled: true
   retention_delete_delay: 2h
   retention_delete_worker_count: 150
+
+# Настройки ingester для работы с логами
+ingester:
+  max_chunk_age: 2h
+  chunk_idle_period: 5m
