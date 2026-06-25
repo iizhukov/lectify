@@ -80,3 +80,7 @@ config.cfg
 htmlcov/
 .coverage
 test_data/
+
+node_modules/
+
+.claude/

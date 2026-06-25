@@ -1,0 +1,12 @@
+{
+  "name": "lectify-ui",
+  "version": "1.0.0",
+  "scripts": {
+    "build:css": "npx tailwindcss -i ./resources/static/css/input.css -o ./resources/static/css/output.css --minify",
+    "watch:css": "npx tailwindcss -i ./resources/static/css/input.css -o ./resources/static/css/output.css --watch",
+    "build": "npm run build:css"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}
