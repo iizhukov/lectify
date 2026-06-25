@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Регистрация - Lectify</title>
+  <link href="/static/css/output.css" rel="stylesheet">
+</head>
+<body class="bg-brand-bg min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-brand">Lectify</h1>
+      <p class="text-brand-muted mt-1">Платформа транскрибации видео</p>
+    </div>
+
+    <div class="card p-6">
+      <h2 class="text-xl font-semibold text-brand-dark mb-6">Создать аккаунт</h2>
+
+      <form id="register-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="full_name">Полное имя</label>
+          <input type="text" id="full_name" name="full_name" class="input-field" placeholder="Иван Иванов">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="username">Имя пользователя</label>
+          <input type="text" id="username" name="username" class="input-field" placeholder="ivanov" required autofocus>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="email">Email</label>
+          <input type="email" id="email" name="email" class="input-field" placeholder="ivan@example.com" required>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="password">Пароль</label>
+          <input type="password" id="password" name="password" class="input-field" placeholder="Минимум 6 символов" required minlength="6">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="confirm_password">Подтвердите пароль</label>
+          <input type="password" id="confirm_password" name="confirm_password" class="input-field" placeholder="Повторите пароль" required minlength="6">
+        </div>
+        <div id="register-error" class="text-red-600 text-sm hidden"></div>
+        <button type="submit" class="btn-primary w-full py-2.5">Зарегистрироваться</button>
+      </form>
+
+      <div class="mt-4 text-center">
+        <span class="text-sm text-brand-muted">Уже есть аккаунт?</span>
+        <a href="/login" class="text-sm text-brand hover:text-brand-dark ml-1">Войти</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
+
+  <script type="module">
+    import { api } from '/static/js/api.js';
+    import { setToken, setUser } from '/static/js/auth.js';
+
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.textContent = 'Регистрация...';
+
+      const errorEl = document.getElementById('register-error');
+      errorEl.classList.add('hidden');
+
+      const username = document.getElementById('username').value;
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const confirm = document.getElementById('confirm_password').value;
+      const full_name = document.getElementById('full_name').value;
+
+      if (password !== confirm) {
+        errorEl.textContent = 'Пароли не совпадают.';
+        errorEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Зарегистрироваться';
+        return;
+      }
+
+      try {
+        const data = await api.auth.register(username, email, password, full_name);
+        setToken(data.token);
+        setUser({ username: data.username, id: data.user_id });
+        window.location.href = '/executions';
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Зарегистрироваться';
+      }
+    });
+  </script>
+</body>
+</html>

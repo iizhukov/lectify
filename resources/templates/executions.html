@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+
+{% block title %}Конспекты{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <h1 class="text-2xl font-bold text-brand-dark">Конспекты</h1>
+    <div class="flex items-center gap-3">
+      <select id="status-filter" class="input-field w-auto">
+        <option value="">Все</option>
+        <option value="pending">Ожидание</option>
+        <option value="running">Выполняется</option>
+        <option value="completed">Завершён</option>
+        <option value="failed">Ошибка</option>
+      </select>
+      <button id="create-execution-btn" class="btn-primary text-sm flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Создать конспект
+      </button>
+    </div>
+  </div>
+
+  <div id="executions-list" class="space-y-3"></div>
+
+  <div id="executions-empty" class="hidden text-center py-16">
+    <p class="text-brand-muted">Запусков пока нет.</p>
+    <a href="/workflows" class="btn-primary mt-4 inline-block">Перейти к воркфлоу</a>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { api } from '/static/js/api.js';
+  import { showToast } from '/static/js/components/toast.js';
+  import { showModal, closeModal } from '/static/js/components/modal.js';
+
+  let executions = [];
+
+  async function loadExecutions() {
+    try {
+      executions = await api.executions.list();
+      applyFilter();
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки запусков: ' + e.message);
+    }
+  }
+
+  function applyFilter() {
+    const el = document.getElementById('status-filter');
+    if (!el) return;
+    const q = el.value;
+    const filtered = q ? executions.filter(ex => ex.status === q) : executions;
+    renderExecutions(filtered);
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function formatDate(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  function duration(start, end) {
+    if (!start || !end) return '-';
+    const ms = new Date(end) - new Date(start);
+    if (ms < 0) return '-';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}с`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}м ${s % 60}с`;
+    return `${Math.floor(m / 60)}ч ${m % 60}м`;
+  }
+
+  const STATUS_LABELS = {
+    completed: 'Завершён',
+    running: 'Выполняется',
+    failed: 'Ошибка',
+    pending: 'Ожидание',
+  };
+
+  const STATUS_STYLES = {
+    completed: { badge: 'badge-success', dot: 'bg-green-500' },
+    running:   { badge: 'badge-warning', dot: 'bg-yellow-500 animate-pulse' },
+    failed:    { badge: 'badge-danger',  dot: 'bg-red-500' },
+    pending:   { badge: 'badge-muted',   dot: 'bg-gray-400' },
+  };
+
+  function renderExecutions(list) {
+    const container = document.getElementById('executions-list');
+    const empty = document.getElementById('executions-empty');
+
+    if (!list.length) {
+      container.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    container.innerHTML = list.map(ex => {
+      const style = STATUS_STYLES[ex.status] || STATUS_STYLES.pending;
+      const label = STATUS_LABELS[ex.status] || ex.status;
+      const elapsed = ex.started_at && ex.ended_at
+        ? duration(ex.started_at, ex.ended_at)
+        : '-';
+      return `
+        <div class="card flex items-center justify-between gap-4">
+          <div class="flex items-center gap-4 min-w-0">
+            <div class="w-3 h-3 rounded-full shrink-0 ${style.dot}"></div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <a href="/executions/${ex.id}" class="font-medium text-brand-dark hover:text-brand truncate">
+                  ${escapeHtml(ex.workflow_name || 'Воркфлоу ' + (ex.id || '').slice(0,8))}
+                </a>
+                <span class="${style.badge}">${label}</span>
+              </div>
+              <div class="flex items-center gap-3 mt-0.5">
+                <span class="text-xs text-brand-muted">${escapeHtml(ex.file_name || '-')}</span>
+                <span class="text-xs text-brand-muted">${formatDate(ex.created_at)}</span>
+              </div>
+              ${ex.error_message ? `<p class="text-xs text-red-600 mt-1 truncate">${escapeHtml(ex.error_message)}</p>` : ''}
+            </div>
+          </div>
+          <div class="flex items-center gap-4 shrink-0">
+            <div class="text-right">
+              <div class="text-xs text-brand-muted">${elapsed}</div>
+              <div class="text-xs text-brand-muted">${ex.language || '-'}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('status-filter').addEventListener('change', applyFilter);
+
+  // ── Create execution modal ─────────────────────────────────────────────────
+  document.getElementById('create-execution-btn').addEventListener('click', async () => {
+    let workflows = [];
+    try {
+      workflows = await api.workflows.list();
+    } catch (e) {
+      showToast('error', 'Не удалось загрузить воркфлоу: ' + e.message);
+      return;
+    }
+
+    let selectedWorkflow = null;
+    let currentFilter = '';
+
+    const firstNode = (wf) => wf.graph.nodes.find(n => n.input_mapping && n.input_mapping.length === 0);
+
+    function renderWorkflowList(filter) {
+      const q = filter.toLowerCase().trim();
+      const filtered = q
+        ? workflows.filter(w => w.name.toLowerCase().includes(q) || (w.description || '').toLowerCase().includes(q))
+        : workflows;
+      if (!filtered.length) {
+        return `<p class="text-brand-muted text-sm py-6 text-center">Ничего не найдено.</p>`;
+      }
+      return filtered.map(wf => {
+        const node = firstNode(wf);
+        return `<button class="w-full text-left card p-3 hover:border-brand transition-colors"
+          data-wf-id="${wf.id}">
+          <div class="font-medium text-brand-dark">${escapeHtml(wf.name)}</div>
+          <div class="text-xs text-brand-muted mt-0.5">${escapeHtml(wf.description || '')}</div>
+          ${node ? `<div class="text-xs text-brand-muted mt-1">Первый узел: ${escapeHtml(node.name)}</div>` : ''}
+        </button>`;
+      }).join('');
+    }
+
+    function renderFormBody() {
+      const node = firstNode(selectedWorkflow);
+      const hasFileInput = node && node.plugin_id === 'media_converter';
+      if (!hasFileInput) {
+        return `<p class="text-brand-muted text-sm">Воркфлоу не требует входных данных.</p>
+          <div class="flex gap-3 mt-5 pt-4 border-t border-brand-light">
+            <button id="ce-submit-btn" type="button" class="btn-primary text-sm">Запустить</button>
+            <button id="ce-cancel-btn" type="button" class="btn-secondary text-sm">Отмена</button>
+          </div>
+          <div id="ce-error" class="text-red-600 text-sm mt-2 hidden"></div>`;
+      }
+      return `
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-brand-dark mb-1">Медиафайл</label>
+            <div id="ce-file-drop"
+              class="input-field flex flex-col items-center justify-center gap-1.5 py-6 cursor-pointer text-brand-muted hover:border-brand transition-colors"
+              style="border-style: dashed">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+              <span class="text-sm">Нажмите или перетащите файл</span>
+              <span class="text-xs opacity-70">MP4, MP3, WAV, M4A</span>
+            </div>
+            <input id="ce-file-input" type="file" accept="video/*,audio/*" class="hidden">
+            <div id="ce-file-preview" class="hidden mt-2 flex items-center gap-2 text-sm text-brand-dark bg-gray-50 rounded px-3 py-2">
+              <svg class="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span id="ce-file-name" class="truncate"></span>
+              <button id="ce-file-remove" class="ml-auto text-brand-muted hover:text-red-500 shrink-0">✕</button>
+            </div>
+          </div>
+          <div class="flex gap-3 mt-5 pt-4 border-t border-brand-light">
+            <button id="ce-submit-btn" type="button" class="btn-primary text-sm">Запустить</button>
+            <button id="ce-cancel-btn" type="button" class="btn-secondary text-sm">Отмена</button>
+          </div>
+          <div id="ce-error" class="text-red-600 text-sm mt-2 hidden"></div>
+        </div>
+      `;
+    }
+
+    function buildModalBody() {
+      if (selectedWorkflow) {
+        return `
+          <div class="flex items-center gap-2 mb-4">
+            <button id="ce-back-btn" class="text-brand-muted hover:text-brand text-sm flex items-center gap-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+              </svg>
+              Назад
+            </button>
+            <span class="text-sm text-brand-dark font-medium">${escapeHtml(selectedWorkflow.name)}</span>
+          </div>
+          ${renderFormBody()}
+        `;
+      }
+      return `
+        <div class="mb-3">
+          <input id="ce-search" type="text" class="input-field w-full"
+            placeholder="Поиск по названию...">
+        </div>
+        <div id="ce-wf-list" class="space-y-2 max-h-80 overflow-y-auto pr-1">
+          ${renderWorkflowList(currentFilter)}
+        </div>
+      `;
+    }
+
+    showModal({ title: 'Создать конспект', body: buildModalBody(), width: 'max-w-lg' });
+    const overlay = document.getElementById('modal-overlay');
+
+    function refreshBody() {
+      const bodyEl = overlay.querySelector('[style*="overflow-y:auto"]');
+      if (bodyEl) bodyEl.innerHTML = buildModalBody();
+      if (selectedWorkflow) {
+        const backBtn = document.getElementById('ce-back-btn');
+        if (backBtn) backBtn.addEventListener('click', () => { selectedWorkflow = null; refreshBody(); });
+        attachFileHandlers();
+      } else {
+        attachWfListeners();
+        setTimeout(() => { const s = document.getElementById('ce-search'); if (s) s.focus(); }, 0);
+      }
+    }
+
+    function attachWfListeners() {
+      const listEl = document.getElementById('ce-wf-list');
+      if (!listEl) return;
+      listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
+          refreshBody();
+        });
+      });
+    }
+
+    function attachFileHandlers() {
+      const dropZone = document.getElementById('ce-file-drop');
+      const fileInput = document.getElementById('ce-file-input');
+      const preview = document.getElementById('ce-file-preview');
+      const fileName = document.getElementById('ce-file-name');
+      const removeBtn = document.getElementById('ce-file-remove');
+      if (!dropZone || !fileInput) return;
+
+      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-brand', 'bg-gray-50'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-brand', 'bg-gray-50'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-brand', 'bg-gray-50');
+        const file = e.dataTransfer.files[0];
+        if (file) setFile(file);
+      });
+      fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+          fileInput.value = '';
+          if (preview) preview.classList.add('hidden');
+          if (dropZone) dropZone.classList.remove('hidden');
+        });
+      }
+
+      function setFile(file) {
+        if (preview) { preview.classList.remove('hidden'); if (fileName) fileName.textContent = file.name; }
+        if (dropZone) dropZone.classList.add('hidden');
+      }
+    }
+
+    // Search input
+    setTimeout(() => {
+      const searchInput = document.getElementById('ce-search');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          currentFilter = e.target.value;
+          const listEl = document.getElementById('ce-wf-list');
+          if (listEl) listEl.innerHTML = renderWorkflowList(currentFilter);
+          attachWfListeners();
+        });
+        searchInput.focus();
+      }
+    }, 0);
+
+    attachWfListeners();
+
+    overlay.addEventListener('click', async (e) => {
+      const cancelBtn = e.target.closest('#ce-cancel-btn');
+      if (cancelBtn) { closeModal(); return; }
+      const submitBtn = e.target.closest('#ce-submit-btn');
+      if (!submitBtn) return;
+
+      e.preventDefault();
+      submitBtn.disabled = true;
+      const errEl = document.getElementById('ce-error');
+      if (errEl) errEl.classList.add('hidden');
+
+      let fileId = '', filePath = '';
+      const fileInput = document.getElementById('ce-file-input');
+      if (fileInput && fileInput.files.length > 0) {
+        filePath = fileInput.files[0].name;
+      }
+
+      try {
+        await api.workflows.execute(selectedWorkflow.id, { file_id: fileId, file_path: filePath, parameters: {} });
+        closeModal();
+        showToast('success', 'Конспект запущен!');
+        loadExecutions();
+      } catch (err) {
+        const errEl = document.getElementById('ce-error');
+        if (errEl) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  });
+
+  loadExecutions();
+  const _interval = setInterval(() => {
+    if (!document.getElementById('status-filter')) { clearInterval(_interval); return; }
+    loadExecutions();
+  }, 8000);
+</script>
+{% endblock %}

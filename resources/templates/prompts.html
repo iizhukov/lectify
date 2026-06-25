@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block title %}Промпты - Lectify{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <h1 class="text-2xl font-bold text-brand-dark">Промпты</h1>
+    <div class="flex items-center gap-3">
+      <input type="text" id="prompt-search" class="input-field w-full sm:w-64" placeholder="Поиск промптов...">
+      <button id="create-prompt-btn" class="btn-primary text-sm flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Создать промпт
+      </button>
+    </div>
+  </div>
+
+  <div id="prompts-list" class="space-y-3"></div>
+
+  <div id="prompts-empty" class="hidden text-center py-16">
+    <p class="text-brand-muted mb-4">Промптов не найдено.</p>
+    <button id="create-prompt-btn-empty" class="btn-primary">Создать первый промпт</button>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { api } from '/static/js/api.js';
+  import { showModal, closeModal, buildBody } from '/static/js/components/modal.js';
+  import { showToast } from '/static/js/components/toast.js';
+  import { requireAuth } from '/static/js/auth.js';
+
+  if (!requireAuth()) {}
+
+  let prompts = [];
+  let editingPrompt = null;
+
+  async function loadPrompts() {
+    try {
+      prompts = await api.prompts.list();
+      renderPrompts();
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки промптов: ' + e.message);
+    }
+  }
+
+  function renderPrompts(filter = '') {
+    const q = filter.toLowerCase();
+    const filtered = prompts.filter(p =>
+      !q || p.name.toLowerCase().includes(q) ||
+      (p.system_prompt || '').toLowerCase().includes(q)
+    );
+    const list = document.getElementById('prompts-list');
+    const empty = document.getElementById('prompts-empty');
+
+    if (!filtered.length) {
+      list.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    list.innerHTML = filtered.map(prompt => `
+      <div class="card flex items-start justify-between gap-4">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <h3 class="font-medium text-brand-dark">${escapeHtml(prompt.name)}</h3>
+            ${!prompt.user_id ? '<span class="badge badge-muted">системный</span>' : ''}
+          </div>
+          <p class="text-sm text-brand-muted truncate mb-2">${escapeHtml(prompt.system_prompt || 'Системный промпт отсутствует')}</p>
+          <div class="flex flex-wrap gap-1">
+            ${(prompt.variables || []).map(v => `<span class="badge badge-info">${escapeHtml(v)}</span>`).join('')}
+            ${(prompt.variables || []).length === 0 ? '<span class="text-xs text-brand-muted">нет переменных</span>' : ''}
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button class="btn-secondary text-xs py-1.5 px-3 edit-btn" data-id="${prompt.id}">Изменить</button>
+          <button class="btn-danger text-xs py-1.5 px-3 delete-btn" data-id="${prompt.id}">Удалить</button>
+        </div>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.edit-btn').forEach(btn =>
+      btn.addEventListener('click', () => openEditModal(promptById(btn.dataset.id)))
+    );
+    list.querySelectorAll('.delete-btn').forEach(btn =>
+      btn.addEventListener('click', () => deletePrompt(btn.dataset.id))
+    );
+  }
+
+  function promptById(id) {
+    return prompts.find(p => p.id === id);
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function openCreateModal() {
+    editingPrompt = null;
+    showModal({
+      title: 'Создать промпт',
+      body: buildPromptForm(null),
+      width: 'max-w-2xl',
+    });
+    attachFormHandlers();
+  }
+
+  function openEditModal(prompt) {
+    editingPrompt = prompt;
+    showModal({
+      title: 'Редактировать промпт',
+      body: buildPromptForm(prompt),
+      width: 'max-w-2xl',
+    });
+    attachFormHandlers();
+  }
+
+  function buildPromptForm(prompt) {
+    const name = prompt ? escapeHtml(prompt.name) : '';
+    const description = prompt ? escapeHtml(prompt.description || '') : '';
+    const system_prompt = prompt ? escapeHtml(prompt.system_prompt || '') : '';
+    const user_prompt_template = prompt ? escapeHtml(prompt.user_prompt_template || '') : '';
+    const variables = prompt ? (prompt.variables || []).join(', ') : '';
+
+    return `
+      <form id="prompt-form" class="space-y-4">
+        ${buildBody([
+          { name: 'name', label: 'Название', value: name, required: true },
+          { name: 'description', label: 'Описание', value: description },
+        ])}
+        ${buildBody([
+          { name: 'system_prompt', label: 'Системный промпт', type: 'textarea', value: system_prompt, rows: 5 },
+        ])}
+        ${buildBody([
+          { name: 'user_prompt_template', label: 'Шаблон пользовательского промпта', type: 'textarea', value: user_prompt_template, rows: 4 },
+        ])}
+        ${buildBody([
+          { name: 'variables', label: 'Переменные (через запятую)', value: variables, placeholder: 'transcript, language' },
+        ])}
+        <div id="prompt-form-error" class="text-red-600 text-sm hidden"></div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" onclick="window._closeModal && window._closeModal()" class="btn-secondary">Отмена</button>
+          <button type="submit" class="btn-primary">Сохранить</button>
+        </div>
+      </form>
+    `;
+  }
+
+  function attachFormHandlers() {
+    window._closeModal = closeModal;
+    document.getElementById('prompt-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      const errEl = document.getElementById('prompt-form-error');
+      errEl.classList.add('hidden');
+
+      const get = (n) => e.target.elements.namedItem(n)?.value || '';
+
+      const data = {
+        name: get('name'),
+        description: get('description'),
+        system_prompt: get('system_prompt'),
+        user_prompt_template: get('user_prompt_template'),
+        variables: get('variables').split(',').map(v => v.trim()).filter(Boolean),
+      };
+
+      try {
+        if (editingPrompt) {
+          await api.prompts.update(editingPrompt.id, data);
+        } else {
+          await api.prompts.create(data);
+        }
+        closeModal();
+        loadPrompts();
+        showToast('success', editingPrompt ? 'Промпт обновлён.' : 'Промпт создан.');
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+      }
+    });
+  }
+
+  async function deletePrompt(id) {
+    const prompt = promptById(id);
+    if (!confirm(`Удалить промпт "${prompt?.name}"?`)) return;
+    try {
+      await api.prompts.delete(id);
+      loadPrompts();
+      showToast('success', 'Промпт удалён.');
+    } catch (e) {
+      showToast('error', e.message);
+    }
+  }
+
+  document.getElementById('prompt-search').addEventListener('input', (e) => renderPrompts(e.target.value));
+  document.getElementById('create-prompt-btn').addEventListener('click', openCreateModal);
+  document.getElementById('create-prompt-btn-empty')?.addEventListener('click', openCreateModal);
+
+  loadPrompts();
+</script>
+{% endblock %}

@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block title %}Профиль{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+
+  <div id="profile-loading" class="text-brand-muted py-8 text-center">Загрузка...</div>
+
+  <div id="profile-content" class="hidden">
+    <!-- Avatar + name row -->
+    <div class="flex items-center gap-4 mb-6">
+      <div id="avatar-circle"
+        class="rounded-full bg-brand flex items-center justify-center text-white font-bold border-4 border-white shadow overflow-hidden shrink-0"
+        style="width: 96px; height: 96px; font-size: 42px;">
+        ?
+      </div>
+      <div>
+        <h1 id="header-full_name" class="text-xl font-bold text-brand-dark leading-tight">—</h1>
+        <p id="header-username" class="text-sm text-brand-muted">@—</p>
+      </div>
+    </div>
+
+    <!-- Profile card -->
+    <div class="card mb-4">
+
+      <div class="flex items-center justify-between mb-4">
+        <span class="text-xs text-brand-muted uppercase tracking-wide">Данные профиля</span>
+        <button id="edit-profile-btn"
+          class="w-8 h-8 flex items-center justify-center rounded-full text-brand-muted hover:text-brand transition-colors"
+          title="Редактировать">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+
+        <div>
+          <p class="text-xs text-brand-muted uppercase tracking-wide mb-0.5">Email</p>
+          <span id="profile-email" class="text-sm text-brand-dark">—</span>
+        </div>
+
+        <div>
+          <p class="text-xs text-brand-muted uppercase tracking-wide mb-0.5">Дата регистрации</p>
+          <span id="profile-created" class="text-sm text-brand-dark">—</span>
+        </div>
+
+        <div>
+          <p class="text-xs text-brand-muted uppercase tracking-wide mb-0.5">Полное имя</p>
+          <div id="field-full_name" class="relative">
+            <span id="profile-full_name" class="text-sm text-brand-dark block">—</span>
+            <input id="input-full_name" type="text"
+              class="absolute left-0 right-0 bottom-0 outline-none border-b-2 border-brand transition-opacity duration-200"
+              style="font-size: 14px; font-weight: 400; opacity: 0;">
+          </div>
+        </div>
+
+        <div id="profile-form-error" class="text-red-600 text-sm hidden"></div>
+
+      </div>
+
+      <!-- Save / Cancel buttons -->
+      <div id="edit-actions" class="flex gap-3 pt-4 mt-4 border-t border-brand-light"
+        style="display: none; opacity: 0; transition: opacity 0.3s ease;">
+        <button id="save-profile-btn" class="btn-primary text-sm">Сохранить</button>
+        <button id="cancel-edit-btn" class="btn-secondary text-sm">Отмена</button>
+      </div>
+
+    </div>
+
+    <!-- Change password -->
+    <div class="mb-6">
+      <button id="open-password-modal" class="text-sm text-brand hover:underline">Изменить пароль</button>
+    </div>
+
+    <!-- Logout -->
+    <div>
+      <button
+        id="logout-btn"
+        class="w-full text-sm text-white border font-bold bg-red-500 rounded-xl py-2.5">
+        Выйти из аккаунта
+      </button>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { api } from '/static/js/api.js';
+  import { showToast } from '/static/js/components/toast.js';
+  import { showModal, closeModal } from '/static/js/components/modal.js';
+  import { logout, requireAuth } from '/static/js/auth.js';
+
+  // ── Auth guard ─────────────────────────────────────────────────────────────
+  requireAuth();
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  function getInitial(name) {
+    return name ? name.trim()[0].toUpperCase() : '?';
+  }
+
+  function setAvatarInitial(name) {
+    document.getElementById('avatar-circle').textContent = getInitial(name);
+  }
+
+  let isEditing = false;
+  let originalFullName = '';
+
+  // ── Edit mode ────────────────────────────────────────────────────────────────
+  function enterEditMode() {
+    isEditing = true;
+    const span = document.getElementById('profile-full_name');
+    const input = document.getElementById('input-full_name');
+    originalFullName = span.textContent;
+    span.style.visibility = 'hidden';
+    input.value = originalFullName;
+    input.style.opacity = '1';
+    input.style.visibility = 'visible';
+    input.focus();
+    const actions = document.getElementById('edit-actions');
+    actions.style.display = 'flex';
+    // tiny delay so opacity transition fires
+    requestAnimationFrame(() => { actions.style.opacity = '1'; });
+  }
+
+  function exitEditMode() {
+    isEditing = false;
+    const span = document.getElementById('profile-full_name');
+    span.style.visibility = 'visible';
+    const input = document.getElementById('input-full_name');
+    input.style.opacity = '0';
+    input.style.visibility = 'hidden';
+    const actions = document.getElementById('edit-actions');
+    actions.style.opacity = '0';
+    setTimeout(() => { if (!isEditing) actions.style.display = 'none'; }, 300);
+    document.getElementById('profile-form-error').classList.add('hidden');
+  }
+
+  document.getElementById('edit-profile-btn').addEventListener('click', () => {
+    if (isEditing) exitEditMode();
+    else enterEditMode();
+  });
+
+  document.getElementById('cancel-edit-btn').addEventListener('click', exitEditMode);
+
+  document.getElementById('save-profile-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('save-profile-btn');
+    const errEl = document.getElementById('profile-form-error');
+    errEl.classList.add('hidden');
+    btn.disabled = true;
+    try {
+      const fullName = document.getElementById('input-full_name').value;
+      await api.profile.update({ full_name: fullName });
+      document.getElementById('profile-full_name').textContent = fullName;
+      document.getElementById('header-full_name').textContent = fullName;
+      setAvatarInitial(fullName);
+      exitEditMode();
+      showToast('success', 'Профиль обновлён.');
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── Load profile ─────────────────────────────────────────────────────────────
+  async function loadProfile() {
+    const loadingEl = document.getElementById('profile-loading');
+    const contentEl = document.getElementById('profile-content');
+
+    loadingEl.classList.remove('hidden');
+    contentEl.classList.add('hidden');
+
+    try {
+      const user = await api.profile.get();
+      const fullName = user.full_name || '-';
+      document.getElementById('header-full_name').textContent = fullName;
+      document.getElementById('header-username').textContent = '@' + (user.username || '—');
+      document.getElementById('profile-full_name').textContent = fullName;
+      document.getElementById('profile-email').textContent = user.email || '-';
+      document.getElementById('profile-created').textContent = user.created_at
+        ? new Date(user.created_at).toLocaleDateString('ru-RU')
+        : '-';
+      setAvatarInitial(fullName !== '-' ? fullName : (user.username || ''));
+    } catch (e) {
+      if (e.message && e.message.toLowerCase().includes('unauthorized')) {
+        window.location.href = '/login';
+        return;
+      }
+      showToast('error', 'Ошибка загрузки профиля: ' + e.message);
+    } finally {
+      loadingEl.classList.add('hidden');
+      contentEl.classList.remove('hidden');
+      window.scrollTo(0, 0);
+    }
+  }
+
+  // ── Password modal ──────────────────────────────────────────────────────────
+  document.getElementById('open-password-modal').addEventListener('click', () => {
+    showModal({
+      title: 'Изменить пароль',
+      body: `
+        <form id="password-form" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-brand-dark mb-1" for="modal-old-password">Текущий пароль</label>
+            <input type="password" id="modal-old-password" class="input-field" required>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-brand-dark mb-1" for="modal-new-password">Новый пароль</label>
+            <input type="password" id="modal-new-password" class="input-field" required minlength="6">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-brand-dark mb-1" for="modal-confirm-password">Подтвердите новый пароль</label>
+            <input type="password" id="modal-confirm-password" class="input-field" required minlength="6">
+          </div>
+          <div id="modal-password-error" class="text-red-600 text-sm hidden"></div>
+          <div class="flex gap-3">
+            <button type="submit" class="btn-primary text-sm">Обновить пароль</button>
+            <button type="button" id="modal-password-cancel" class="btn-secondary text-sm">Отмена</button>
+          </div>
+        </form>
+      `,
+    });
+
+    document.getElementById('modal-password-cancel').addEventListener('click', closeModal);
+
+    document.getElementById('password-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      const errEl = document.getElementById('modal-password-error');
+      errEl.classList.add('hidden');
+
+      const newPass = document.getElementById('modal-new-password').value;
+      if (newPass !== document.getElementById('modal-confirm-password').value) {
+        errEl.textContent = 'Пароли не совпадают.';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        return;
+      }
+
+      try {
+        await api.profile.changePassword(
+          document.getElementById('modal-old-password').value,
+          newPass
+        );
+        showToast('success', 'Пароль обновлён.');
+        closeModal();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // ── Logout ──────────────────────────────────────────────────────────────────
+  document.getElementById('logout-btn').addEventListener('click', logout);
+
+  // ── Init ────────────────────────────────────────────────────────────────────
+  loadProfile();
+</script>
+{% endblock %}

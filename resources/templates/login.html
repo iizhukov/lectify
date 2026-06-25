@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход - Lectify</title>
+  <link href="/static/css/output.css" rel="stylesheet">
+</head>
+<body class="bg-brand-bg min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-brand">Lectify</h1>
+      <p class="text-brand-muted mt-1">Платформа транскрибации видео</p>
+    </div>
+
+    <div class="card p-6">
+      <h2 class="text-xl font-semibold text-brand-dark mb-6">Войти</h2>
+
+      <form id="login-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="username">Имя пользователя</label>
+          <input type="text" id="username" name="username" class="input-field" placeholder="demo" required autofocus>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-brand-dark mb-1" for="password">Пароль</label>
+          <input type="password" id="password" name="password" class="input-field" placeholder="password123" required>
+        </div>
+        <div id="login-error" class="text-red-600 text-sm hidden"></div>
+        <button type="submit" class="btn-primary w-full py-2.5">Войти</button>
+      </form>
+
+      <div class="mt-4 space-y-2">
+        <a href="/forgot-password" class="block text-sm text-brand hover:text-brand-dark">Забыли пароль?</a>
+        <span class="block text-sm text-brand-muted">Нет аккаунта?
+          <a href="/register" class="text-brand hover:text-brand-dark">Зарегистрироваться</a>
+        </span>
+      </div>
+
+      <div class="mt-6 pt-4 border-t border-brand-light">
+        <p class="text-xs text-brand-muted">
+          Демо: логин <strong>demo</strong>, пароль <strong>password123</strong>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
+
+  <script type="module">
+    import { api } from '/static/js/api.js';
+    import { setToken, setUser } from '/static/js/auth.js';
+    import { showToast } from '/static/js/components/toast.js';
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.textContent = 'Вход...';
+
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const errorEl = document.getElementById('login-error');
+      errorEl.classList.add('hidden');
+
+      try {
+        const data = await api.auth.login(username, password);
+        setToken(data.token);
+        setUser(data.user);
+        window.location.href = '/executions';
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Войти';
+      }
+    });
+  </script>
+</body>
+</html>

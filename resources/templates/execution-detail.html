@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+
+{% block title %}Конспекты{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+
+  <div class="flex items-center gap-2 text-sm text-brand-muted mb-6">
+    <a href="/executions" class="hover:text-brand-dark">Конспекты</a>
+    <span>/</span>
+    <span id="exec-id" class="text-brand-dark">-</span>
+  </div>
+
+  <div class="card mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <h1 id="exec-title" class="text-xl font-bold text-brand-dark">Загрузка...</h1>
+          <span id="exec-status-badge" class="badge badge-muted">-</span>
+        </div>
+        <dl class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-brand-muted">
+          <div><dt class="inline">Воркфлоу</dt><dd id="exec-workflow" class="inline ml-1">-</dd></div>
+          <div><dt class="inline">Файл</dt><dd id="exec-file" class="inline ml-1">-</dd></div>
+          <div><dt class="inline">Язык</dt><dd id="exec-language" class="inline ml-1">-</dd></div>
+          <div><dt class="inline">Запущен</dt><dd id="exec-started" class="inline ml-1">-</dd></div>
+          <div><dt class="inline">Длительность</dt><dd id="exec-duration" class="inline ml-1">-</dd></div>
+        </dl>
+        <p id="exec-error" class="text-sm text-red-600 mt-2 hidden"></p>
+      </div>
+      <div class="flex gap-2 shrink-0">
+        <button id="restart-btn" class="btn-secondary text-sm hidden">Перезапустить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-6">
+    <h2 class="text-base font-semibold text-brand-dark mb-4">Граф выполнения</h2>
+    <div id="network-loading" class="text-sm text-brand-muted py-8 text-center">Загрузка узлов...</div>
+    <svg id="network-svg" class="w-full" style="min-height:200px" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <div class="card mb-6">
+    <h2 class="text-base font-semibold text-brand-dark mb-4">Артефакты</h2>
+    <div id="artifacts-list" class="space-y-2"></div>
+    <div id="artifacts-empty" class="hidden text-sm text-brand-muted text-center py-6">Артефактов пока нет.</div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { api } from '/static/js/api.js';
+  import { showModal } from '/static/js/components/modal.js';
+  import { showToast } from '/static/js/components/toast.js';
+  import { renderNetworkGraph } from '/static/js/components/network-graph.js';
+
+  const execId = window.location.pathname.split('/').pop();
+  const STATUS_STYLES = {
+    completed: { badge: 'badge-success', dot: 'bg-green-500', color: '#16a34a' },
+    running:   { badge: 'badge-warning', dot: 'bg-yellow-500 animate-pulse', color: '#d97706' },
+    failed:    { badge: 'badge-danger',  dot: 'bg-red-500', color: '#dc2626' },
+    pending:   { badge: 'badge-muted',   dot: 'bg-gray-400', color: '#9ca3af' },
+  };
+  const STATUS_LABELS = {
+    completed: 'Завершён', running: 'Выполняется', failed: 'Ошибка', pending: 'Ожидание',
+  };
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function formatDate(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleString('ru-RU');
+  }
+
+  function duration(start, end) {
+    if (!start || !end) return '-';
+    const ms = new Date(end) - new Date(start);
+    if (ms < 0) return '-';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}с`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}м ${s % 60}с`;
+    return `${Math.floor(m / 60)}ч ${m % 60}м`;
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return '-';
+    const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+    return bytes.toFixed(1) + ' ' + units[i];
+  }
+
+  function renderHeader(ex) {
+    const style = STATUS_STYLES[ex.status] || STATUS_STYLES.pending;
+    document.getElementById('exec-id').textContent = (ex.id || '').slice(0, 12);
+    document.getElementById('exec-title').textContent = ex.workflow_name || 'Запуск';
+    const badge = document.getElementById('exec-status-badge');
+    badge.className = style.badge;
+    badge.textContent = STATUS_LABELS[ex.status] || ex.status || '-';
+    document.getElementById('exec-workflow').textContent = ex.workflow_name || '-';
+    document.getElementById('exec-file').textContent = ex.file_name || '-';
+    document.getElementById('exec-language').textContent = ex.language || '-';
+    document.getElementById('exec-started').textContent = formatDate(ex.created_at);
+    document.getElementById('exec-duration').textContent = duration(ex.started_at, ex.ended_at);
+
+    const errEl = document.getElementById('exec-error');
+    if (ex.error_message) {
+      errEl.textContent = ex.error_message;
+      errEl.classList.remove('hidden');
+    } else {
+      errEl.classList.add('hidden');
+    }
+
+    const restartBtn = document.getElementById('restart-btn');
+    if (ex.status === 'failed' || ex.status === 'completed') {
+      restartBtn.classList.remove('hidden');
+    } else {
+      restartBtn.classList.add('hidden');
+    }
+  }
+
+  async function renderGraph(nodes, workflowGraph) {
+    const svg = document.getElementById('network-svg');
+    document.getElementById('network-loading').classList.add('hidden');
+    svg.innerHTML = '';
+
+    const statusByNodeId = {};
+    nodes.forEach(n => { statusByNodeId[n.node_id] = n; });
+
+    const nodeMapById = {};
+    nodes.forEach(n => { nodeMapById[n.id] = n; });
+
+    let displayNodes, displayEdges;
+
+    if (workflowGraph?.nodes) {
+      displayNodes = workflowGraph.nodes.map(wn => {
+        const en = statusByNodeId[wn.id];
+        return {
+          id: wn.id,
+          node_name: wn.name || en?.node_name || wn.id,
+          status: en?.status || 'pending',
+          progress_percent: en?.progress_percent ?? null,
+          _exec_node_id: en?.id,
+        };
+      });
+      displayEdges = workflowGraph.edges || [];
+    } else {
+      displayNodes = nodes.map(n => ({
+        id: n.node_id,
+        node_name: n.node_name || n.node_id,
+        status: n.status,
+        progress_percent: n.progress_percent,
+        _exec_node_id: n.id,
+      }));
+      displayEdges = [];
+    }
+
+    renderNetworkGraph(svg, displayNodes, displayEdges, (clicked) => {
+      const execNodeId = clicked._exec_node_id;
+      if (execNodeId) showNodeDetail(execNodeId);
+    });
+  }
+
+  async function showNodeDetail(nodeId) {
+    try {
+      const node = await api.nodes.getDetail(execId, nodeId);
+      const style = STATUS_STYLES[node.status] || STATUS_STYLES.pending;
+
+      const formatKV = (label, val) => {
+        if (val == null) return '';
+        return `<div class="flex gap-4"><dt class="text-sm text-brand-muted w-36 shrink-0">${label}</dt><dd class="text-sm text-brand-dark break-all">${escapeHtml(String(val))}</dd></div>`;
+      };
+
+      const elapsed = node.started_at && node.ended_at ? duration(node.started_at, node.ended_at) : '-';
+
+      const body = `
+        <div class="space-y-3">
+          <div class="flex gap-4">
+            <dt class="text-sm text-brand-muted">Статус</dt>
+            <dd><span class="${style.badge}">${STATUS_LABELS[node.status] || node.status}</span></dd>
+          </div>
+          ${formatKV('Запущен', formatDate(node.started_at))}
+          ${formatKV('Завершён', formatDate(node.ended_at))}
+          ${formatKV('Длительность', elapsed)}
+          ${formatKV('Прогресс', node.progress_percent != null ? node.progress_percent + '%' : null)}
+          ${formatKV('Сообщение', node.progress_message)}
+          ${formatKV('Контейнер', node.container_id)}
+          ${formatKV('CPU %', node.cpu_percent != null ? node.cpu_percent.toFixed(1) : null)}
+          ${formatKV('Память МБ', node.memory_mb)}
+          ${formatKV('Время выполнения мс', node.execution_time_ms)}
+          ${formatKV('Ошибка', node.error_message)}
+        </div>
+        <div class="mt-4 pt-4 border-t border-brand-light">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-brand-dark">Входные данные</h3>
+            <button class="text-xs text-brand hover:text-brand-dark view-logs-btn" data-node-id="${nodeId}">Просмотр логов</button>
+          </div>
+          <pre class="bg-brand-bg p-3 rounded text-xs text-brand-dark overflow-auto max-h-48 font-mono">${escapeHtml(JSON.stringify(node.input_data || {}, null, 2))}</pre>
+        </div>
+        ${node.output_data ? `
+          <div class="mt-4 pt-4 border-t border-brand-light">
+            <h3 class="text-sm font-semibold text-brand-dark mb-2">Выходные данные</h3>
+            <pre class="bg-brand-bg p-3 rounded text-xs text-brand-dark overflow-auto max-h-48 font-mono">${escapeHtml(JSON.stringify(node.output_data, null, 2))}</pre>
+          </div>
+        ` : ''}
+      `;
+
+      showModal({ title: escapeHtml(node.node_name || node.node_id || 'Узел'), body, width: 'max-w-2xl' });
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки узла: ' + e.message);
+    }
+  }
+
+  async function showNodeLogs(nodeId) {
+    try {
+      const logs = await api.nodes.logs(execId, nodeId);
+      showModal({
+        title: 'Логи узла',
+        body: `<pre class="bg-gray-900 text-green-400 p-4 rounded text-xs font-mono overflow-auto max-h-[60vh]">${escapeHtml(logs)}</pre>`,
+        width: 'max-w-3xl',
+      });
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки логов: ' + e.message);
+    }
+  }
+
+  async function renderArtifacts(id) {
+    const list = document.getElementById('artifacts-list');
+    const empty = document.getElementById('artifacts-empty');
+    try {
+      const artifacts = await api.artifacts.list(id);
+      if (!artifacts.length) {
+        list.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      list.innerHTML = artifacts.map(art => `
+        <div class="flex items-center justify-between gap-4 p-3 bg-brand-bg rounded border border-brand-light">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="text-sm font-medium text-brand-dark truncate">${escapeHtml(art.name)}</span>
+            <span class="text-xs text-brand-muted">${formatBytes(art.size_bytes)}</span>
+            <span class="badge badge-muted">${escapeHtml(art.artifact_type || art.ext || 'файл')}</span>
+          </div>
+          <a href="${api.artifacts.download(art.id)}" class="btn-secondary text-xs py-1.5 px-3 shrink-0" download>Скачать</a>
+        </div>
+      `).join('');
+    } catch (e) {
+      list.innerHTML = '<p class="text-sm text-red-600">Ошибка загрузки артефактов.</p>';
+    }
+  }
+
+  async function loadExecution() {
+    try {
+      const [ex, nodes] = await Promise.all([
+        api.executions.get(execId),
+        api.executions.getNodes(execId),
+      ]);
+      renderHeader(ex);
+      renderArtifacts(execId);
+      const workflow = ex.workflow_graph || ex.graph || null;
+      renderGraph(nodes, workflow);
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки запуска: ' + e.message);
+    }
+  }
+
+  document.getElementById('restart-btn').addEventListener('click', async () => {
+    if (!confirm('Перезапустить этот запуск?')) return;
+    try {
+      await api.executions.restart(execId);
+      showToast('success', 'Запуск перезапущен.');
+      loadExecution();
+    } catch (e) {
+      showToast('error', e.message);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.view-logs-btn');
+    if (btn) showNodeLogs(btn.dataset.nodeId);
+  });
+
+  loadExecution();
+  const _interval = setInterval(() => {
+    if (!document.getElementById('exec-id')) { clearInterval(_interval); return; }
+    loadExecution();
+  }, 5000);
+</script>
+{% endblock %}

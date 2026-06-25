@@ -1,0 +1,1309 @@
+{% extends "base.html" %}
+
+{% block title %}Редактирование воркфлоу - Lectify{% endblock %}
+
+{% block content %}
+<div id="editor-root" class="max-w-full mx-auto flex flex-col" style="height: calc(100vh - 48px);">
+
+  <!-- Header bar -->
+  <div class="flex items-center gap-3 mb-3 shrink-0">
+    <a href="/workflows" class="text-sm text-brand-muted hover:text-brand-dark flex items-center gap-1">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+      Воркфлоу
+    </a>
+    <span class="text-brand-muted">/</span>
+    <span id="wf-name-breadcrumb" class="text-sm text-brand-dark font-medium">Загрузка...</span>
+    <div class="flex-1"></div>
+    <button id="save-btn" class="btn-primary text-sm">Сохранить</button>
+  </div>
+
+  <!-- Name + description -->
+  <div class="flex-col gap-3 mb-3 items-start shrink-0">
+    <div class="flex-1">
+      <input type="text" id="wf-name-input" class="input-field font-semibold text-brand-dark w-full"
+        placeholder="Название воркфлоу">
+    </div>
+    <div class="flex-1 mt-2">
+      <textarea id="wf-desc-input" class="input-field text-brand-dark w-full"
+        placeholder="Описание (необязательно)" rows="1"></textarea>
+    </div>
+  </div>
+
+  <!-- Main: graph + node config -->
+  <div id="resizable-panes" class="flex gap-0 flex-1 min-h-0">
+
+    <!-- Graph area -->
+    <div id="left-pane" class="min-h-0 flex flex-col overflow-hidden" style="flex: 1 1 auto; min-width: 500px;">
+      <div class="card flex-1 flex flex-col min-h-0">
+        <!-- Graph toolbar -->
+        <div class="flex items-center justify-between mb-3 shrink-0">
+          <h2 class="text-sm font-semibold text-brand-dark">Граф воркфлоу</h2>
+          <div class="flex gap-2">
+            <button id="connect-mode-btn" class="btn-secondary text-xs py-1">Режим соединения</button>
+            <button id="add-node-btn" class="btn-primary text-xs py-1">+ Добавить узел</button>
+            <button id="clear-graph-btn" class="btn-secondary text-xs py-1 text-red-600 border-red-300 hover:bg-red-50">Очистить</button>
+          </div>
+        </div>
+        <!-- Graph SVG wrapper (overflow hidden so pan stays inside) -->
+        <div id="graph-svg-wrapper" class="flex-1 overflow-hidden" style="min-height:0;">
+          <div id="graph-loading" class="text-sm text-brand-muted py-8 text-center">Загрузка графа...</div>
+          <svg id="graph-svg" class="w-full" style="height:100%;display:block;" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+      </div>
+      <!-- Hint bar (outside card so it's always visible) -->
+      <div class="flex items-center justify-center gap-3 py-1 shrink-0" style="background:#fff;border-top:1px solid #DCDCDC;">
+        <span id="hint-default" class="text-xs text-brand-muted">Клик по узлу — настройка. ЛКМ перетаскивание, колёсико — масштаб.</span>
+        <span id="hint-connect" class="hidden text-xs text-brand">Выберите целевой узел для соединения. Esc — отмена.</span>
+        <span id="hint-delete-edge" class="hidden text-xs text-red-600">Связь выбрана.</span>
+        <button id="delete-edge-btn" class="hidden text-xs text-red-600 underline hover:no-underline font-medium">Удалить связь</button>
+        <span id="hint-delete-edge-suffix" class="hidden text-xs text-brand-muted">или нажмите Delete</span>
+      </div>
+    </div>
+
+    <!-- Resize handle -->
+    <div id="resize-handle" class="w-3 cursor-col-resize flex items-center justify-center group relative shrink-0">
+      <div class="flex gap-0.5 py-4 opacity-40 group-hover:opacity-100 transition-opacity">
+        <div class="flex flex-col gap-1.5">
+          <div class="w-0.5 h-1 bg-brand-muted rounded-full"></div>
+          <div class="w-0.5 h-1 bg-brand-muted rounded-full"></div>
+          <div class="w-0.5 h-1 bg-brand-muted rounded-full"></div>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <div class="w-0.5 h-1 bg-brand-muted rounded-full"></div>
+          <div class="w-0.5 h-1 bg-brand-muted rounded-full"></div>
+          <div class="w-0.5 h-1 bg-brand-muted rounded-full"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Node config panel -->
+    <div id="right-pane" class="shrink-0 flex flex-col min-h-0 overflow-hidden" style="flex-basis: 384px; min-width: 350px;">
+
+      <!-- Node config -->
+      <div id="node-panel" class="card flex-1 min-h-0 flex flex-col hidden">
+        <div class="flex items-center justify-between mb-3 shrink-0">
+          <h3 class="text-sm font-semibold text-brand-dark">Настройка узла</h3>
+          <button id="close-node-panel" class="text-brand-muted hover:text-brand-dark">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto space-y-4 min-h-0 pr-1">
+
+          <!-- Name + plugin -->
+          <div class="space-y-2">
+            <div>
+              <label class="block text-xs font-medium text-brand-muted mb-1">Название</label>
+              <input type="text" id="node-name-input" class="input-field text-sm" placeholder="Название узла">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-brand-muted mb-1">Плагин</label>
+              <select id="node-type-select" class="input-field text-sm">
+                <option value="">— выберите —</option>
+                <option value="media_converter">Конвертация медиа</option>
+                <option value="transcriber">Транскрибация</option>
+                <option value="formatter">Форматирование</option>
+                <option value="topic_analyzer">Анализ тем</option>
+                <option value="term_extractor">Извлечение терминов</option>
+                <option value="llm">LLM узел</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-brand-muted mb-1">Описание</label>
+              <textarea id="node-desc-input" class="input-field text-sm" rows="2" placeholder="Описание..."></textarea>
+            </div>
+          </div>
+
+          <!-- Входы / Выходы -->
+          <div id="node-io-section" class="space-y-2">
+            <div class="flex items-center justify-between">
+              <h4 class="text-xs font-semibold text-brand-dark">Входы</h4>
+            </div>
+            <div id="node-inputs-list" class="space-y-1"></div>
+
+            <div class="flex items-center justify-between mt-2">
+              <h4 class="text-xs font-semibold text-brand-dark">Выходы</h4>
+            </div>
+            <div id="node-outputs-list" class="space-y-1"></div>
+          </div>
+
+          <!-- Параметры плагина -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-xs font-semibold text-brand-dark">Параметры</h4>
+            </div>
+            <div id="params-list" class="space-y-2"></div>
+          </div>
+
+          <!-- Prompt library (only for llm nodes) -->
+          <div id="prompt-section" class="hidden">
+            <h4 class="text-xs font-semibold text-brand-dark mb-2">Промпт</h4>
+            <select id="node-prompt-select" class="input-field text-sm w-full">
+              <option value="">— без промпта —</option>
+            </select>
+          </div>
+
+          <div id="node-config-error" class="text-xs text-red-600 hidden"></div>
+
+          <div class="flex gap-2 pt-1 shrink-0">
+            <button id="delete-node-btn" class="btn-secondary text-xs py-1.5 text-red-600 border-red-300 hover:bg-red-50 flex-1">Удалить узел</button>
+            <button id="apply-node-btn" class="btn-primary text-xs py-1.5 flex-1">Применить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="node-panel-empty" class="card flex-1 flex items-center justify-center">
+        <p class="text-sm text-brand-muted text-center">Кликните на узел на графе<br>для настройки</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Add Node Modal -->
+<div id="add-node-modal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5);align-items:center;justify-content:center;padding:1rem;overflow-y:auto;">
+  <div id="add-node-dialog" style="background:#fff;border-radius:0.75rem;box-shadow:0 20px 60px rgba(0,0,0,0.25);width:100%;max-width:40rem;max-height:85vh;margin:auto;display:flex;flex-direction:column;position:relative;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid #DCDCDC;flex-shrink:0">
+      <h2 class="text-base font-bold text-brand-dark m-0">Добавить узел</h2>
+      <button id="close-add-modal" style="color:#787878;font-size:1.5rem;line-height:1;background:none;border:none;cursor:pointer;padding:0 0.25rem">&times;</button>
+    </div>
+    <div id="node-type-list" style="overflow-y:auto;flex:1;padding:0.75rem;display:flex;flex-direction:column;gap:0.5rem;"></div>
+    <div id="add-node-footer" class="hidden" style="border-top:1px solid #DCDCDC;padding:0.75rem;flex-shrink:0">
+      <button id="confirm-add-node-btn" class="btn-primary text-sm py-2 w-full">Добавить</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { api } from '/static/js/api.js';
+  import { showToast } from '/static/js/components/toast.js';
+
+  const wfId = window.location.pathname.split('/').filter(Boolean)[1];
+  let workflow = null;
+  let nodes = [];
+  let edges = [];
+  let prompts = [];
+  let selectedNodeId = null;
+  let selectedEdgeIndex = null;
+  let connectMode = false;
+  let connectFromNodeId = null;
+  let pendingPluginId = null;
+
+  // --- Pan/zoom state (persists across renders) ---
+  let panX = 0, panY = 0, scale = 1;
+  let isPanning = false;
+  let lastX = 0, lastY = 0;
+  // Positions computed by layoutNodes, stored for use by selectNode
+  let _nodePositions = {};
+
+  // --- Resizable panes ---
+  const STORAGE_KEY = 'lectify-editor-right-width';
+  const leftPane = document.getElementById('left-pane');
+  const rightPane = document.getElementById('right-pane');
+  const handle = document.getElementById('resize-handle');
+  const panes = document.getElementById('resizable-panes');
+
+  let isDragging = false;
+  let startX = 0;
+  let startRightW = 0;
+
+  function applyWidths(rightWidth, save) {
+    rightWidth = Math.max(350, Math.min(rightWidth, window.innerWidth - 500 - 12));
+    leftPane.style.flexBasis = (window.innerWidth - rightWidth - 12) + 'px';
+    rightPane.style.flexBasis = rightWidth + 'px';
+    if (save) localStorage.setItem(STORAGE_KEY, String(rightWidth));
+  }
+
+  function initPaneWidth() {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const rightWidth = saved ? parseInt(saved, 10) : 384;
+    applyWidths(rightWidth, false);
+  }
+
+  handle.addEventListener('mousedown', e => {
+    isDragging = true;
+    startX = e.clientX;
+    startRightW = rightPane.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    const delta = startX - e.clientX;
+    applyWidths(startRightW + delta, false);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    const currentRightW = rightPane.getBoundingClientRect().width;
+    localStorage.setItem(STORAGE_KEY, String(Math.round(currentRightW)));
+    rightPane.style.flexBasis = Math.round(currentRightW) + 'px';
+    leftPane.style.flexBasis = (window.innerWidth - currentRightW - 12) + 'px';
+  });
+
+  initPaneWidth();
+
+  // --- Node catalog ---
+  const PLUGIN_COLORS = {
+    media_converter: '#3b82f6',
+    transcriber:     '#8b5cf6',
+    formatter:       '#10b981',
+    topic_analyzer:  '#f59e0b',
+    term_extractor:  '#ef4444',
+    llm:             '#06b6d4',
+  };
+
+  const PLUGIN_OUTPUTS = {
+    media_converter: ['audio_data', 'duration_seconds', 'format', 'file_path'],
+    transcriber:     ['transcript', 'language', 'duration_seconds'],
+    formatter:       ['formatted_text', 'toc', 'word_count'],
+    topic_analyzer:  ['topics', 'topic_scores'],
+    term_extractor:  ['terms', 'term_count'],
+    llm:             ['result', 'reasoning'],
+  };
+
+  const PLUGIN_INPUTS = {
+    media_converter: [],
+    transcriber:     ['audio_data', 'file_path'],
+    formatter:       ['transcript', 'text'],
+    topic_analyzer:  ['transcript', 'formatted_text'],
+    term_extractor:  ['transcript', 'formatted_text'],
+    llm:             ['prompt_text', 'context_data'],
+  };
+
+  const PLUGIN_DEFAULTS = {
+    media_converter: { quality: '720p', format: 'mp4', audio_codec: 'aac' },
+    transcriber:     { language: 'auto', model: 'base', word_level: false },
+    formatter:       { style: 'academic', include_toc: true },
+    topic_analyzer:  { num_topics: 5, min_score: 0.1 },
+    term_extractor:  { top_n: 20, min_freq: 2 },
+    llm:             { model: 'gpt-4o', temperature: 0.7, max_tokens: 2048 },
+  };
+
+  const PARAM_TYPES = {
+    // key: 'select' | 'input' | 'bool'
+    quality:         { type: 'select',  options: ['360p','480p','720p','1080p'] },
+    format:          { type: 'select',  options: ['mp4','mkv','mov','webm'] },
+    audio_codec:     { type: 'select',  options: ['aac','mp3','opus','flac'] },
+    language:        { type: 'select',  options: ['auto','ru','en','de','fr','es'] },
+    model:           { type: 'input' },
+    word_level:      { type: 'bool' },
+    style:           { type: 'select',  options: ['academic','plain','technical','narrative'] },
+    include_toc:     { type: 'bool' },
+    num_topics:      { type: 'input' },
+    min_score:       { type: 'input' },
+    top_n:           { type: 'input' },
+    min_freq:        { type: 'input' },
+    temperature:     { type: 'input' },
+    max_tokens:      { type: 'input' },
+  };
+
+  const PLUGIN_ICONS = {
+    media_converter: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8.5A1.5 1.5 0 014.5 7h11A1.5 1.5 0 0117 8.5v1H3V8.5z"/></svg>`,
+    transcriber:     `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>`,
+    formatter:       `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>`,
+    topic_analyzer:  `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>`,
+    term_extractor:  `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>`,
+    llm:             `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>`,
+  };
+
+  const PLUGIN_META = [
+    { id: 'media_converter', name: 'Конвертация медиа', description: 'Конвертирует аудио/видео в нужный формат и качество.', color: '#3b82f6' },
+    { id: 'transcriber',     name: 'Транскрибация',     description: 'Преобразует аудио/видео в текст (транскрипт).',          color: '#8b5cf6' },
+    { id: 'formatter',       name: 'Форматирование',    description: 'Форматирует текст: оглавление, пунктуация, абзацы.',      color: '#10b981' },
+    { id: 'topic_analyzer',  name: 'Анализ тем',        description: 'Выделяет ключевые темы и оценивает их релевантность.',  color: '#f59e0b' },
+    { id: 'term_extractor',  name: 'Извлечение терминов',description: 'Извлекает ключевые слова и термины из текста.',       color: '#ef4444' },
+    { id: 'llm',             name: 'LLM узел',           description: 'Вызывает языковую модель с заданным промптом.',         color: '#06b6d4' },
+  ];
+
+  // --- Add Node Modal ---
+  function renderNodeTypeList() {
+    const list = document.getElementById('node-type-list');
+    list.innerHTML = PLUGIN_META.map(p => {
+      const ins = PLUGIN_INPUTS[p.id] || [];
+      const outs = PLUGIN_OUTPUTS[p.id] || [];
+      return `
+        <div class="node-type-item border border-brand-light rounded-lg p-3 cursor-pointer hover:border-brand hover:shadow-sm transition-all" data-plugin-id="${p.id}">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style="background:${p.color}15; color:${p.color}">
+              ${PLUGIN_ICONS[p.id]}
+            </div>
+            <div>
+              <p class="font-semibold text-sm text-brand-dark">${p.name}</p>
+              <p class="text-xs font-mono" style="color:${p.color}">${p.id}</p>
+            </div>
+          </div>
+          <p class="text-xs text-brand-muted mt-2">${p.description}</p>
+        </div>
+      `;
+    }).join('');
+
+    list.querySelectorAll('.node-type-item').forEach(item => {
+      item.addEventListener('click', () => {
+        list.querySelectorAll('.node-type-item').forEach(i => i.classList.remove('border-brand', 'shadow-sm', 'bg-blue-50'));
+        item.classList.add('border-brand', 'shadow-sm');
+        pendingPluginId = item.dataset.pluginId;
+        showAddFooter(pendingPluginId);
+      });
+    });
+  }
+
+  function showAddFooter(pluginId) {
+    document.getElementById('add-node-footer').classList.remove('hidden');
+  }
+
+  function openAddModal() {
+    pendingPluginId = null;
+    document.getElementById('add-node-footer').classList.add('hidden');
+    renderNodeTypeList();
+    const m = document.getElementById('add-node-modal');
+    m.classList.remove('hidden');
+    m.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeAddModal() {
+    const m = document.getElementById('add-node-modal');
+    m.classList.add('hidden');
+    m.style.display = '';
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('add-node-btn').addEventListener('click', openAddModal);
+  document.getElementById('close-add-modal').addEventListener('click', closeAddModal);
+  document.getElementById('add-node-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeAddModal();
+  });
+
+  document.getElementById('confirm-add-node-btn').addEventListener('click', () => {
+    if (!pendingPluginId) return;
+    const name = PLUGIN_META.find(p => p.id === pendingPluginId).name;
+    const newNode = {
+      id: 'n-' + Math.random().toString(36).slice(2, 8),
+      plugin_id: pendingPluginId,
+      name,
+      description: '',
+      parameters: JSON.parse(JSON.stringify(PLUGIN_DEFAULTS[pendingPluginId] || {})),
+      input_mapping: [],
+      prompt_id: null,
+    };
+    nodes.push(newNode);
+    closeAddModal();
+    renderGraph();
+    selectNode(newNode.id);
+  });
+
+
+  // --- Load data ---
+  async function loadWorkflow() {
+    try {
+      [workflow] = await Promise.all([api.workflows.get(wfId)]);
+      document.getElementById('wf-name-input').value = workflow.name || '';
+      document.getElementById('wf-desc-input').value = workflow.description || '';
+      document.getElementById('wf-name-breadcrumb').textContent = workflow.name || 'Без названия';
+
+      const graph = workflow.graph || { nodes: [], edges: [] };
+      nodes = JSON.parse(JSON.stringify(graph.nodes || []));
+      edges = JSON.parse(JSON.stringify(graph.edges || []));
+
+      // Load prompts for llm node select
+      try { prompts = await api.prompts.list(); } catch (_) { prompts = []; }
+
+      renderGraph();
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки: ' + e.message);
+    }
+  }
+
+  // --- Graph constants ---
+  const NODE_W = 180;
+  const NODE_H = 56;
+  const ARROW_SIZE = 6;
+
+  // Module-level references (set once after SVG is created)
+  let svgEl, graphViewport;
+
+  function applyTransform() {
+    graphViewport.setAttribute('transform', `translate(${panX},${panY}) scale(${scale})`);
+    const dotSpacing = 20 * scale;
+    const ox = ((panX % dotSpacing) + dotSpacing) % dotSpacing;
+    const oy = ((panY % dotSpacing) + dotSpacing) % dotSpacing;
+    svgEl.style.backgroundImage = 'radial-gradient(circle, #d1d5db 1px, transparent 1px)';
+    svgEl.style.backgroundSize = `${dotSpacing}px ${dotSpacing}px`;
+    svgEl.style.backgroundPosition = `${ox}px ${oy}px`;
+  }
+
+  function pluginInputs(pluginId) { return PLUGIN_INPUTS[pluginId] || []; }
+  function pluginOutputsFn(pluginId) { return PLUGIN_OUTPUTS[pluginId] || ['result']; }
+
+  function availableSourceNodes(currentNodeId) {
+    const visited = new Set([currentNodeId]);
+    const queue = [currentNodeId];
+    while (queue.length) {
+      const cur = queue.shift();
+      edges.forEach(e => {
+        if (e.to_node_id === cur && !visited.has(e.from_node_id)) {
+          visited.add(e.from_node_id);
+          queue.push(e.from_node_id);
+        }
+      });
+    }
+    return nodes.filter(n => n.id !== currentNodeId && visited.has(n.id));
+  }
+
+  function getMappedInputs(node) {
+    // Returns the set of input fields that are already mapped (consumed by input_mapping)
+    const mapped = new Set((node.input_mapping || []).map(m => m.target_field));
+    return mapped;
+  }
+
+  function getAvailableInputs(node) {
+    const definedInputs = new Set(pluginInputs(node.plugin_id));
+
+    // Build a map: targetField -> existing mapping
+    const mappingByField = {};
+    (node.input_mapping || []).forEach(m => {
+      const match = m.source ? m.source.match(/^\$([^.]+)\.output\.(.+)$/) : null;
+      if (match) mappingByField[m.target_field] = { srcNodeId: match[1], srcField: match[2], source: m.source };
+    });
+
+    // Show all defined inputs (from PLUGIN_INPUTS) + any extra fields in input_mapping
+    const allFields = new Set([...definedInputs, ...Object.keys(mappingByField)]);
+    return Array.from(allFields).map(field => {
+      const mapping = mappingByField[field];
+      if (mapping) {
+        const srcNode = nodes.find(n => n.id === mapping.srcNodeId);
+        return {
+          targetField: field,
+          sourceNode: srcNode || null,
+          sourceField: mapping.srcField,
+          source: mapping.source,
+          isMapped: true,
+          isDefined: definedInputs.has(field),
+        };
+      } else {
+        return {
+          targetField: field,
+          sourceNode: null,
+          sourceField: null,
+          source: null,
+          isMapped: false,
+          isDefined: definedInputs.has(field),
+        };
+      }
+    });
+  }
+
+  // --- Layout ---
+  function layoutNodes() {
+    const inDeg = {};
+    nodes.forEach(n => { inDeg[n.id] = 0; });
+    edges.forEach(e => { if (inDeg[e.to_node_id] !== undefined) inDeg[e.to_node_id]++; });
+
+    const depth = {};
+    const queue = nodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
+    queue.forEach(id => { depth[id] = 0; });
+    const adj = {};
+    edges.forEach(e => {
+      if (!adj[e.from_node_id]) adj[e.from_node_id] = [];
+      adj[e.from_node_id].push(e.to_node_id);
+    });
+    let qi = 0;
+    while (qi < queue.length) {
+      const cur = queue[qi++];
+      (adj[cur] || []).forEach(next => {
+        if (depth[next] === undefined) {
+          depth[next] = depth[cur] + 1;
+          queue.push(next);
+        }
+      });
+    }
+    nodes.forEach(n => { if (depth[n.id] === undefined) depth[n.id] = 0; });
+
+    const cols = {};
+    nodes.forEach(n => {
+      const c = depth[n.id];
+      if (!cols[c]) cols[c] = [];
+      cols[c].push(n);
+    });
+
+    const svgW = svgEl.clientWidth || 700;
+    const colCount = Math.max(1, Math.max(...Object.keys(cols).map(Number)) + 1);
+    const colSpacing = Math.max(NODE_W + 80, (svgW - 40) / colCount);
+    const rowSpacing = NODE_H + 60;
+    const svgH = Math.max(200, nodes.length * rowSpacing + 80);
+
+    const pos = {};
+    Object.entries(cols).forEach(([c, bucket]) => {
+      const x = parseInt(c) * colSpacing + 20;
+      const totalH = bucket.length * rowSpacing;
+      const offsetY = (svgH - totalH) / 2;
+      bucket.forEach((n, ri) => {
+        pos[n.id] = { x, y: offsetY + ri * rowSpacing + 20 };
+      });
+    });
+
+    svgEl.style.minHeight = svgH + 'px';
+    return pos;
+  }
+
+  // --- Render graph ---
+  function renderGraph() {
+    document.getElementById('graph-loading').classList.add('hidden');
+    svgEl = document.getElementById('graph-svg');  // always re-fetch in case of SPA navigation
+    svgEl.innerHTML = '';
+
+    const pos = layoutNodes();
+    _nodePositions = pos;  // persist for use outside renderGraph
+
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    svgEl.appendChild(defs);
+
+    const mkMarker = (id, color) => {
+      const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+      m.setAttribute('id', id);
+      m.setAttribute('markerWidth', ARROW_SIZE);
+      m.setAttribute('markerHeight', ARROW_SIZE * 0.75);
+      m.setAttribute('refX', ARROW_SIZE);
+      m.setAttribute('refY', ARROW_SIZE * 0.375);
+      m.setAttribute('orient', 'auto');
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      p.setAttribute('points', `0 0, ${ARROW_SIZE} ${ARROW_SIZE * 0.375}, 0 ${ARROW_SIZE * 0.75}`);
+      p.setAttribute('fill', color);
+      m.appendChild(p);
+      return m;
+    };
+    defs.appendChild(mkMarker('arrow-default', '#AAAAAA'));
+    defs.appendChild(mkMarker('arrow-selected', '#0066CC'));
+    defs.appendChild(mkMarker('arrow-connect', '#16a34a'));
+
+    const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+    filter.setAttribute('id', 'shadow');
+    filter.setAttribute('x', '-20%'); filter.setAttribute('y', '-20%');
+    filter.setAttribute('width', '140%'); filter.setAttribute('height', '140%');
+    const fds = document.createElementNS('http://www.w3.org/2000/svg', 'feDropShadow');
+    fds.setAttribute('dx', '0'); fds.setAttribute('dy', '2');
+    fds.setAttribute('stdDeviation', '3'); fds.setAttribute('flood-opacity', '0.08');
+    filter.appendChild(fds);
+    defs.appendChild(filter);
+
+    svgEl.style.cursor = 'grab';
+    graphViewport = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    graphViewport.setAttribute('id', 'graph-viewport');
+    svgEl.appendChild(graphViewport);
+
+    applyTransform();
+
+    // Edges
+    const edgeEls = [];
+    edges.forEach((edge, idx) => {
+      const from = pos[edge.from_node_id];
+      const to = pos[edge.to_node_id];
+      if (!from || !to) return;
+
+      const sx = from.x + NODE_W;
+      const sy = from.y + NODE_H / 2;
+      const tx = to.x;
+      const ty = to.y + NODE_H / 2;
+      const cx = sx + (tx - sx) * 0.5;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const isSelected = idx === selectedEdgeIndex;
+      path.setAttribute('d', `M ${sx} ${sy} C ${cx} ${sy}, ${cx} ${ty}, ${tx} ${ty}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', isSelected ? '#0066CC' : '#AAAAAA');
+      path.setAttribute('stroke-width', isSelected ? '2.5' : '1.5');
+      path.setAttribute('marker-end', isSelected ? 'url(#arrow-selected)' : 'url(#arrow-default)');
+      path.setAttribute('stroke-dasharray', isSelected ? 'none' : 'none');
+      path.style.cursor = 'pointer';
+      path.style.transition = 'stroke 0.15s, stroke-width 0.15s';
+      path.dataset.edgeIdx = idx;
+      path.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (connectMode) return;
+        selectedEdgeIndex = selectedEdgeIndex === idx ? null : idx;
+        selectedNodeId = null;
+        deselectNode();
+        renderGraph();
+        updateHint('delete-edge');
+      });
+      path.addEventListener('mouseenter', () => {
+        if (selectedEdgeIndex !== idx && connectMode === false) {
+          path.setAttribute('stroke', '#ef4444');
+          path.setAttribute('stroke-width', '2');
+        }
+      });
+      path.addEventListener('mouseleave', () => {
+        if (selectedEdgeIndex !== idx) {
+          path.setAttribute('stroke', '#AAAAAA');
+          path.setAttribute('stroke-width', '1.5');
+        }
+      });
+      edgeEls.push(path);
+      graphViewport.appendChild(path);
+    });
+
+    // Nodes
+    nodes.forEach(node => {
+      const p = pos[node.id];
+      if (!p) return;
+      const color = PLUGIN_COLORS[node.plugin_id] || '#9ca3af';
+      const label = node.name || node.id || '';
+      const isSelected = node.id === selectedNodeId;
+      const isConnectFrom = node.id === connectFromNodeId;
+
+      const ng = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      ng.style.cursor = 'pointer';
+
+      if (isSelected || isConnectFrom) {
+        const glow = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        glow.setAttribute('x', p.x - 4); glow.setAttribute('y', p.y - 4);
+        glow.setAttribute('width', NODE_W + 8); glow.setAttribute('height', NODE_H + 8);
+        glow.setAttribute('rx', '12');
+        glow.setAttribute('fill', 'none');
+        glow.setAttribute('stroke', isConnectFrom ? '#16a34a' : '#0066CC');
+        glow.setAttribute('stroke-width', '2');
+        glow.setAttribute('stroke-dasharray', isConnectFrom ? '6 3' : 'none');
+        graphViewport.appendChild(glow);
+      }
+
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', p.x); rect.setAttribute('y', p.y);
+      rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
+      rect.setAttribute('rx', '8');
+      rect.setAttribute('fill', '#ffffff');
+      rect.setAttribute('stroke', isSelected ? '#0066CC' : color);
+      rect.setAttribute('stroke-width', isSelected ? '2.5' : '1.5');
+      rect.setAttribute('filter', 'url(#shadow)');
+      ng.appendChild(rect);
+
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', p.x + 14); dot.setAttribute('cy', p.y + 18);
+      dot.setAttribute('r', '4'); dot.setAttribute('fill', color);
+      ng.appendChild(dot);
+
+      const maxChars = Math.floor((NODE_W - 36) / 7.2);
+      const words = label.split(' ');
+      let line1 = '', line2 = '';
+      for (const w of words) {
+        if ((line1 + (line1 ? ' ' : '') + w).length <= maxChars) line1 += (line1 ? ' ' : '') + w;
+        else line2 += (line2 ? ' ' : '') + w;
+      }
+      if (line2.length > maxChars) line2 = line2.slice(0, maxChars - 1) + '…';
+
+      const t1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t1.setAttribute('x', p.x + 26); t1.setAttribute('y', p.y + (line2 ? 16 : 22));
+      t1.setAttribute('font-size', '12'); t1.setAttribute('font-family', 'system-ui,sans-serif');
+      t1.setAttribute('font-weight', '500'); t1.setAttribute('fill', '#222222');
+      t1.textContent = line1;
+      ng.appendChild(t1);
+
+      if (line2) {
+        const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t2.setAttribute('x', p.x + 26); t2.setAttribute('y', p.y + 29);
+        t2.setAttribute('font-size', '11'); t2.setAttribute('font-family', 'system-ui,sans-serif');
+        t2.setAttribute('fill', '#555555');
+        t2.textContent = line2;
+        ng.appendChild(t2);
+      }
+
+      const st = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      st.setAttribute('x', p.x + 10); st.setAttribute('y', p.y + NODE_H - 8);
+      st.setAttribute('font-size', '10'); st.setAttribute('font-family', 'system-ui,sans-serif');
+      st.setAttribute('fill', color); st.setAttribute('opacity', '0.7');
+      st.textContent = node.plugin_id || '';
+      ng.appendChild(st);
+
+      ng.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (connectMode) handleConnectClick(node.id);
+        else selectNode(node.id);
+      });
+
+      graphViewport.appendChild(ng);
+    });
+
+    // SVG interactions
+    let dragStartX = 0, dragStartY = 0;
+    svgEl.addEventListener('mousedown', (e) => {
+      if (e.target.closest('g')) return;
+      isPanning = true;
+      dragStartX = lastX = e.clientX;
+      dragStartY = lastY = e.clientY;
+      svgEl.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      panX += e.clientX - lastX; panY += e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      applyTransform();
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (!isPanning) return;
+      isPanning = false;
+      svgEl.style.cursor = 'grab';
+      const moved = Math.abs(e.clientX - dragStartX) > 5 || Math.abs(e.clientY - dragStartY) > 5;
+      if (moved) svgEl._wasDragged = true;
+    });
+    svgEl.addEventListener('click', () => {
+      if (svgEl._wasDragged) { svgEl._wasDragged = false; return; }
+      if (connectMode) return;
+      selectedEdgeIndex = null;
+      deselectNode();
+      renderGraph();
+    });
+    svgEl.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 0.9;
+      scale = Math.min(Math.max(scale * factor, 0.1), 4);
+      applyTransform();
+    }, { passive: false });
+    svgEl.addEventListener('dblclick', () => { panX = 0; panY = 0; scale = 1; applyTransform(); });
+    svgEl.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  function updateHint(mode) {
+    const hintD = document.getElementById('hint-default');
+    const hintC = document.getElementById('hint-connect');
+    const hintDel = document.getElementById('hint-delete-edge');
+    const delBtn = document.getElementById('delete-edge-btn');
+    const delSuffix = document.getElementById('hint-delete-edge-suffix');
+    hintD.classList.add('hidden');
+    hintC.classList.add('hidden');
+    hintDel.classList.add('hidden');
+    delBtn.classList.add('hidden');
+    delSuffix.classList.add('hidden');
+    if (mode === 'connect') { hintC.classList.remove('hidden'); }
+    else if (mode === 'delete-edge') {
+      hintDel.classList.remove('hidden');
+      delBtn.classList.remove('hidden');
+      delSuffix.classList.remove('hidden');
+    }
+    else { hintD.classList.remove('hidden'); }
+  }
+
+  // --- Connect mode ---
+  function setConnectMode(on) {
+    connectMode = on;
+    connectFromNodeId = null;
+    selectedEdgeIndex = null;
+    const btn = document.getElementById('connect-mode-btn');
+    if (on) {
+      btn.classList.add('bg-brand', 'text-white', 'border-brand');
+      updateHint('connect');
+    } else {
+      btn.classList.remove('bg-brand', 'text-white', 'border-brand');
+      updateHint(null);
+    }
+    renderGraph();
+  }
+
+  function handleConnectClick(targetNodeId) {
+    if (!connectFromNodeId) {
+      connectFromNodeId = targetNodeId;
+      renderGraph();
+    } else if (connectFromNodeId !== targetNodeId) {
+      const exists = edges.some(e => e.from_node_id === connectFromNodeId && e.to_node_id === targetNodeId);
+      if (!exists) {
+        // Determine suggested field before pushing the edge
+        let suggested = null;
+        const srcNode = nodes.find(n => n.id === connectFromNodeId);
+        const tgtNode = nodes.find(n => n.id === targetNodeId);
+        if (srcNode && tgtNode) {
+          const srcOuts = pluginOutputsFn(srcNode.plugin_id);
+          const tgtIns = pluginInputs(tgtNode.plugin_id);
+          suggested = srcOuts.find(f => tgtIns.includes(f)) || null;
+          if (suggested) {
+            if (!tgtNode.input_mapping) tgtNode.input_mapping = [];
+            tgtNode.input_mapping.push({
+              target_field: suggested,
+              source: `$${connectFromNodeId}.output.${suggested}`,
+              transform: 'passthrough',
+            });
+          }
+        }
+        edges.push({ from_node_id: connectFromNodeId, to_node_id: targetNodeId, input_target_field: suggested, output_field: suggested });
+      }
+      connectFromNodeId = null;
+      setConnectMode(false);
+      if (selectedNodeId) selectNode(selectedNodeId);
+    } else {
+      connectFromNodeId = null;
+      renderGraph();
+    }
+  }
+
+  document.getElementById('connect-mode-btn').addEventListener('click', () => setConnectMode(!connectMode));
+
+  document.getElementById('delete-edge-btn').addEventListener('click', () => {
+    if (selectedEdgeIndex !== null) {
+      edges.splice(selectedEdgeIndex, 1);
+      selectedEdgeIndex = null;
+      renderGraph();
+      updateHint(null);
+    }
+  });
+
+  // --- Keyboard: delete edge ---
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (connectMode) { setConnectMode(false); return; }
+      if (selectedEdgeIndex !== null) {
+        selectedEdgeIndex = null;
+        renderGraph();
+        updateHint(null);
+      }
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedEdgeIndex !== null) {
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT') return;
+      e.preventDefault();
+      edges.splice(selectedEdgeIndex, 1);
+      selectedEdgeIndex = null;
+      renderGraph();
+      updateHint(null);
+    }
+  });
+
+  // --- Node selection ---
+  function selectNode(nodeId) {
+    selectedNodeId = nodeId;
+    selectedEdgeIndex = null;
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    document.getElementById('node-panel').classList.remove('hidden');
+    document.getElementById('node-panel-empty').classList.add('hidden');
+    document.getElementById('node-config-error').classList.add('hidden');
+
+    document.getElementById('node-name-input').value = node.name || '';
+    document.getElementById('node-type-select').value = node.plugin_id || '';
+    document.getElementById('node-desc-input').value = node.description || '';
+
+    // Prompt select for llm nodes
+    const promptSection = document.getElementById('prompt-section');
+    const promptSelect = document.getElementById('node-prompt-select');
+    if (node.plugin_id === 'llm') {
+      promptSection.classList.remove('hidden');
+      promptSelect.innerHTML = '<option value="">— без промпта —</option>' +
+        prompts.map(p => `<option value="${p.id}" ${node.prompt_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+    } else {
+      promptSection.classList.add('hidden');
+    }
+
+    renderNodeIO(node);
+    renderParams(node);
+    renderGraph();
+    updateHint(null);
+
+    // Center the selected node in the viewport (after renderGraph stores positions)
+    requestAnimationFrame(() => {
+      const svgEl = document.getElementById('graph-svg');
+      const pos = _nodePositions[node.id];
+      if (pos) {
+        const svgW = svgEl.clientWidth || 600;
+        const svgH = svgEl.clientHeight || 400;
+        panX = (svgW / 2) - (pos.x + NODE_W / 2) * scale;
+        panY = (svgH / 2) - (pos.y + NODE_H / 2) * scale;
+        applyTransform();
+      }
+    });
+  }
+
+  function deselectNode() {
+    selectedNodeId = null;
+    document.getElementById('node-panel').classList.add('hidden');
+    document.getElementById('node-panel-empty').classList.remove('hidden');
+  }
+
+  document.getElementById('close-node-panel').addEventListener('click', () => {
+    deselectNode();
+    renderGraph();
+    updateHint(null);
+  });
+
+  // --- Remap input: click "подключить" → show dropdown of available sources ---
+  const insList = document.getElementById('node-inputs-list');
+  insList.addEventListener('click', (e) => {
+    const btn = e.target.closest('.remap-input-btn');
+    if (!btn) return;
+    const targetField = btn.dataset.targetField;
+    const container = btn.closest('[data-unmapped-input]');
+
+    // Build options: source nodes with outputs already connected TO this node
+    const connectedEdges = edges.filter(e => e.to_node_id === selectedNodeId);
+    const compatibleOptions = [];
+    const incompatibleOptions = [];
+    const seen = new Set();
+    for (const edge of connectedEdges) {
+      const srcNode = nodes.find(n => n.id === edge.from_node_id);
+      if (!srcNode) continue;
+      const srcOuts = pluginOutputsFn(srcNode.plugin_id);
+      // Match output fields by name (best-effort — output field ≈ target input)
+      for (const out of srcOuts) {
+        const key = srcNode.id + ':' + out;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const opt = { nodeId: srcNode.id, nodeName: srcNode.name || srcNode.plugin_id, field: out };
+        if (pluginInputs(currentNode ? currentNode.plugin_id : '').includes(out)) {
+          compatibleOptions.push(opt);
+        } else {
+          incompatibleOptions.push(opt);
+        }
+      }
+    }
+    const allOpts = [...compatibleOptions, ...incompatibleOptions];
+    if (allOpts.length === 0) {
+      showToast('warning', 'Нет доступных выходов для подключения.');
+      return;
+    }
+
+    // Remove any existing dropdown
+    const existing = document.getElementById('remap-dropdown');
+    if (existing) existing.remove();
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'remap-dropdown';
+    dropdown.className = 'absolute z-50 bg-white border border-brand-light rounded-lg shadow-lg p-2 text-xs min-w-48 max-h-48 overflow-y-auto';
+    dropdown.style.top = btn.getBoundingClientRect().bottom + window.scrollY + 4 + 'px';
+    dropdown.style.left = btn.getBoundingClientRect().left + window.scrollX + 'px';
+    dropdown.innerHTML = compatibleOptions.length > 0
+      ? compatibleOptions.map(o => `<button class="remap-option block w-full text-left px-2 py-1 rounded hover:bg-brand-light ${!compatibleOptions.includes(o) ? 'text-brand-muted' : ''}" data-node="${o.nodeId}" data-field="${o.field}">${escapeHtml(o.nodeName)} → ${o.field}</button>`).join('')
+        + (incompatibleOptions.length > 0 ? '<div class="border-t border-brand-light my-1"></div>' : '')
+        + incompatibleOptions.map(o => `<button class="remap-option block w-full text-left px-2 py-1 rounded hover:bg-brand-light text-brand-muted" data-node="${o.nodeId}" data-field="${o.field}">${escapeHtml(o.nodeName)} → ${o.field}</button>`).join('')
+      : incompatibleOptions.map(o => `<button class="remap-option block w-full text-left px-2 py-1 rounded hover:bg-brand-light" data-node="${o.nodeId}" data-field="${o.field}">${escapeHtml(o.nodeName)} → ${o.field}</button>`).join('');
+
+    document.body.appendChild(dropdown);
+
+    dropdown.addEventListener('click', (ev) => {
+      const opt = ev.target.closest('.remap-option');
+      if (!opt) return;
+      const srcNodeId = opt.dataset.node;
+      const srcField = opt.dataset.field;
+      const srcNode = nodes.find(n => n.id === srcNodeId);
+      const tgtNode = nodes.find(n => n.id === selectedNodeId);
+      if (!srcNode || !tgtNode) return;
+
+      // Remove existing mapping for this target field
+      if (tgtNode.input_mapping) {
+        tgtNode.input_mapping = tgtNode.input_mapping.filter(m => m.target_field !== targetField);
+      }
+      // Add new mapping
+      if (!tgtNode.input_mapping) tgtNode.input_mapping = [];
+      tgtNode.input_mapping.push({
+        target_field: targetField,
+        source: `$${srcNodeId}.output.${srcField}`,
+        transform: 'passthrough',
+      });
+      // Add edge if not already present
+      const edgeExists = edges.some(e => e.from_node_id === srcNodeId && e.to_node_id === selectedNodeId);
+      if (!edgeExists) {
+        edges.push({ from_node_id: srcNodeId, to_node_id: selectedNodeId, input_target_field: targetField, output_field: srcField });
+      }
+      dropdown.remove();
+      renderGraph();
+      renderNodeIO(tgtNode);
+      showToast('success', `Подключено: ${srcField} → ${targetField}`);
+    });
+
+    const closeHandler = (ev) => {
+      if (!dropdown.contains(ev.target) && ev.target !== btn) {
+        dropdown.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  });
+
+  // --- Disconnect mapped input ---
+  insList.addEventListener('click', (e) => {
+    const btn = e.target.closest('.disconnect-input-btn');
+    if (!btn) return;
+    const targetField = btn.dataset.targetField;
+    const tgtNode = nodes.find(n => n.id === selectedNodeId);
+    if (!tgtNode) return;
+
+    // Find the mapping for this field
+    const mapping = tgtNode.input_mapping
+      ? tgtNode.input_mapping.find(m => m.target_field === targetField)
+      : null;
+
+    if (mapping) {
+      // Parse source like "$uuid.output.field"
+      const srcMatch = mapping.source && mapping.source.match(/^\$(.+)\.output\.(.+)$/);
+      if (srcMatch) {
+        const srcNodeId = srcMatch[1];
+        const srcField = srcMatch[2];
+        // Remove the edge: from this source node with this field
+        for (let i = edges.length - 1; i >= 0; i--) {
+          const edge = edges[i];
+          if (edge.from_node_id === srcNodeId &&
+              edge.to_node_id === selectedNodeId &&
+              (edge.input_target_field === srcField || edge.input_target_field === targetField)) {
+            edges.splice(i, 1);
+            break;
+          }
+        }
+      }
+      // Remove the mapping
+      tgtNode.input_mapping = tgtNode.input_mapping.filter(m => m.target_field !== targetField);
+    }
+
+    renderGraph();
+    renderNodeIO(tgtNode);
+    showToast('success', 'Связь удалена.');
+  });
+
+  // --- Disconnect output ---
+  document.getElementById('node-outputs-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.disconnect-output-btn');
+    if (!btn) return;
+    const edgeIdx = parseInt(btn.dataset.edgeIdx, 10);
+    if (isNaN(edgeIdx) || edgeIdx < 0 || edgeIdx >= edges.length) return;
+    const edge = edges[edgeIdx];
+    const srcNode = nodes.find(n => n.id === edge.from_node_id);
+    // Remove mapping on the target node for this edge's field
+    const tgtNode = nodes.find(n => n.id === edge.to_node_id);
+    const field = edge.input_target_field;
+    if (tgtNode && field && tgtNode.input_mapping) {
+      tgtNode.input_mapping = tgtNode.input_mapping.filter(m => m.target_field !== field);
+    }
+    edges.splice(edgeIdx, 1);
+    if (srcNode) renderNodeIO(srcNode);
+    renderGraph();
+    showToast('success', 'Связь удалена.');
+  });
+
+  // --- Render I/O ---
+  function renderNodeIO(node) {
+    const outsList = document.getElementById('node-outputs-list');
+
+    // Inputs: each of this node's defined inputs, marked as mapped/unmapped
+    const availInputs = getAvailableInputs(node);
+    if (availInputs.length === 0) {
+      insList.innerHTML = '<p class="text-xs text-brand-muted italic">Нет входов для этого узла</p>';
+    } else {
+      insList.innerHTML = availInputs.map(av => {
+        if (av.isMapped && av.sourceNode) {
+          const dotColor = PLUGIN_COLORS[av.sourceNode.plugin_id] || '#6b7280';
+          return `
+            <div class="flex items-center gap-1.5 text-xs py-0.5 text-brand-muted group">
+              <span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:${dotColor};flex-shrink:0"></span>
+              <span class="font-mono text-xs">${av.sourceField}</span>
+              <span class="text-brand-muted mx-0.5">→</span>
+              <span class="font-mono text-xs">${av.targetField}</span>
+              <button class="disconnect-input-btn ml-auto px-1 py-0.5 rounded text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100" data-target-field="${av.targetField}" title="Удалить связь">✕</button>
+            </div>`;
+        } else {
+          return `
+            <div class="flex items-center gap-1.5 text-xs py-0.5 text-brand-muted opacity-40" data-unmapped-input="${av.targetField}">
+              <span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:#d1d5db;flex-shrink:0"></span>
+              <span class="text-brand-muted mx-0.5 italic">? →</span>
+              <span class="font-mono text-xs italic">${av.targetField}</span>
+              <button class="remap-input-btn ml-auto px-1.5 py-0.5 rounded text-xs border border-brand-light text-brand hover:bg-brand hover:text-white transition-colors" data-target-field="${av.targetField}">подключить</button>
+            </div>`;
+        }
+      }).join('');
+    }
+
+    // Outputs: show this node's outputs and where each is connected
+    const nodeColor = PLUGIN_COLORS[node.plugin_id] || '#6b7280';
+    const nodeOutputs = pluginOutputsFn(node.plugin_id);
+
+    // Build map: this node's output field -> edge info
+    const outgoingEdges = edges.filter(e => e.from_node_id === node.id);
+    const outputMap = {};
+    outgoingEdges.forEach(edge => {
+      const srcField = edge.output_field || edge.input_target_field || '';
+      if (!outputMap[srcField]) outputMap[srcField] = [];
+      const tgtNode = nodes.find(n => n.id === edge.to_node_id);
+      outputMap[srcField].push({ edge, tgtNode });
+    });
+
+    outsList.innerHTML = nodeOutputs.map(out => {
+      const connections = outputMap[out] || [];
+      if (connections.length === 0) {
+        return `
+          <div class="flex items-center gap-1.5 text-xs py-0.5 text-brand-muted opacity-40">
+            <span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:${nodeColor};flex-shrink:0"></span>
+            <span class="font-mono text-xs italic">${out}</span>
+            <span class="text-brand-muted mx-0.5 italic">→ —</span>
+          </div>`;
+      }
+      return connections.map(conn => `
+        <div class="flex items-center gap-1.5 text-xs py-0.5 text-brand-muted group">
+          <span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:${nodeColor};flex-shrink:0"></span>
+          <span class="font-mono text-xs">${out}</span>
+          <span class="text-brand-muted mx-0.5">→</span>
+          <span class="font-mono text-xs">${conn.tgtNode ? (conn.tgtNode.name || conn.tgtNode.plugin_id) : conn.edge.to_node_id}</span>
+          <button class="disconnect-output-btn ml-auto px-1 py-0.5 rounded text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100" data-edge-idx="${edges.indexOf(conn.edge)}" title="Удалить связь">✕</button>
+        </div>`).join('');
+    }).join('');
+  }
+
+  // --- Render parameters ---
+  function renderParams(node) {
+    const list = document.getElementById('params-list');
+    const params = node.parameters || {};
+    const keys = Object.keys(params);
+
+    if (!keys.length) {
+      list.innerHTML = '<p class="text-xs text-brand-muted italic">Нет параметров.</p>';
+      return;
+    }
+
+    list.innerHTML = keys.map(key => {
+      const ptype = PARAM_TYPES[key] || { type: 'input' };
+      const val = params[key];
+      const valStr = typeof val === 'boolean' ? '' : String(val);
+
+      if (ptype.type === 'bool') {
+        return `
+          <label class="flex items-center gap-2 cursor-pointer text-xs">
+            <input type="checkbox" class="param-bool" data-key="${key}" ${val ? 'checked' : ''}>
+            <span class="font-mono text-brand-dark">${key}</span>
+          </label>
+        `;
+      }
+      if (ptype.type === 'select') {
+        return `
+          <div class="flex items-center gap-1.5">
+            <span class="font-mono text-xs text-brand-muted w-24 shrink-0 truncate">${key}</span>
+            <select class="input-field text-xs py-1 flex-1 param-select" data-key="${key}">
+              ${ptype.options.map(opt => `<option value="${opt}" ${String(val) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+            </select>
+          </div>
+        `;
+      }
+      return `
+        <div class="flex items-center gap-1.5">
+          <span class="font-mono text-xs text-brand-muted w-24 shrink-0 truncate">${key}</span>
+          <input type="text" value="${escapeAttr(valStr)}"
+            class="input-field text-xs py-1 flex-1 param-text" data-key="${key}">
+        </div>
+      `;
+    }).join('');
+
+    list.querySelectorAll('.param-bool').forEach(el => {
+      el.addEventListener('change', () => {
+        const node2 = nodes.find(n => n.id === selectedNodeId);
+        if (node2) { node2.parameters[el.dataset.key] = el.checked; }
+      });
+    });
+    list.querySelectorAll('.param-select').forEach(el => {
+      el.addEventListener('change', () => {
+        const node2 = nodes.find(n => n.id === selectedNodeId);
+        if (node2) { node2.parameters[el.dataset.key] = el.value; }
+      });
+    });
+    list.querySelectorAll('.param-text').forEach(el => {
+      el.addEventListener('change', () => {
+        const node2 = nodes.find(n => n.id === selectedNodeId);
+        if (!node2) return;
+        const v = el.value;
+        try { node2.parameters[el.dataset.key] = JSON.parse(v); }
+        catch { node2.parameters[el.dataset.key] = v; }
+      });
+    });
+  }
+
+  // --- Apply node changes ---
+  document.getElementById('apply-node-btn').addEventListener('click', () => {
+    if (!selectedNodeId) return;
+    const node = nodes.find(n => n.id === selectedNodeId);
+    if (!node) return;
+
+    const name = document.getElementById('node-name-input').value.trim();
+    const type = document.getElementById('node-type-select').value;
+    const desc = document.getElementById('node-desc-input').value.trim();
+
+    if (!name) {
+      const err = document.getElementById('node-config-error');
+      err.textContent = 'Название обязательно';
+      err.classList.remove('hidden');
+      return;
+    }
+
+    node.name = name;
+    node.plugin_id = type || node.plugin_id;
+    node.description = desc;
+    if (node.plugin_id === 'llm') {
+      node.prompt_id = document.getElementById('node-prompt-select').value || null;
+    }
+
+    document.getElementById('wf-name-breadcrumb').textContent =
+      document.getElementById('wf-name-input').value.trim() || 'Без названия';
+
+    renderGraph();
+    showToast('success', 'Узел обновлён.');
+  });
+
+  document.getElementById('delete-node-btn').addEventListener('click', () => {
+    if (!selectedNodeId) return;
+    if (!confirm('Удалить узел?')) return;
+    deleteNode(selectedNodeId);
+  });
+
+  function deleteNode(nodeId) {
+    nodes = nodes.filter(n => n.id !== nodeId);
+    edges = edges.filter(e => e.from_node_id !== nodeId && e.to_node_id !== nodeId);
+    if (selectedNodeId === nodeId) deselectNode();
+    renderGraph();
+    updateHint(null);
+  }
+
+  // --- Clear graph ---
+  document.getElementById('clear-graph-btn').addEventListener('click', () => {
+    if (!confirm('Очистить граф? Все узлы и связи будут удалены.')) return;
+    nodes = []; edges = [];
+    deselectNode();
+    renderGraph();
+    updateHint(null);
+  });
+
+  // --- Save ---
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('save-btn');
+    btn.disabled = true; btn.textContent = 'Сохранение...';
+    try {
+      const updated = await api.workflows.update(wfId, {
+        name: document.getElementById('wf-name-input').value.trim(),
+        description: document.getElementById('wf-desc-input').value.trim(),
+        nodes, edges,
+      });
+      workflow = updated;
+      showToast('success', 'Воркфлоу сохранён.');
+    } catch (e) {
+      showToast('error', 'Ошибка: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Сохранить';
+    }
+  });
+
+  // --- Helpers ---
+  function escapeHtml(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return (str || '').replace(/"/g, '&quot;');
+  }
+
+  loadWorkflow();
+</script>
+{% endblock %}

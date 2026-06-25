@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Воркфлоу - Lectify{% endblock %}
+
+{% block content %}
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+  <h1 class="text-2xl font-bold text-brand-dark">Воркфлоу</h1>
+  <div class="flex items-center gap-3">
+    <button id="create-btn" class="btn-primary text-sm flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      Создать воркфлоу
+    </button>
+  </div>
+</div>
+
+<div class="max-w-5xl mx-auto">
+  <div id="workflows-list" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3"></div>
+  <div id="workflows-empty" class="hidden text-center py-16">
+    <p class="text-brand-muted">Воркфлоу пока нет.</p>
+  </div>
+</div>
+
+<!-- Create modal -->
+<div id="create-modal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+    <h2 class="text-lg font-bold text-brand-dark mb-4">Создать воркфлоу</h2>
+    <form id="workflow-form" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-brand-dark mb-1" for="wf-name">Название</label>
+        <input type="text" id="wf-name" class="input-field" required>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-brand-dark mb-1" for="wf-desc">Описание</label>
+        <textarea id="wf-desc" class="input-field" rows="3"></textarea>
+      </div>
+      <div id="wf-form-error" class="text-sm text-red-600 hidden"></div>
+      <div class="flex gap-3 justify-end">
+        <button type="button" id="cancel-wf-btn" class="btn-secondary">Отмена</button>
+        <button type="submit" class="btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+  import { api } from '/static/js/api.js';
+  import { showToast } from '/static/js/components/toast.js';
+
+  let workflows = [];
+
+  async function loadWorkflows() {
+    try {
+      workflows = await api.workflows.list();
+      renderWorkflows();
+    } catch (e) {
+      showToast('error', 'Ошибка загрузки воркфлоу: ' + e.message);
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function renderWorkflows() {
+    const list = document.getElementById('workflows-list');
+    const empty = document.getElementById('workflows-empty');
+
+    if (!workflows.length) {
+      list.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    list.innerHTML = workflows.map(w => `
+      <div class="card hover:border-brand transition-colors flex flex-col">
+        <div class="flex-1 mb-3">
+          <h3 class="font-semibold text-brand-dark">${escapeHtml(w.name)}</h3>
+          <p class="text-sm text-brand-muted mt-0.5">${escapeHtml(w.description || 'Без описания')}</p>
+        </div>
+        <a href="/workflows/${w.id}" class="btn-secondary text-xs py-1.5 text-center w-full block box-border">Редактировать</a>
+        <div class="mt-3 text-xs text-brand-muted">
+          <span>${w.is_public ? 'Публичный' : 'Приватный'}</span>
+          <span class="mx-1">·</span>
+          <span>${w.created_at ? new Date(w.created_at).toLocaleDateString('ru-RU') : '-'}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function openCreateModal() {
+    document.getElementById('wf-name').value = '';
+    document.getElementById('wf-desc').value = '';
+    document.getElementById('wf-form-error').classList.add('hidden');
+    const m = document.getElementById('create-modal');
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+  }
+
+  function closeModal() {
+    const m = document.getElementById('create-modal');
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+  }
+
+  document.getElementById('create-btn').addEventListener('click', openCreateModal);
+  document.getElementById('cancel-wf-btn').addEventListener('click', closeModal);
+  document.getElementById('create-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+
+  document.getElementById('workflow-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    const errEl = document.getElementById('wf-form-error');
+    errEl.classList.add('hidden');
+
+    try {
+      await api.workflows.create({
+        name: document.getElementById('wf-name').value,
+        description: document.getElementById('wf-desc').value,
+      });
+      closeModal();
+      loadWorkflows();
+      showToast('success', 'Воркфлоу создан.');
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  loadWorkflows();
+</script>
+{% endblock %}
