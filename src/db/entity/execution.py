@@ -11,9 +11,14 @@ class DBExecution(Base):
     __tablename__ = "executions"
 
     id = Column(String, primary_key=True)
+    # workflow_id: DEPRECATED alias, use workflow_template_id
+    workflow_id = Column(String, nullable=True)  # DEPRECATED
     workflow_template_id = Column(String, ForeignKey("workflow_templates.id", ondelete="SET NULL"), nullable=True)
     file_id = Column(String, nullable=False)
     user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    workflow_name = Column(String, nullable=True)  # human-readable execution name
+    file_name = Column(String, nullable=True)  # input file name
+    language = Column(String, nullable=True, default="ru")  # language for the execution
     status = Column(String, nullable=False)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
@@ -32,6 +37,7 @@ class DBExecutionNode(Base):
     execution_id = Column(String, ForeignKey("executions.id", ondelete="CASCADE"), nullable=False)
     node_template_id = Column(String, ForeignKey("node_templates.id", ondelete="SET NULL"), nullable=True)
     node_id = Column(String, nullable=False)
+    node_name = Column(String, nullable=True)  # human-readable node label
     status = Column(String, nullable=False)
     progress_percent = Column(Integer, nullable=True)
     progress_message = Column(Text, nullable=True)

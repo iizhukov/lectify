@@ -1,71 +1,122 @@
 import uuid
-from typing import Optional
+from typing import Optional, List
 
 from src.db.repository.base import BaseRepository
 from src.db.entity import DBWorkflowTemplate, DBWorkflowPublic
+from src.db.models.workflow_template import WorkflowTemplateModel, PublicWorkflowModel
+from src.db.models.workflow_template import WorkflowGraph
+
+
+def _workflow_to_model(wf: DBWorkflowTemplate) -> WorkflowTemplateModel:
+    def _dt(v):
+        return v.isoformat() if v else None
+
+    graph_data = wf.graph
+    if isinstance(graph_data, dict):
+        graph = WorkflowGraph.model_validate(graph_data)
+    else:
+        graph = WorkflowGraph.model_validate({})
+
+    return WorkflowTemplateModel(
+        id=wf.id,
+        user_id=wf.user_id,
+        name=wf.name,
+        description=wf.description,
+        graph=graph,
+        is_public=wf.is_public,
+        created_at=_dt(wf.created_at),
+        updated_at=_dt(wf.updated_at),
+    )
+
+
+def _public_workflow_to_model(wf: DBWorkflowPublic) -> PublicWorkflowModel:
+    def _dt(v):
+        return v.isoformat() if v else None
+
+    graph_data = wf.graph
+    if isinstance(graph_data, dict):
+        graph = WorkflowGraph.model_validate(graph_data)
+    else:
+        graph = WorkflowGraph.model_validate({})
+
+    return PublicWorkflowModel(
+        id=wf.id,
+        original_workflow_id=wf.original_workflow_id,
+        name=wf.name,
+        description=wf.description,
+        graph=graph,
+        author_id=wf.author_id,
+        usage_count=wf.usage_count,
+        created_at=_dt(wf.created_at),
+    )
 
 
 class WorkflowTemplateRepository(BaseRepository):
 
-    def create(self, data: dict) -> DBWorkflowTemplate:
+    def create(self, data: dict) -> WorkflowTemplateModel:
         with self.session() as s:
             workflow = DBWorkflowTemplate(**data)
             s.add(workflow)
             s.commit()
             s.refresh(workflow)
-            return workflow
+            return _workflow_to_model(workflow)
 
-    def get(self, workflow_id: str) -> Optional[DBWorkflowTemplate]:
+    def get(self, workflow_id: str) -> Optional[WorkflowTemplateModel]:
         with self.session() as s:
-            return s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
+            wf = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
+            if not wf:
+                return None
+            return _workflow_to_model(wf)
 
-    def get_by_user(self, user_id: str):
+    def get_by_user(self, user_id: str) -> List[WorkflowTemplateModel]:
         with self.session() as s:
-            return s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.user_id == user_id).all()
+            wfs = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.user_id == user_id).all()
+            return [_workflow_to_model(w) for w in wfs]
 
-    def get_public(self):
+    def get_public(self) -> List[WorkflowTemplateModel]:
         with self.session() as s:
-            return s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.is_public == True).all()
+            wfs = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.is_public == True).all()
+            return [_workflow_to_model(w) for w in wfs]
 
-    def update(self, workflow_id: str, **kwargs) -> Optional[DBWorkflowTemplate]:
+    def update(self, workflow_id: str, **kwargs) -> Optional[WorkflowTemplateModel]:
         with self.session() as s:
-            workflow = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
-            if not workflow:
+            wf = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
+            if not wf:
                 return None
             for key, value in kwargs.items():
-                setattr(workflow, key, value)
+                setattr(wf, key, value)
             s.commit()
-            s.refresh(workflow)
-            return workflow
+            s.refresh(wf)
+            return _workflow_to_model(wf)
 
     def delete(self, workflow_id: str) -> bool:
         with self.session() as s:
-            workflow = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
-            if not workflow:
+            wf = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
+            if not wf:
                 return False
-            s.delete(workflow)
+            s.delete(wf)
             s.commit()
             return True
 
-    def publish(self, workflow_id: str) -> Optional[DBWorkflowPublic]:
+    def publish(self, workflow_id: str) -> Optional[PublicWorkflowModel]:
         with self.session() as s:
-            workflow = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
-            if not workflow:
+            wf = s.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.id == workflow_id).first()
+            if not wf:
                 return None
             public_wf = DBWorkflowPublic(
                 id=str(uuid.uuid4()),
-                original_workflow_id=workflow.id,
-                name=workflow.name,
-                description=workflow.description,
-                graph=workflow.graph,
-                author_id=workflow.user_id
+                original_workflow_id=wf.id,
+                name=wf.name,
+                description=wf.description,
+                graph=wf.graph,
+                author_id=wf.user_id
             )
             s.add(public_wf)
             s.commit()
             s.refresh(public_wf)
-            return public_wf
+            return _public_workflow_to_model(public_wf)
 
-    def fork(self, public_workflow_id: str, user_id: str) -> Optional[DBWorkflowTemplate]:
+    def fork(self, public_workflow_id: str, user_id: str) -> Optional[WorkflowTemplateModel]:
         with self.session() as s:
             public_wf = s.query(DBWorkflowPublic).filter(DBWorkflowPublic.id == public_workflow_id).first()
             if not public_wf:
@@ -82,4 +133,4 @@ class WorkflowTemplateRepository(BaseRepository):
             s.add(private_workflow)
             s.commit()
             s.refresh(private_workflow)
-            return private_workflow
+            return _workflow_to_model(private_workflow)

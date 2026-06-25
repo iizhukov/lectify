@@ -5,7 +5,7 @@ Seed script - populates database with initial data
 import uuid
 
 from src.db.database import SessionLocal
-from src.db.entities import (
+from src.db.entity import (
     DBUser, DBPlugin, DBNodeTemplate, DBPrompt,
     DBWorkflowTemplate, ExecutionStatus
 )
@@ -228,6 +228,9 @@ def seed_node_templates(session, plugins, prompts):
 
 def seed_workflow_templates(session, node_templates):
     """Create default workflow templates"""
+    # Build plugin_id lookup from node_templates
+    plugin_id_by_name = {t.name: str(t.plugin_id) for t in node_templates}
+
     # Create a basic lecture processing workflow
     template_id = str(uuid.uuid4())
     workflow = {
@@ -236,13 +239,13 @@ def seed_workflow_templates(session, node_templates):
         "description": "Upload audio -> Transcribe -> Format -> Generate notes",
         "graph": {
             "nodes": [
-                {"id": "media_converter", "template_id": node_templates[0].id, "position_x": 100, "position_y": 100},
-                {"id": "speech_to_text", "template_id": node_templates[1].id, "position_x": 300, "position_y": 100},
-                {"id": "text_to_md", "template_id": node_templates[2].id, "position_x": 500, "position_y": 100},
+                {"id": "media_converter", "plugin_id": plugin_id_by_name.get("Media Converter", ""), "name": "Convert Media", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "speech_to_text", "plugin_id": plugin_id_by_name.get("Transcribe Audio", ""), "name": "Transcribe Audio", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "text_to_md", "plugin_id": plugin_id_by_name.get("Format as Markdown", ""), "name": "Format as Markdown", "description": "", "parameters": {}, "input_mapping": []},
             ],
             "edges": [
-                {"from_node": "media_converter", "to_node": "speech_to_text"},
-                {"from_node": "speech_to_text", "to_node": "text_to_md"},
+                {"from_node_id": "media_converter", "to_node_id": "speech_to_text"},
+                {"from_node_id": "speech_to_text", "to_node_id": "text_to_md"},
             ]
         },
         "is_public": True
@@ -261,19 +264,19 @@ def seed_workflow_templates(session, node_templates):
         "description": "Audio -> Transcript -> Markdown -> Summary -> LaTeX -> PDF",
         "graph": {
             "nodes": [
-                {"id": "media_converter", "template_id": node_templates[0].id, "position_x": 100, "position_y": 100},
-                {"id": "speech_to_text", "template_id": node_templates[1].id, "position_x": 300, "position_y": 100},
-                {"id": "text_to_md", "template_id": node_templates[2].id, "position_x": 500, "position_y": 100},
-                {"id": "summarize", "template_id": node_templates[3].id, "position_x": 700, "position_y": 100},
-                {"id": "text_to_latex", "template_id": node_templates[4].id, "position_x": 500, "position_y": 250},
-                {"id": "latex_to_pdf", "template_id": node_templates[5].id, "position_x": 700, "position_y": 250},
+                {"id": "media_converter", "plugin_id": plugin_id_by_name.get("Media Converter", ""), "name": "Convert Media", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "speech_to_text", "plugin_id": plugin_id_by_name.get("Transcribe Audio", ""), "name": "Transcribe Audio", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "text_to_md", "plugin_id": plugin_id_by_name.get("Format as Markdown", ""), "name": "Format as Markdown", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "summarize", "plugin_id": plugin_id_by_name.get("Summarize Content", ""), "name": "Summarize Content", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "text_to_latex", "plugin_id": plugin_id_by_name.get("Convert to LaTeX", ""), "name": "Convert to LaTeX", "description": "", "parameters": {}, "input_mapping": []},
+                {"id": "latex_to_pdf", "plugin_id": plugin_id_by_name.get("Generate PDF", ""), "name": "Generate PDF", "description": "", "parameters": {}, "input_mapping": []},
             ],
             "edges": [
-                {"from_node": "media_converter", "to_node": "speech_to_text"},
-                {"from_node": "speech_to_text", "to_node": "text_to_md"},
-                {"from_node": "text_to_md", "to_node": "summarize"},
-                {"from_node": "text_to_md", "to_node": "text_to_latex"},
-                {"from_node": "text_to_latex", "to_node": "latex_to_pdf"},
+                {"from_node_id": "media_converter", "to_node_id": "speech_to_text"},
+                {"from_node_id": "speech_to_text", "to_node_id": "text_to_md"},
+                {"from_node_id": "text_to_md", "to_node_id": "summarize"},
+                {"from_node_id": "text_to_md", "to_node_id": "text_to_latex"},
+                {"from_node_id": "text_to_latex", "to_node_id": "latex_to_pdf"},
             ]
         },
         "is_public": True

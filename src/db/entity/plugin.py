@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, String, Text, Boolean, JSON, DateTime
+from sqlalchemy import Column, String, Text, Boolean, JSON, DateTime, Integer
 from sqlalchemy.orm import relationship
 
 from src.db.entity.base import Base
@@ -19,7 +19,7 @@ class DBPlugin(Base):
     output_model = Column(String, nullable=False)
     parameters_schema = Column(JSON, nullable=True)
     docker_image = Column(String, nullable=True)
-    node_count: Optional[int] = None  # DEPRECATED: computed from len(node_templates)
+    node_count = Column(Integer, nullable=True)  # DEPRECATED: computed from len(node_templates)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

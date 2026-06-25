@@ -32,25 +32,6 @@ class WorkflowGraph(BaseModelConfig):
     edges: List[WorkflowGraphEdge] = []
 
 
-# ---- LEGACY: position-based models (deprecated, use the flat models above) ----
-# DEPRECATED: use WorkflowGraphNode / WorkflowGraphEdge instead
-class _LegacyWorkflowGraphNode(BaseModelConfig):
-    id: str
-    template_id: str
-    position_x: float = 0
-    position_y: float = 0
-
-
-class _LegacyWorkflowGraphEdge(BaseModelConfig):
-    from_node: str
-    to_node: str
-
-
-class _LegacyWorkflowGraph(BaseModelConfig):
-    nodes: List[_LegacyWorkflowGraphNode] = []
-    edges: List[_LegacyWorkflowGraphEdge] = []
-
-
 class WorkflowTemplateModel(BaseModelConfig):
     id: str
     user_id: Optional[str] = None

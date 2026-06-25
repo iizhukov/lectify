@@ -1,9 +1,23 @@
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from src.db.repository.base import BaseRepository
-from src.db.repository.schemas import UserData
 from src.db.entity import DBUser
+from src.db.models.user import UserModel
+
+
+def _user_to_model(user: DBUser) -> UserModel:
+    return UserModel(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        avatar_url=user.avatar_url,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
 
 
 class UserRepository(BaseRepository):
@@ -16,7 +30,7 @@ class UserRepository(BaseRepository):
         password_hash: Optional[str] = None,
         full_name: Optional[str] = None,
         avatar_url: Optional[str] = None,
-    ) -> UserData:
+    ) -> UserModel:
         with self.session() as s:
             user = DBUser(
                 id=user_id,
@@ -29,58 +43,30 @@ class UserRepository(BaseRepository):
             s.add(user)
             s.commit()
             s.refresh(user)
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return _user_to_model(user)
 
-    def get(self, user_id: str) -> Optional[UserData]:
+    def get(self, user_id: str) -> Optional[UserModel]:
         with self.session() as s:
             user = s.query(DBUser).filter(DBUser.id == user_id).first()
             if not user:
                 return None
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return _user_to_model(user)
 
-    def get_by_username(self, username: str) -> Optional[UserData]:
+    def get_by_username(self, username: str) -> Optional[UserModel]:
         with self.session() as s:
             user = s.query(DBUser).filter(DBUser.username == username).first()
             if not user:
                 return None
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return _user_to_model(user)
 
-    def get_by_email(self, email: str) -> Optional[UserData]:
+    def get_by_email(self, email: str) -> Optional[UserModel]:
         with self.session() as s:
             user = s.query(DBUser).filter(DBUser.email == email).first()
             if not user:
                 return None
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return _user_to_model(user)
 
-    def update(self, user_id: str, **kwargs) -> Optional[UserData]:
+    def update(self, user_id: str, **kwargs) -> Optional[UserModel]:
         with self.session() as s:
             user = s.query(DBUser).filter(DBUser.id == user_id).first()
             if not user:
@@ -90,16 +76,9 @@ class UserRepository(BaseRepository):
                     setattr(user, key, value)
             s.commit()
             s.refresh(user)
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return _user_to_model(user)
 
-    def get_or_create_default(self) -> UserData:
+    def get_or_create_default(self) -> UserModel:
         default_user = self.get("anonymous")
         if default_user:
             return default_user

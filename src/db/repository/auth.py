@@ -4,8 +4,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from src.db.repository.base import BaseRepository
-from src.db.repository.schemas import SessionData, ResetTokenData, UserData
 from src.db.entity import DBSession, DBPasswordResetToken, DBUser
+from src.db.models.auth import SessionData, ResetTokenData
+from src.db.models.user import UserModel
 
 
 class AuthRepository(BaseRepository):
@@ -30,14 +31,9 @@ class AuthRepository(BaseRepository):
             s.add(session)
             s.commit()
             s.refresh(session)
-            return SessionData(
-                id=session.id,
-                user_id=session.user_id,
-                token=session.token,
-                expires_at=session.expires_at,
-            ), token
+            return SessionData.model_validate(session), token
 
-    def verify_session(self, token: str) -> Optional[UserData]:
+    def verify_session(self, token: str) -> Optional[UserModel]:
         with self.session() as s:
             session = s.query(DBSession).filter(DBSession.token == token).first()
             if not session:
@@ -47,26 +43,14 @@ class AuthRepository(BaseRepository):
                 s.commit()
                 return None
             user = session.user
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return UserModel.model_validate(user)
 
     def get_session(self, token: str) -> Optional[SessionData]:
         with self.session() as s:
             session = s.query(DBSession).filter(DBSession.token == token).first()
             if not session:
                 return None
-            return SessionData(
-                id=session.id,
-                user_id=session.user_id,
-                token=session.token,
-                expires_at=session.expires_at,
-            )
+            return SessionData.model_validate(session)
 
     def delete_session(self, token: str) -> bool:
         with self.session() as s:
@@ -115,15 +99,9 @@ class AuthRepository(BaseRepository):
             s.add(token)
             s.commit()
             s.refresh(token)
-            return ResetTokenData(
-                id=token.id,
-                user_id=token.user_id,
-                token=token.token,
-                expires_at=token.expires_at,
-                used_at=token.used_at,
-            ), token_str
+            return ResetTokenData.model_validate(token), token_str
 
-    def verify_reset_token(self, token_str: str) -> Optional[UserData]:
+    def verify_reset_token(self, token_str: str) -> Optional[UserModel]:
         with self.session() as s:
             token = (
                 s.query(DBPasswordResetToken)
@@ -140,14 +118,7 @@ class AuthRepository(BaseRepository):
                 s.commit()
                 return None
             user = token.user
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return UserModel.model_validate(user)
 
     def consume_reset_token(self, token_str: str) -> bool:
         with self.session() as s:
@@ -169,16 +140,9 @@ class AuthRepository(BaseRepository):
             s.commit()
             return True
 
-    def get_user_by_email(self, email: str) -> Optional[UserData]:
+    def get_user_by_email(self, email: str) -> Optional[UserModel]:
         with self.session() as s:
             user = s.query(DBUser).filter(DBUser.email == email).first()
             if not user:
                 return None
-            return UserData(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                password_hash=user.password_hash,
-                full_name=user.full_name,
-                avatar_url=user.avatar_url,
-            )
+            return UserModel.model_validate(user)

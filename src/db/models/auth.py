@@ -54,7 +54,21 @@ class MessageResponse(BaseModelConfig):
     message: str
 
 
-# Profile response
+class SessionData(BaseModelConfig):
+    id: str
+    user_id: str
+    token: str
+    expires_at: datetime
+
+
+class ResetTokenData(BaseModelConfig):
+    id: str
+    user_id: str
+    token: str
+    expires_at: datetime
+    used_at: Optional[datetime] = None
+
+
 class ProfileResponse(BaseModelConfig):
     id: str
     username: str
