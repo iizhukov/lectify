@@ -1,29 +1,11 @@
 from datetime import datetime
-from enum import StrEnum
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from src.db.models.base import BaseModelConfig
+from src.db.models.status import FileStatus
 
 
-class NodeStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class FileStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class ArtifactModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class ArtifactModel(BaseModelConfig):
     id: str
     file_id: str
     workflow_id: str
@@ -39,23 +21,18 @@ class ArtifactModel(BaseModel):
     created_at: datetime
 
 
-class WorkflowEdgeModel(BaseModel):
+class WorkflowEdgeModel(BaseModelConfig):
     from_node_id: str
     to_node_id: str
 
 
-class WorkflowNodeModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class WorkflowNodeModel(BaseModelConfig):
     id: str
-
     workflow_id: str
     file_id: str
-
     node_id: str
     node_name: str
-
-    status: NodeStatus
+    status: str
 
     message: Optional[str] = None
     artifact_path: Optional[str] = None
@@ -63,50 +40,39 @@ class WorkflowNodeModel(BaseModel):
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
-    artifacts: List[ArtifactModel] = Field(default_factory=list)
+    artifacts: List[ArtifactModel] = []
+    dependencies: List[str] = []
 
-    dependencies: List[str] = Field(default_factory=list)
 
-
-class WorkflowGraphModel(BaseModel):
+class WorkflowGraphModel(BaseModelConfig):
     nodes: List[WorkflowNodeModel]
     edges: List[WorkflowEdgeModel]
 
 
-class WorkflowStateModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class WorkflowStateModel(BaseModelConfig):
     id: str
     file_id: str
-
     name: str
-    status: NodeStatus
+    status: str
 
     created_at: datetime
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
     final_artifact_id: Optional[str] = None
-
     graph: Optional[WorkflowGraphModel] = None
 
 
-class FileModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class FileModel(BaseModelConfig):
     id: str
-
     filename: str
     original_path: str
-
     language: str
-
     status: FileStatus
-
     size_bytes: int
     mime_type: str
 
     created_at: datetime
     updated_at: datetime
 
-    workflows: List[WorkflowStateModel] = Field(default_factory=list)
+    workflows: List[WorkflowStateModel] = []
