@@ -104,12 +104,6 @@
               <label class="block text-xs font-medium text-brand-muted mb-1">Плагин</label>
               <select id="node-type-select" class="input-field text-sm">
                 <option value="">— выберите —</option>
-                <option value="media_converter">Конвертация медиа</option>
-                <option value="transcriber">Транскрибация</option>
-                <option value="formatter">Форматирование</option>
-                <option value="topic_analyzer">Анализ тем</option>
-                <option value="term_extractor">Извлечение терминов</option>
-                <option value="llm">LLM узел</option>
               </select>
             </div>
             <div>
@@ -184,6 +178,7 @@
 <script type="module">
   import { api } from '/static/js/api.js';
   import { showToast } from '/static/js/components/toast.js';
+  import { PLUGINS, PLUGIN_MAP, PLUGIN_COLORS, PLUGIN_INPUTS, PLUGIN_OUTPUTS, PLUGIN_DEFAULTS, getParamType, loadPlugins } from '/static/js/plugins.js';
 
   const wfId = window.location.pathname.split('/').filter(Boolean)[1];
   let workflow = null;
@@ -255,90 +250,23 @@
 
   initPaneWidth();
 
+  const nodeTypeSelect = document.getElementById('node-type-select');
+
+  window.addEventListener('resize', () => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    applyWidths(saved ? parseInt(saved, 10) : 384, false);
+  });
+
   // --- Node catalog ---
-  const PLUGIN_COLORS = {
-    media_converter: '#3b82f6',
-    transcriber:     '#8b5cf6',
-    formatter:       '#10b981',
-    topic_analyzer:  '#f59e0b',
-    term_extractor:  '#ef4444',
-    llm:             '#06b6d4',
-  };
-
-  const PLUGIN_OUTPUTS = {
-    media_converter: ['audio_data', 'duration_seconds', 'format', 'file_path'],
-    transcriber:     ['transcript', 'language', 'duration_seconds'],
-    formatter:       ['formatted_text', 'toc', 'word_count'],
-    topic_analyzer:  ['topics', 'topic_scores'],
-    term_extractor:  ['terms', 'term_count'],
-    llm:             ['result', 'reasoning'],
-  };
-
-  const PLUGIN_INPUTS = {
-    media_converter: [],
-    transcriber:     ['audio_data', 'file_path'],
-    formatter:       ['transcript', 'text'],
-    topic_analyzer:  ['transcript', 'formatted_text'],
-    term_extractor:  ['transcript', 'formatted_text'],
-    llm:             ['prompt_text', 'context_data'],
-  };
-
-  const PLUGIN_DEFAULTS = {
-    media_converter: { quality: '720p', format: 'mp4', audio_codec: 'aac' },
-    transcriber:     { language: 'auto', model: 'base', word_level: false },
-    formatter:       { style: 'academic', include_toc: true },
-    topic_analyzer:  { num_topics: 5, min_score: 0.1 },
-    term_extractor:  { top_n: 20, min_freq: 2 },
-    llm:             { model: 'gpt-4o', temperature: 0.7, max_tokens: 2048 },
-  };
-
-  const PARAM_TYPES = {
-    // key: 'select' | 'input' | 'bool'
-    quality:         { type: 'select',  options: ['360p','480p','720p','1080p'] },
-    format:          { type: 'select',  options: ['mp4','mkv','mov','webm'] },
-    audio_codec:     { type: 'select',  options: ['aac','mp3','opus','flac'] },
-    language:        { type: 'select',  options: ['auto','ru','en','de','fr','es'] },
-    model:           { type: 'input' },
-    word_level:      { type: 'bool' },
-    style:           { type: 'select',  options: ['academic','plain','technical','narrative'] },
-    include_toc:     { type: 'bool' },
-    num_topics:      { type: 'input' },
-    min_score:       { type: 'input' },
-    top_n:           { type: 'input' },
-    min_freq:        { type: 'input' },
-    temperature:     { type: 'input' },
-    max_tokens:      { type: 'input' },
-  };
-
-  const PLUGIN_ICONS = {
-    media_converter: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8.5A1.5 1.5 0 014.5 7h11A1.5 1.5 0 0117 8.5v1H3V8.5z"/></svg>`,
-    transcriber:     `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>`,
-    formatter:       `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>`,
-    topic_analyzer:  `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>`,
-    term_extractor:  `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>`,
-    llm:             `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>`,
-  };
-
-  const PLUGIN_META = [
-    { id: 'media_converter', name: 'Конвертация медиа', description: 'Конвертирует аудио/видео в нужный формат и качество.', color: '#3b82f6' },
-    { id: 'transcriber',     name: 'Транскрибация',     description: 'Преобразует аудио/видео в текст (транскрипт).',          color: '#8b5cf6' },
-    { id: 'formatter',       name: 'Форматирование',    description: 'Форматирует текст: оглавление, пунктуация, абзацы.',      color: '#10b981' },
-    { id: 'topic_analyzer',  name: 'Анализ тем',        description: 'Выделяет ключевые темы и оценивает их релевантность.',  color: '#f59e0b' },
-    { id: 'term_extractor',  name: 'Извлечение терминов',description: 'Извлекает ключевые слова и термины из текста.',       color: '#ef4444' },
-    { id: 'llm',             name: 'LLM узел',           description: 'Вызывает языковую модель с заданным промптом.',         color: '#06b6d4' },
-  ];
-
   // --- Add Node Modal ---
   function renderNodeTypeList() {
     const list = document.getElementById('node-type-list');
-    list.innerHTML = PLUGIN_META.map(p => {
-      const ins = PLUGIN_INPUTS[p.id] || [];
-      const outs = PLUGIN_OUTPUTS[p.id] || [];
+    list.innerHTML = PLUGINS.map(p => {
       return `
         <div class="node-type-item border border-brand-light rounded-lg p-3 cursor-pointer hover:border-brand hover:shadow-sm transition-all" data-plugin-id="${p.id}">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style="background:${p.color}15; color:${p.color}">
-              ${PLUGIN_ICONS[p.id]}
+              ${p.icon}
             </div>
             <div>
               <p class="font-semibold text-sm text-brand-dark">${p.name}</p>
@@ -389,11 +317,11 @@
 
   document.getElementById('confirm-add-node-btn').addEventListener('click', () => {
     if (!pendingPluginId) return;
-    const name = PLUGIN_META.find(p => p.id === pendingPluginId).name;
+    const p = PLUGIN_MAP[pendingPluginId];
     const newNode = {
       id: 'n-' + Math.random().toString(36).slice(2, 8),
       plugin_id: pendingPluginId,
-      name,
+      name: p ? p.name : pendingPluginId,
       description: '',
       parameters: JSON.parse(JSON.stringify(PLUGIN_DEFAULTS[pendingPluginId] || {})),
       input_mapping: [],
@@ -895,8 +823,7 @@
     // Prompt select for llm nodes
     const promptSection = document.getElementById('prompt-section');
     const promptSelect = document.getElementById('node-prompt-select');
-    if (node.plugin_id === 'llm') {
-      promptSection.classList.remove('hidden');
+    if (node.plugin_id === 'llm_request') {
       promptSelect.innerHTML = '<option value="">— без промпта —</option>' +
         prompts.map(p => `<option value="${p.id}" ${node.prompt_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
     } else {
@@ -1167,7 +1094,7 @@
     }
 
     list.innerHTML = keys.map(key => {
-      const ptype = PARAM_TYPES[key] || { type: 'input' };
+      const ptype = getParamType(node.plugin_id, key);
       const val = params[key];
       const valStr = typeof val === 'boolean' ? '' : String(val);
 
@@ -1241,7 +1168,7 @@
     node.name = name;
     node.plugin_id = type || node.plugin_id;
     node.description = desc;
-    if (node.plugin_id === 'llm') {
+    if (node.plugin_id === 'llm_request') {
       node.prompt_id = document.getElementById('node-prompt-select').value || null;
     }
 
@@ -1306,6 +1233,16 @@
     return (str || '').replace(/"/g, '&quot;');
   }
 
-  loadWorkflow();
+  (async () => {
+    await loadPlugins();
+    // Populate plugin select from registry
+    PLUGINS.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      nodeTypeSelect.appendChild(opt);
+    });
+    await loadWorkflow();
+  })();
 </script>
 {% endblock %}

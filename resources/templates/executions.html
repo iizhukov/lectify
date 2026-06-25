@@ -333,11 +333,8 @@
       const errEl = document.getElementById('ce-error');
       if (errEl) errEl.classList.add('hidden');
 
-      let fileId = '', filePath = '';
       const fileInput = document.getElementById('ce-file-input');
-      if (fileInput && fileInput.files.length > 0) {
-        filePath = fileInput.files[0].name;
-      }
+      const filePath = fileInput && fileInput.files.length > 0 ? fileInput.files[0].name : '';
 
       try {
         await api.workflows.execute(selectedWorkflow.id, { file_id: fileId, file_path: filePath, parameters: {} });
