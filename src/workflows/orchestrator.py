@@ -1,11 +1,10 @@
 import os
 import time
-import pathlib
 import threading
-from queue import Queue
+from queue import Queue, Empty
 from typing import Dict, Tuple
 
-from src.db.repository import DBRepository
+from src.db.repository import Repository
 from src.db.models import NodeStatus
 from src.workflows.registry import WORKFLOW_REGISTRY
 from src.workflows.converter import get_converter
@@ -36,7 +35,7 @@ class LectureOrchestrator:
             raise ValueError("deepseek_client must be provided on first initialization")
 
         self.client = deepseek_client
-        self._repository = DBRepository()
+        self._repository = Repository()
         self.workflow = WORKFLOW_REGISTRY["lecture_workflow"]
         self.active_workflows = set()
         self._results_lock = threading.Lock()
@@ -253,6 +252,7 @@ class LectureOrchestrator:
     def _start_queue_processor(self):
         """Запускает фоновый поток для обработки очереди воркфлоу"""
         def process_queue():
+            logger.info("queue_processor_started", max_concurrent=self.max_concurrent_workflows)
             while True:
                 try:
                     # Проверяем, можем ли запустить новый воркфлоу
@@ -263,6 +263,13 @@ class LectureOrchestrator:
                         # Пытаемся взять воркфлоу из очереди (неблокирующий вызов)
                         try:
                             workflow_id, file_id, file_path, language = self._workflow_queue.get(timeout=1)
+                            
+                            logger.info(
+                                "workflow_dequeued",
+                                workflow_id=workflow_id,
+                                file_id=file_id,
+                                queue_size=self._workflow_queue.qsize()
+                            )
                             
                             # Запускаем воркфлоу
                             with self._queue_lock:
@@ -286,22 +293,41 @@ class LectureOrchestrator:
                             )
                             t.start()
                             
-                        except:
+                        except Empty:
                             # Очередь пуста, ждём
-                            time.sleep(1)
+                            pass
+                        except Exception as e:
+                            logger.error(
+                                "queue_get_error",
+                                error=str(e),
+                                error_type=type(e).__name__,
+                                exc_info=True
+                            )
+                            print(f"ERROR:  Error getting workflow from queue: {e}", file=__import__('sys').stderr)
+                            import traceback
+                            traceback.print_exc()
                     else:
                         # Достигнут лимит, ждём
+                        logger.debug("queue_processor_waiting", active_count=active_count, max_concurrent=self.max_concurrent_workflows)
                         time.sleep(1)
                         
                 except Exception as e:
-                    print(f"❌ Ошибка в обработчике очереди: {e}")
+                    logger.error(
+                        "queue_processor_error",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        exc_info=True
+                    )
+                    print(f"ERROR:  Queue processor error: {e}", file=__import__('sys').stderr)
+                    import traceback
+                    traceback.print_exc()
                     time.sleep(1)
         
         self._queue_processor_thread = threading.Thread(target=process_queue, daemon=True)
         self._queue_processor_thread.start()
         
         logger.info(
-            "queue_processor_started",
+            "queue_processor_thread_started",
             max_concurrent=self.max_concurrent_workflows
         )
 
