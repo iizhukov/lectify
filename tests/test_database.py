@@ -6,7 +6,6 @@ import uuid
 from datetime import datetime
 
 from src.db.models import NodeStatus, FileStatus
-from src.db.repository import DBRepository
 
 
 @pytest.mark.integration

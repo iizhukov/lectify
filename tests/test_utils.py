@@ -6,7 +6,7 @@ import structlog
 from pathlib import Path
 
 from src.utils.logging import setup_logging, get_logger
-from src.utils.metrics import LectifyMetrics, get_metrics
+from src.utils.metrics import get_metrics
 
 
 @pytest.mark.integration
@@ -73,11 +73,11 @@ class TestLogging:
 @pytest.mark.integration
 class TestMetrics:
     """Тесты системы метрик"""
-    
+
     def test_metrics_initialization(self):
         """Тест инициализации метрик"""
-        metrics = LectifyMetrics()
-        
+        metrics = get_metrics()
+
         assert hasattr(metrics, 'workflows_total')
         assert hasattr(metrics, 'workflows_completed')
         assert hasattr(metrics, 'workflows_failed')
