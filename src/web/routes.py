@@ -2,18 +2,23 @@ import pathlib
 
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
+from jinja2 import Environment, FileSystemLoader
 
 
 web_router = APIRouter()
 
 HTML_PATH = pathlib.Path(__file__).parent.parent.parent / "resources" / "templates"
+JINJA = Environment(loader=FileSystemLoader(str(HTML_PATH)), autoescape=True)
 
 
 def read_html(filename: str):
     path = HTML_PATH / filename
     if not path.exists():
         return HTMLResponse(f"<h3>Error: {filename} not found!</h3>", status_code=404)
-    return HTMLResponse(path.read_text(encoding="utf-8"))
+    content = path.read_text(encoding="utf-8")
+    if "{% extends" in content or "{% block" in content:
+        return HTMLResponse(JINJA.get_template(filename).render())
+    return HTMLResponse(content)
 
 
 @web_router.get("/")

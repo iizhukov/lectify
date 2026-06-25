@@ -59,15 +59,22 @@ class PluginRegistry:
         else:
             params_schema = []
 
+        inputs = [f for f in plugin_class.input_model.model_fields if f != "file_id"]
+        outputs = list(plugin_class.output_model.model_fields.keys())
+
         self._plugins_metadata[plugin_id] = {
             "id": plugin_id,
             "name": plugin_class.name,
             "description": plugin_class.description,
             "version": plugin_class.version,
             "category": getattr(plugin_class, "category", "general"),
+            "color": getattr(plugin_class, "color", "#9ca3af"),
+            "icon_svg": getattr(plugin_class, "icon_svg", ""),
             "input_model": plugin_class.input_model.__name__,
             "output_model": plugin_class.output_model.__name__,
             "parameters_schema": params_schema,
+            "inputs": inputs,
+            "outputs": outputs,
         }
         logger.info(f"Registered plugin: {plugin_id}")
 

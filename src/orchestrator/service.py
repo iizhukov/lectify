@@ -214,9 +214,8 @@ class OrchestratorService:
         Возвращает True при успехе, False при неудаче.
         """
         node_id = node_def["id"]
-        template_id = node_def["template_id"]
-        template = self.node_repo.get(template_id)
-        plugin_id = template.plugin_id if template else None
+        plugin_id = node_def["plugin_id"]
+        parameters = node_def.get("parameters", {})
 
         logger.info(
             "node_starting",
@@ -248,7 +247,7 @@ class OrchestratorService:
                     node_exec_id=str(node_exec.id),
                     plugin_id=plugin_id or "unknown",
                     input_data=input_data,
-                    parameters=template.parameters if template else {},
+                    parameters=parameters,
                     execution_id=execution_id,
                     node_id=node_id,
                     timeout_seconds=self.config.node_timeout_seconds,
@@ -351,8 +350,8 @@ def _build_dependency_map(
     """Построить карту зависимостей: node_id → [dependency_node_ids]."""
     deps = {n["id"]: [] for n in nodes}
     for edge in edges:
-        if edge["to_node"] in deps:
-            deps[edge["to_node"]].append(edge["from_node"])
+        if edge["to_node_id"] in deps:
+            deps[edge["to_node_id"]].append(edge["from_node_id"])
     return deps
 
 

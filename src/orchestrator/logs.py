@@ -22,7 +22,7 @@ class NodeLogManager:
         log_dir = Path(tempfile.gettempdir()) / "lectify" / "logs" / execution_id / node_id
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "node.log"
-        # Открываем в append mode, чтобы буферизировать записи
+        log_path.touch()
         return log_path
 
     def append_logs(self, log_path: Path, new_logs: str) -> None:

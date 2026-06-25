@@ -23,7 +23,6 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/lectify.log"):
     except Exception as e:
         print(f"WARNING: Using default logging config: {str(e)}")
     
-    # Создаём директорию для логов
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     

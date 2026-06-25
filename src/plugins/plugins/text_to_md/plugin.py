@@ -38,6 +38,8 @@ class TextToMDPlugin(Plugin):
     description = "Преобразует распознанный текст в Markdown-конспект"
     version = "1.0.0"
     category = "ai"
+    color = "#10b981"
+    icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>'
 
     input_model = TextToMDInput
     output_model = TextToMDOutput

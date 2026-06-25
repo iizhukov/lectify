@@ -22,6 +22,7 @@ class TextToLatexInput(BaseModel):
     """Input for text-to-LaTeX plugin"""
     file_id: str
     txt_path: str
+    prompt_id: str = ""
 
 
 class TextToLatexOutput(BaseModel):
@@ -38,6 +39,8 @@ class TextToLatexPlugin(Plugin):
     description = "Преобразует распознанный текст в LaTeX-конспект"
     version = "1.0.0"
     category = "ai"
+    color = "#f59e0b"
+    icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>'
 
     input_model = TextToLatexInput
     output_model = TextToLatexOutput
@@ -69,6 +72,7 @@ class TextToLatexPlugin(Plugin):
         """Execute text-to-latex"""
         file_id = input_data.file_id
         txt_path = input_data.txt_path
+        prompt_id = input_data.prompt_id
         segments = parameters.get("segments", 3)
         subject = parameters.get("subject", "auto")
 
@@ -86,6 +90,17 @@ class TextToLatexPlugin(Plugin):
 
             context.report_progress(30, f"Генерируем LaTeX ({subject})...")
 
+            # Resolve prompt: from DB/MinIO via prompt_id, or fall back to file
+            prompt_path = f"resources/prompts/{subject}.txt"
+            if prompt_id:
+                db_prompt = self._get_prompt(prompt_id)
+                if db_prompt:
+                    import tempfile
+                    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+                    tmp.write(db_prompt)
+                    tmp.close()
+                    prompt_path = tmp.name
+
             # Build script path (in same directory as this plugin)
             script_path = pathlib.Path(__file__).parent.parent.parent.parent / "text_to_latex.py"
 
@@ -94,7 +109,7 @@ class TextToLatexPlugin(Plugin):
                     sys.executable, str(script_path),
                     "--file", str(txt_file),
                     "--seg-num", str(segments),
-                    "--sys-prompt", f"resources/prompts/{subject}.txt",
+                    "--sys-prompt", prompt_path,
                     "--language", "ru-RU"
                 ],
                 capture_output=True,
@@ -152,3 +167,19 @@ class TextToLatexPlugin(Plugin):
 
         except:
             return "sys_prompt"
+
+    def _get_prompt(self, prompt_id: str) -> str:
+        """Get prompt from library or MinIO"""
+        try:
+            from src.db.database import SessionLocal
+            from src.db.entity import DBPrompt
+            session = SessionLocal()
+            try:
+                prompt = session.query(DBPrompt).filter(DBPrompt.id == prompt_id).first()
+                if prompt:
+                    return prompt.system_prompt or ""
+            finally:
+                session.close()
+        except:
+            pass
+        return ""

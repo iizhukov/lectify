@@ -117,6 +117,8 @@ class Plugin(abc.ABC):
     description: str = ""
     version: str = "1.0.0"
     category: str = "general"  # media, ai, transform, io
+    color: str = "#9ca3af"  # Hex color for UI (fallback)
+    icon_svg: str = ""  # SVG markup for UI icon (fallback)
 
     input_model: Type[PluginInput] = PluginInput
     output_model: Type[PluginOutput] = PluginOutput

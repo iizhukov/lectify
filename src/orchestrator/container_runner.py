@@ -91,6 +91,13 @@ class ContainerRunnerOrchestrator:
                 on_metrics=metrics_callback,
             )
 
+            # Сохраняем output.json из результата контейнера, чтобы он не был удалён
+            # при очистке временных файлов в docker_runner
+            if output_data and not output_file.exists():
+                import json
+                with open(output_file, "w", encoding="utf-8") as f:
+                    json.dump(output_data, f)
+
             # Копируем output.json в MinIO
             if output_file.exists():
                 artifact_type = parameters.get("output_type", "data")

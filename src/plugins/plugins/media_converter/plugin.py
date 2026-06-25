@@ -30,6 +30,8 @@ class MediaConverterPlugin(Plugin):
     description = "Конвертирует видео или аудио файл в формат M4A"
     version = "1.0.0"
     category = "media"
+    color = "#3b82f6"
+    icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8.5A1.5 1.5 0 014.5 7h11A1.5 1.5 0 0117 8.5v1H3V8.5z"/></svg>'
 
     input_model = MediaConverterInput
     output_model = MediaConverterOutput

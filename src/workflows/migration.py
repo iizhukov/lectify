@@ -5,8 +5,10 @@ Workflow migration — migrate existing workflows to new architecture
 import logging
 from datetime import datetime
 
-from src.db.entity import DBWorkflowTemplate, DBNodeTemplate, DBPlugin
+from src.db.entity import DBPlugin
 from src.db.repository import DBRepository
+from src.db.repository.node_template import NodeTemplateRepository
+from src.db.repository.workflow_template import WorkflowTemplateRepository
 from src.plugins.registry import get_plugin_registry
 
 logger = logging.getLogger(__name__)
@@ -19,15 +21,17 @@ def migrate_lecture_workflow() -> str | None:
     Returns workflow_template_id or None if already migrated.
     """
     repo = DBRepository()
+    node_repo = NodeTemplateRepository()
+    wf_repo = WorkflowTemplateRepository()
 
     # Check if already migrated
-    existing = repo.get_workflow_template("lecture_workflow_v2")
+    existing = wf_repo.get("lecture_workflow_v2")
     if existing:
         logger.info("lecture_workflow already migrated")
         return existing.id
 
     # Get or create default user
-    default_user = repo.get_or_create_default_user()
+    default_user = repo.get_or_create_default()
 
     # Map old node IDs to new plugin IDs
     node_mapping = {
@@ -40,6 +44,16 @@ def migrate_lecture_workflow() -> str | None:
             "plugin_id": "speech_to_text",
             "name": "Распознавание речи",
             "parameters": {"language": "ru"}
+        },
+        "prompt_for_md": {
+            "plugin_id": "prompt_selector",
+            "name": "Промпт → Markdown",
+            "parameters": {"prompt_id": ""}
+        },
+        "prompt_for_latex": {
+            "plugin_id": "prompt_selector",
+            "name": "Промпт → LaTeX",
+            "parameters": {"prompt_id": ""}
         },
         "text_to_md": {
             "plugin_id": "text_to_md",
@@ -61,60 +75,44 @@ def migrate_lecture_workflow() -> str | None:
     # Create node templates
     node_template_ids = {}
     for node_id, config in node_mapping.items():
-        template = repo.create_node_template({
-            "id": f"{node_id}_template",
-            "user_id": None,  # Global
-            "plugin_id": config["plugin_id"],
-            "name": config["name"],
-            "parameters": config["parameters"],
-            "input_mapping": _get_input_mapping(node_id)
-        })
-        node_template_ids[node_id] = template.id
+        template_id = f"{node_id}_template"
+        existing_tmpl = node_repo.get(template_id)
+        if existing_tmpl:
+            node_template_ids[node_id] = existing_tmpl.id
+        else:
+            template = node_repo.create({
+                "id": template_id,
+                "user_id": None,
+                "plugin_id": config["plugin_id"],
+                "name": config["name"],
+                "parameters": config["parameters"],
+                "input_mapping": _get_input_mapping(node_id)
+            })
+            node_template_ids[node_id] = template.id
 
     # Build workflow graph
     graph = {
         "nodes": [
-            {
-                "id": "media_converter",
-                "template_id": node_template_ids["media_converter"],
-                "position_x": 0,
-                "position_y": 0
-            },
-            {
-                "id": "speech_to_text",
-                "template_id": node_template_ids["speech_to_text"],
-                "position_x": 200,
-                "position_y": 100
-            },
-            {
-                "id": "text_to_md",
-                "template_id": node_template_ids["text_to_md"],
-                "position_x": 400,
-                "position_y": 0
-            },
-            {
-                "id": "text_to_latex",
-                "template_id": node_template_ids["text_to_latex"],
-                "position_x": 400,
-                "position_y": 200
-            },
-            {
-                "id": "latex_to_pdf",
-                "template_id": node_template_ids["latex_to_pdf"],
-                "position_x": 600,
-                "position_y": 200
-            }
+            {"id": "media_converter", "plugin_id": "media_converter", "name": "Конвертация медиа", "parameters": node_mapping["media_converter"]["parameters"], "input_mapping": _get_input_mapping("media_converter")},
+            {"id": "speech_to_text", "plugin_id": "speech_to_text", "name": "Распознавание речи", "parameters": node_mapping["speech_to_text"]["parameters"], "input_mapping": _get_input_mapping("speech_to_text")},
+            {"id": "prompt_for_md", "plugin_id": "prompt_selector", "name": "Промпт → Markdown", "parameters": node_mapping["prompt_for_md"]["parameters"], "input_mapping": _get_input_mapping("prompt_for_md")},
+            {"id": "prompt_for_latex", "plugin_id": "prompt_selector", "name": "Промпт → LaTeX", "parameters": node_mapping["prompt_for_latex"]["parameters"], "input_mapping": _get_input_mapping("prompt_for_latex")},
+            {"id": "text_to_md", "plugin_id": "text_to_md", "name": "Создание Markdown", "parameters": node_mapping["text_to_md"]["parameters"], "input_mapping": _get_input_mapping("text_to_md")},
+            {"id": "text_to_latex", "plugin_id": "text_to_latex", "name": "Создание LaTeX", "parameters": node_mapping["text_to_latex"]["parameters"], "input_mapping": _get_input_mapping("text_to_latex")},
+            {"id": "latex_to_pdf", "plugin_id": "latex_to_pdf", "name": "Компиляция PDF", "parameters": node_mapping["latex_to_pdf"]["parameters"], "input_mapping": _get_input_mapping("latex_to_pdf")},
         ],
         "edges": [
-            {"from_node": "media_converter", "to_node": "speech_to_text"},
-            {"from_node": "speech_to_text", "to_node": "text_to_md"},
-            {"from_node": "speech_to_text", "to_node": "text_to_latex"},
-            {"from_node": "text_to_latex", "to_node": "latex_to_pdf"}
+            {"from_node_id": "media_converter", "to_node_id": "speech_to_text"},
+            {"from_node_id": "speech_to_text", "to_node_id": "prompt_for_md"},
+            {"from_node_id": "speech_to_text", "to_node_id": "prompt_for_latex"},
+            {"from_node_id": "prompt_for_md", "to_node_id": "text_to_md"},
+            {"from_node_id": "prompt_for_latex", "to_node_id": "text_to_latex"},
+            {"from_node_id": "text_to_latex", "to_node_id": "latex_to_pdf"},
         ]
     }
 
     # Create workflow template
-    workflow = repo.create_workflow_template({
+    workflow = wf_repo.create({
         "id": "lecture_workflow_v2",
         "user_id": None,  # Global
         "name": "Конспект лекции",
@@ -134,10 +132,12 @@ def _get_input_mapping(node_id: str) -> list:
             {"target_field": "media_path", "source": "$media_converter.output.media_path"}
         ],
         "text_to_md": [
-            {"target_field": "txt_path", "source": "$speech_to_text.output.txt_path"}
+            {"target_field": "txt_path", "source": "$speech_to_text.output.txt_path"},
+            {"target_field": "prompt_id", "source": "$prompt_for_md.output.prompt_id"}
         ],
         "text_to_latex": [
-            {"target_field": "txt_path", "source": "$speech_to_text.output.txt_path"}
+            {"target_field": "txt_path", "source": "$speech_to_text.output.txt_path"},
+            {"target_field": "prompt_id", "source": "$prompt_for_latex.output.prompt_id"}
         ],
         "latex_to_pdf": [
             {"target_field": "latex_path", "source": "$text_to_latex.output.latex_path"}
@@ -152,14 +152,13 @@ def sync_plugins_on_startup():
 
     This should be called once at startup.
     """
-    from src.db.database import engine
-    from sqlalchemy.orm import Session
+    from src.db.database import SessionLocal
     from datetime import datetime
 
     registry = get_plugin_registry()
     plugins_metadata = registry.get_plugins_metadata()
 
-    with Session(engine) as session:
+    with SessionLocal() as session:
         for metadata in plugins_metadata:
             plugin_id = metadata["id"]
 
@@ -170,6 +169,8 @@ def sync_plugins_on_startup():
                 # Update if needed
                 existing.version = metadata["version"]
                 existing.parameters_schema = metadata["parameters_schema"]
+                existing.color = metadata.get("color")
+                existing.icon_svg = metadata.get("icon_svg")
                 existing.updated_at = datetime.utcnow()
             else:
                 # Insert new
@@ -182,6 +183,8 @@ def sync_plugins_on_startup():
                     input_model=metadata["input_model"],
                     output_model=metadata["output_model"],
                     parameters_schema=metadata["parameters_schema"],
+                    color=metadata.get("color"),
+                    icon_svg=metadata.get("icon_svg"),
                     is_active=True,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow()
@@ -211,13 +214,13 @@ def run_all_migrations():
     sync_plugins_on_startup()
     logger.info("Plugins synced")
 
-    # 2. Migrate prompts
-    from src.prompts.migration import migrate_prompts_to_database
-    migrate_prompts_to_database()
-    logger.info("Prompts migrated")
-
-    # 3. Migrate lecture workflow
+    # 2. Migrate lecture workflow
     migrate_lecture_workflow()
     logger.info("Workflows migrated")
+
+    # 3. Seed initial data (idempotent)
+    from src.db.seed import run as seed_run
+    seed_run()
+    logger.info("Seed data applied")
 
     logger.info("All migrations completed")
