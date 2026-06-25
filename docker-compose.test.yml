@@ -1,0 +1,24 @@
+# Docker compose для запуска тестов
+# Использует ту же сеть что и основной docker-compose
+version: '3.8'
+
+services:
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgresql://lectify:lectify_password@postgres:5432/lectify_test
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - default
+    command: pytest tests/ -v --tb=short -m "not slow"
+
+networks:
+  default:
+    name: lectify_default
