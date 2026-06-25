@@ -5,14 +5,17 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Импортируем Base и все модели
-from src.db.database import Base, DATABASE_URL
+# Импортируем Base из entity/base
+from src.db.entity.base import Base
 
 # this is the Alembic Config object
 config = context.config
 
-# Устанавливаем URL из переменной окружения
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# Устанавливаем URL из environment variable или получаем из engine
+import os
+test_url = os.environ.get("TESTING_DB_URL")
+if test_url:
+    config.set_main_option("sqlalchemy.url", test_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

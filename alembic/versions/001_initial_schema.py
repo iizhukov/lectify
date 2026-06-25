@@ -30,6 +30,7 @@ def upgrade() -> None:
         sa.Column('size_bytes', sa.Integer(), nullable=False),
         sa.Column('mime_type', sa.String(), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=True),
+        sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_files_id'), 'files', ['id'], unique=False)
