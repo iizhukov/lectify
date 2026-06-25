@@ -1,6 +1,3 @@
-import os
-import configparser
-
 from openai import OpenAI
 
 
