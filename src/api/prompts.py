@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.db.models import PromptModel
+from src.db.repository import PromptRepository
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
@@ -29,27 +30,28 @@ class UpdatePromptRequest(BaseModel):
 
 @router.get("", response_model=List[PromptModel])
 async def list_prompts(user_id: Optional[str] = None):
-    """List all prompts (global + user's)"""
-    repo = WorkflowRepository()
+    """
+    List all prompts (global + user's).
+    Returns prompts filtered by user_id if provided.
+    """
+    repo = PromptRepository()
 
+    # MIGRATED: use PromptRepository.get_global() / get_by_user()
     if user_id:
-        # Get user's prompts + global prompts
-        user_prompts = repo.get_user_prompts(user_id)
-        global_prompts = repo.get_global_prompts()
+        global_prompts = repo.get_global()
+        user_prompts = repo.get_by_user(user_id)
         prompts = global_prompts + user_prompts
     else:
-        prompts = repo.get_global_prompts()
+        prompts = repo.get_global()
 
-    return [
-        PromptModel.model_validate(p) for p in prompts
-    ]
+    return [PromptModel.model_validate(p) for p in prompts]
 
 
 @router.get("/{prompt_id}", response_model=PromptModel)
 async def get_prompt(prompt_id: str):
     """Get prompt by ID"""
-    repo = WorkflowRepository()
-    prompt = repo.get_prompt(prompt_id)
+    repo = PromptRepository()
+    prompt = repo.get(prompt_id)
 
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -63,9 +65,9 @@ async def create_prompt(
     user_id: Optional[str] = None
 ):
     """Create a new prompt"""
-    repo = WorkflowRepository()
+    repo = PromptRepository()
 
-    prompt = repo.create_prompt({
+    prompt = repo.create({
         "id": str(uuid.uuid4()),
         "user_id": user_id,
         "name": request.name,
@@ -83,7 +85,7 @@ async def update_prompt(
     request: UpdatePromptRequest
 ):
     """Update a prompt"""
-    repo = WorkflowRepository()
+    repo = PromptRepository()
 
     update_data = {}
     if request.name is not None:
@@ -95,7 +97,7 @@ async def update_prompt(
     if request.variables is not None:
         update_data["variables"] = request.variables
 
-    prompt = repo.update_prompt(prompt_id, **update_data)
+    prompt = repo.update(prompt_id, **update_data)
 
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -106,8 +108,8 @@ async def update_prompt(
 @router.delete("/{prompt_id}")
 async def delete_prompt(prompt_id: str):
     """Delete a prompt"""
-    repo = WorkflowRepository()
-    success = repo.delete_prompt(prompt_id)
+    repo = PromptRepository()
+    success = repo.delete(prompt_id)
 
     if not success:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -118,26 +120,23 @@ async def delete_prompt(prompt_id: str):
 @router.get("/{prompt_id}/render")
 async def render_prompt(
     prompt_id: str,
-    name: str = None,
-    value: str = None
+    name: Optional[str] = None,
+    value: Optional[str] = None
 ):
     """Render prompt with variables substituted"""
-    repo = WorkflowRepository()
-    prompt = repo.get_prompt(prompt_id)
+    repo = PromptRepository()
+    prompt = repo.get(prompt_id)
 
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
 
-    # Get prompt content (from MinIO if needed)
     system = prompt.system_prompt or ""
     user_template = prompt.user_prompt_template or ""
 
-    # Build variables dict from provided kwargs
     variables = {}
     if name is not None and value is not None:
         variables[name] = value
 
-    # Substitute variables
     for var_name, var_value in variables.items():
         placeholder = f"{{{{{var_name}}}}}"
         system = system.replace(placeholder, str(var_value))

@@ -27,6 +27,7 @@ class ExecutionNodeModel(BaseModelConfig):
     execution_id: str
     node_template_id: Optional[str] = None
     node_id: str
+    node_name: str = ""
     status: NodeExecutionStatus
     progress_percent: Optional[int] = None
     progress_message: Optional[str] = None
@@ -47,9 +48,13 @@ class ExecutionNodeModel(BaseModelConfig):
 
 class ExecutionModel(BaseModelConfig):
     id: str
+    workflow_id: Optional[str] = None  # DEPRECATED: use workflow_template_id
     workflow_template_id: Optional[str] = None
     file_id: str
     user_id: Optional[str] = None
+    workflow_name: Optional[str] = None  # from mock: execution-level name
+    file_name: Optional[str] = None  # from mock: file name for the execution
+    language: str = "ru"  # from mock: language for the execution
     status: ExecutionStatus
     started_at: Optional[str] = None
     ended_at: Optional[str] = None

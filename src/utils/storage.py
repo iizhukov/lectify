@@ -8,6 +8,7 @@ from datetime import datetime
 from minio import Minio
 from minio.error import S3Error
 
+from src.config import config
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,33 +19,43 @@ class MinIOStorage:
     
     def __init__(
         self,
-        endpoint: str = "localhost:9000",
-        access_key: str = "minioadmin",
-        secret_key: str = "minioadmin",
-        secure: bool = False
+        endpoint: str = None,
+        access_key: str = None,
+        secret_key: str = None,
+        secure: bool = None,
+        artifacts_bucket: str = None,
+        logs_bucket: str = None
     ):
         """
         Инициализация MinIO клиента
         
-        Args:
-            endpoint: Адрес MinIO сервера
-            access_key: Access key
-            secret_key: Secret key
-            secure: Использовать HTTPS
-        """
-        self.client = Minio(
-            endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure
-        )
+        Если параметры не указаны, они читаются из config.cfg
         
-        self.artifacts_bucket = "artifacts"
-        self.logs_bucket = "logs"
+        Args:
+            endpoint: Адрес MinIO сервера (по умолчанию из config.cfg)
+            access_key: Access key (по умолчанию из config.cfg)
+            secret_key: Secret key (по умолчанию из config.cfg)
+            secure: Использовать HTTPS (по умолчанию из config.cfg)
+            artifacts_bucket: Бакет для артефактов (по умолчанию из config.cfg)
+            logs_bucket: Бакет для логов (по умолчанию из config.cfg)
+        """
+        self.endpoint = endpoint or config.minio_endpoint
+        self.access_key = access_key or config.minio_access_key
+        self.secret_key = secret_key or config.minio_secret_key
+        self.secure = secure if secure is not None else config.minio_secure
+        self.artifacts_bucket = artifacts_bucket or config.minio_artifacts_bucket
+        self.logs_bucket = logs_bucket or config.minio_logs_bucket
+        
+        self.client = Minio(
+            self.endpoint,
+            access_key=self.access_key,
+            secret_key=self.secret_key,
+            secure=self.secure
+        )
         
         logger.info(
             "minio_client_initialized",
-            endpoint=endpoint,
+            endpoint=self.endpoint,
             artifacts_bucket=self.artifacts_bucket,
             logs_bucket=self.logs_bucket
         )
@@ -112,6 +123,67 @@ class MinIOStorage:
         except S3Error as e:
             logger.error(
                 "artifact_upload_failed",
+                workflow_id=workflow_id,
+                node_id=node_id,
+                error=str(e),
+                exc_info=True
+            )
+            return None
+    
+    def upload_artifact_from_bytes(
+        self,
+        data: bytes,
+        filename: str,
+        workflow_id: str,
+        node_id: str,
+        artifact_type: str
+    ) -> Optional[str]:
+        """
+        Загрузка артефакта в MinIO прямо из памяти (без сохранения на диск)
+        
+        Args:
+            data: Байты файла
+            filename: Имя файла
+            workflow_id: ID воркфлоу
+            node_id: ID ноды
+            artifact_type: Тип артефакта (audio, text, markdown, latex, pdf)
+        
+        Returns:
+            Путь к объекту в MinIO или None при ошибке
+        """
+        import io
+        
+        # Структура: artifacts/{workflow_id}/{node_id}/{artifact_type}/{filename}
+        object_name = f"{workflow_id}/{node_id}/{artifact_type}/{filename}"
+        
+        try:
+            # Определяем content type
+            content_type = self._get_content_type_from_filename(filename)
+            
+            # Загружаем файл из памяти
+            data_stream = io.BytesIO(data)
+            self.client.put_object(
+                self.artifacts_bucket,
+                object_name,
+                data_stream,
+                length=len(data),
+                content_type=content_type
+            )
+            
+            logger.info(
+                "artifact_uploaded_from_bytes",
+                workflow_id=workflow_id,
+                node_id=node_id,
+                artifact_type=artifact_type,
+                object_name=object_name,
+                file_size=len(data)
+            )
+            
+            return object_name
+            
+        except S3Error as e:
+            logger.error(
+                "artifact_upload_from_bytes_failed",
                 workflow_id=workflow_id,
                 node_id=node_id,
                 error=str(e),
@@ -304,7 +376,27 @@ class MinIOStorage:
                 error=str(e)
             )
             return None
-    
+
+    def read_log(self, object_name: str) -> Optional[str]:
+        """
+        Read log content from MinIO by object name.
+
+        Args:
+            object_name: e.g. "node/2026/06/25/exec123_node1.log"
+
+        Returns:
+            Log content as string, or None if not found.
+        """
+        import io  # noqa: F401 — used implicitly via decode
+        try:
+            response = self.client.get_object(self.logs_bucket, object_name)
+            data = response.read()
+            response.close()
+            response.release_conn()
+            return data.decode("utf-8", errors="replace")
+        except S3Error:
+            return None
+
     def _get_content_type(self, file_path: str) -> str:
         """Определить content type по расширению файла"""
         ext = Path(file_path).suffix.lower()
@@ -322,6 +414,29 @@ class MinIOStorage:
         }
         
         return content_types.get(ext, "application/octet-stream")
+    
+    def _get_content_type_from_filename(self, filename: str) -> str:
+        """Определить content type по имени файла"""
+        ext = Path(filename).suffix.lower()
+        
+        content_types = {
+            ".mp3": "audio/mpeg",
+            ".mp4": "video/mp4",
+            ".m4a": "audio/mp4",
+            ".mkv": "video/x-matroska",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+            ".wav": "audio/wav",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+            ".tex": "text/x-tex",
+            ".pdf": "application/pdf",
+            ".json": "application/json"
+        }
+        
+        return content_types.get(ext, "application/octet-stream")
+
 
 
 # Глобальный экземпляр MinIO клиента

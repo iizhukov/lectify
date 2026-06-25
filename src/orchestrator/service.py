@@ -326,8 +326,8 @@ def _topological_sort(
     adj = defaultdict(list)
     in_degree = {n["id"]: 0 for n in nodes}
     for edge in edges:
-        adj[edge["from_node"]].append(edge["to_node"])
-        in_degree[edge["to_node"]] += 1
+        adj[edge["from_node_id"]].append(edge["to_node_id"])
+        in_degree[edge["to_node_id"]] += 1
 
     queue = deque([n["id"] for n in nodes if in_degree[n["id"]] == 0])
     node_map = {n["id"]: n for n in nodes}
