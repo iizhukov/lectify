@@ -18,6 +18,8 @@ class DBPlugin(Base):
     input_model = Column(String, nullable=False)
     output_model = Column(String, nullable=False)
     parameters_schema = Column(JSON, nullable=True)
+    color = Column(String, nullable=True)
+    icon_svg = Column(Text, nullable=True)
     docker_image = Column(String, nullable=True)
     node_count = Column(Integer, nullable=True)  # DEPRECATED: computed from len(node_templates)
     is_active = Column(Boolean, nullable=False, default=True)

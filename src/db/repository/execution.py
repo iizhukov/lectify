@@ -42,7 +42,6 @@ def _execution_to_model(exec: DBExecution) -> ExecutionModel:
     nodes = [_node_to_model(n) for n in exec.nodes] if exec.nodes else None
     return ExecutionModel(
         id=exec.id,
-        workflow_id=exec.workflow_id,
         workflow_template_id=exec.workflow_template_id,
         file_id=exec.file_id,
         user_id=exec.user_id,

@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
 from typing import Optional
 
 from src.db.repository.base import BaseRepository
 from src.db.entity import DBUser
 from src.db.models.user import UserModel
+from src.utils.passwords import verify_password
 
 
 def _user_to_model(user: DBUser) -> UserModel:
@@ -78,8 +78,17 @@ class UserRepository(BaseRepository):
             s.refresh(user)
             return _user_to_model(user)
 
+    def verify_credentials(self, username: str, password: str) -> Optional[UserModel]:
+        with self.session() as s:
+            user = s.query(DBUser).filter(DBUser.username == username).first()
+            if not user or not user.password_hash:
+                return None
+            if not verify_password(password, user.password_hash):
+                return None
+            return _user_to_model(user)
+
     def get_or_create_default(self) -> UserModel:
-        default_user = self.get("anonymous")
+        default_user = self.get_by_username("anonymous")
         if default_user:
             return default_user
         return self.create(user_id=str(uuid.uuid4()), username="anonymous")

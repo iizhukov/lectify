@@ -61,3 +61,12 @@ class NodeTemplateRepository(BaseRepository):
             s.commit()
             s.refresh(tmpl)
             return _node_template_to_model(tmpl)
+
+    def delete(self, template_id: str) -> bool:
+        with self.session() as s:
+            tmpl = s.query(DBNodeTemplate).filter(DBNodeTemplate.id == template_id).first()
+            if not tmpl:
+                return False
+            s.delete(tmpl)
+            s.commit()
+            return True
