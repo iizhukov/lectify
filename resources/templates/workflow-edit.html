@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Редактирование воркфлоу - Lectify{% endblock %}
+{% block title %}Редактирование сценария{% endblock %}
 
 {% block content %}
 <div id="editor-root" class="max-w-full mx-auto flex flex-col" style="height: calc(100vh - 48px);">
@@ -11,7 +11,7 @@
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
       </svg>
-      Воркфлоу
+      Сценарий
     </a>
     <span class="text-brand-muted">/</span>
     <span id="wf-name-breadcrumb" class="text-sm text-brand-dark font-medium">Загрузка...</span>
@@ -23,7 +23,7 @@
   <div class="flex-col gap-3 mb-3 items-start shrink-0">
     <div class="flex-1">
       <input type="text" id="wf-name-input" class="input-field font-semibold text-brand-dark w-full"
-        placeholder="Название воркфлоу">
+        placeholder="Название сценария">
     </div>
     <div class="flex-1 mt-2">
       <textarea id="wf-desc-input" class="input-field text-brand-dark w-full"
@@ -39,7 +39,7 @@
       <div class="card flex-1 flex flex-col min-h-0">
         <!-- Graph toolbar -->
         <div class="flex items-center justify-between mb-3 shrink-0">
-          <h2 class="text-sm font-semibold text-brand-dark">Граф воркфлоу</h2>
+          <h2 class="text-sm font-semibold text-brand-dark">Граф сценария</h2>
           <div class="flex gap-2">
             <button id="connect-mode-btn" class="btn-secondary text-xs py-1">Режим соединения</button>
             <button id="add-node-btn" class="btn-primary text-xs py-1">+ Добавить узел</button>
@@ -942,6 +942,8 @@
     const targetField = btn.dataset.targetField;
     const container = btn.closest('[data-unmapped-input]');
 
+    const currentNode = nodes.find(n => n.id === selectedNodeId);
+
     // Build options: source nodes with outputs already connected TO this node
     const connectedEdges = edges.filter(e => e.to_node_id === selectedNodeId);
     const compatibleOptions = [];
@@ -1284,7 +1286,7 @@
         nodes, edges,
       });
       workflow = updated;
-      showToast('success', 'Воркфлоу сохранён.');
+      showToast('success', 'Сценарий сохранён.');
     } catch (e) {
       showToast('error', 'Ошибка: ' + e.message);
     } finally {
