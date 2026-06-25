@@ -1,213 +1,114 @@
-from datetime import datetime
-
-from sqlalchemy import (
-    create_engine,
-    Column,
-    String,
-    ForeignKey,
-    DateTime,
-    Integer,
-    Text
-)
-
-from sqlalchemy.orm import (
-    declarative_base,
-    sessionmaker,
-    relationship
-)
-
-
 import os
 
-# PostgreSQL connection string
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://lectify:lectify_password@localhost:5432/lectify"
-)
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20
-)
-
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
-
-Base = declarative_base()
+from src.config import config
 
 
-class DBFile(Base):
-    __tablename__ = "files"
-
-    id = Column(String, primary_key=True, index=True)
-
-    filename = Column(String, nullable=False)
-    original_path = Column(String, nullable=False)
-
-    language = Column(String, nullable=False)
-
-    status = Column(String, nullable=False)
-
-    size_bytes = Column(Integer, nullable=False)
-    mime_type = Column(String, nullable=False)
-
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
-    )
-
-    workflows = relationship(
-        "DBWorkflow",
-        back_populates="file",
-        cascade="all, delete-orphan"
-    )
+_engine = None
+_SessionLocal = None
+_testing_mode = False
 
 
-class DBWorkflow(Base):
-    __tablename__ = "workflows"
+def set_testing_mode(enabled: bool = True):
+    """Включить тестовый режим - использовать тестовую БД"""
+    global _testing_mode, _engine, _SessionLocal
+    _testing_mode = enabled
 
-    id = Column(String, primary_key=True)
+    if _engine is not None:
+        _engine.dispose()
 
-    file_id = Column(
-        String,
-        ForeignKey("files.id", ondelete="CASCADE"),
-        nullable=False
-    )
-
-    name = Column(String, nullable=False)
-
-    status = Column(String, nullable=False)
-
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    started_at = Column(DateTime, nullable=True)
-    ended_at = Column(DateTime, nullable=True)
-
-    final_artifact_id = Column(
-        String,
-        ForeignKey("artifacts.id", ondelete="SET NULL"),
-        nullable=True
-    )
-
-    file = relationship(
-        "DBFile",
-        back_populates="workflows"
-    )
-
-    nodes = relationship(
-        "DBWorkflowNode",
-        back_populates="workflow",
-        cascade="all, delete-orphan"
-    )
+    _engine = None
+    _SessionLocal = None
 
 
-class DBWorkflowNode(Base):
-    __tablename__ = "workflow_nodes"
-
-    id = Column(String, primary_key=True)
-
-    workflow_id = Column(
-        String,
-        ForeignKey("workflows.id", ondelete="CASCADE"),
-        nullable=False
-    )
-
-    file_id = Column(
-        String,
-        ForeignKey("files.id", ondelete="CASCADE"),
-        nullable=False
-    )
-
-    node_id = Column(String, nullable=False)
-    node_name = Column(String, nullable=False)
-
-    status = Column(String, nullable=False)
-
-    message = Column(Text, nullable=True)
-    artifact_path = Column(Text, nullable=True)
-
-    started_at = Column(DateTime, nullable=True)
-    ended_at = Column(DateTime, nullable=True)
-
-    workflow = relationship(
-        "DBWorkflow",
-        back_populates="nodes"
-    )
-
-    artifacts = relationship(
-        "DBArtifact",
-        back_populates="node",
-        cascade="all, delete-orphan"
-    )
-
-    dependencies = relationship(
-        "DBWorkflowNodeDependency",
-        foreign_keys="DBWorkflowNodeDependency.node_db_id",
-        cascade="all, delete-orphan"
-    )
+def is_testing_mode() -> bool:
+    """Проверить тестовый режим"""
+    global _testing_mode
+    return _testing_mode or os.environ.get("TESTING", "").lower() == "true"
 
 
-class DBWorkflowNodeDependency(Base):
-    __tablename__ = "workflow_node_dependencies"
+def _get_database_url() -> str:
+    """Получить URL базы данных"""
+    if is_testing_mode():
+        return config.database_test_url
 
-    id = Column(String, primary_key=True)
-
-    node_db_id = Column(
-        String,
-        ForeignKey("workflow_nodes.id", ondelete="CASCADE"),
-        nullable=False
-    )
-
-    dependency_node_id = Column(String, nullable=False)
+    return config.database_url
 
 
-class DBArtifact(Base):
-    __tablename__ = "artifacts"
+def get_engine():
+    """Lazy creation engine"""
+    global _engine
 
-    id = Column(String, primary_key=True)
+    if _engine is None:
+        url = _get_database_url()
+        _engine = create_engine(
+            url,
+            pool_pre_ping=True,
+            pool_size=config.database_pool_size,
+            max_overflow=config.database_max_overflow
+        )
 
-    file_id = Column(
-        String,
-        ForeignKey("files.id", ondelete="CASCADE"),
-        nullable=False
-    )
+    return _engine
 
-    workflow_id = Column(
-        String,
-        ForeignKey("workflows.id", ondelete="CASCADE"),
-        nullable=False
-    )
 
-    node_id = Column(
-        String,
-        ForeignKey("workflow_nodes.id", ondelete="CASCADE"),
-        nullable=False
-    )
+def get_session_local():
+    """Lazy creation SessionLocal"""
+    global _SessionLocal
 
-    name = Column(String, nullable=False)
-    ext = Column(String, nullable=False)
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=get_engine()
+        )
 
-    mime_type = Column(String, nullable=False)
+    return _SessionLocal
 
-    path = Column(String, nullable=False)  # Локальный путь (для обратной совместимости)
-    minio_path = Column(String, nullable=True)  # Путь в MinIO
 
-    size_bytes = Column(Integer, nullable=False)
+def reset_database():
+    """Сбросить подключение к БД"""
+    global _engine, _SessionLocal
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    if _engine is not None:
+        _engine.dispose()
 
-    node = relationship(
-        "DBWorkflowNode",
-        back_populates="artifacts"
-    )
+    _engine = None
+    _SessionLocal = None
 
 
 def init_sqlalchemy_db():
-    Base.metadata.create_all(bind=engine)
+    """Инициализация БД - создание таблиц"""
+    from src.db.entity.base import Base
+    Base.metadata.create_all(bind=get_engine())
+
+
+class _SessionLocalWrapper:
+    """
+    Обёртка для sessionmaker, позволяющая патчить SessionLocal в тестах.
+    Используется как замена прямого импорта SessionLocal.
+    """
+    def __call__(self):
+        return get_session_local()()
+
+    def __enter__(self):
+        return get_session_local()().__enter__()
+
+    def __exit__(self, *args):
+        return get_session_local()().__exit__(*args)
+
+
+SessionLocal = _SessionLocalWrapper()
+
+
+class _EngineProxy:
+    """Прокси для engine"""
+    def __getattr__(self, name):
+        return getattr(get_engine(), name)
+
+    def __call__(self, *args, **kwargs):
+        return get_engine()(*args, **kwargs)
+
+
+engine = _EngineProxy()
