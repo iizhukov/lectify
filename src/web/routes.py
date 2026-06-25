@@ -1,5 +1,3 @@
-# routers/web_router.py
-
 import pathlib
 
 from fastapi import APIRouter, Query
