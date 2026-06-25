@@ -1,7 +1,7 @@
 import abc
-from typing import List, Type, Optional
+from typing import Type, Optional
 from pydantic import BaseModel
-from src.db.repository import DBRepository
+from src.db.repository import Repository
 from src.db.models import NodeStatus
 from src.utils.storage import get_storage
 from src.utils.logging import get_logger
@@ -16,7 +16,7 @@ class BaseNode(abc.ABC):
         self.input_model = input_model
         self.output_model = output_model
         self.children = []
-        self._repository = DBRepository()
+        self._repository = Repository()
         self._storage = get_storage()
 
     def add_child(self, child: 'BaseNode'):
