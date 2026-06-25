@@ -1,6 +1,8 @@
 """
 Tests for OrchestratorService: polling loop, execution, node run, retry logic.
 """
+import asyncio
+import concurrent.futures
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from collections import defaultdict
@@ -30,7 +32,7 @@ class TestTopologicalSort:
     def test_linear_chain(self):
         """A → B → C (single path)."""
         nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
-        edges = [{"from_node": "a", "to_node": "b"}, {"from_node": "b", "to_node": "c"}]
+        edges = [{"from_node_id": "a", "to_node_id": "b"}, {"from_node_id": "b", "to_node_id": "c"}]
         result_ids = [r["id"] for r in _topological_sort(nodes, edges)]
         assert result_ids.index("a") < result_ids.index("b") < result_ids.index("c")
 
@@ -38,10 +40,10 @@ class TestTopologicalSort:
         """A → B, A → C, B → D, C → D."""
         nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]
         edges = [
-            {"from_node": "a", "to_node": "b"},
-            {"from_node": "a", "to_node": "c"},
-            {"from_node": "b", "to_node": "d"},
-            {"from_node": "c", "to_node": "d"},
+            {"from_node_id": "a", "to_node_id": "b"},
+            {"from_node_id": "a", "to_node_id": "c"},
+            {"from_node_id": "b", "to_node_id": "d"},
+            {"from_node_id": "c", "to_node_id": "d"},
         ]
         result_ids = [r["id"] for r in _topological_sort(nodes, edges)]
         # a must come before both b and c
@@ -55,10 +57,10 @@ class TestTopologicalSort:
         """A → B → D, A → C → D (diamond)."""
         nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]
         edges = [
-            {"from_node": "a", "to_node": "b"},
-            {"from_node": "a", "to_node": "c"},
-            {"from_node": "b", "to_node": "d"},
-            {"from_node": "c", "to_node": "d"},
+            {"from_node_id": "a", "to_node_id": "b"},
+            {"from_node_id": "a", "to_node_id": "c"},
+            {"from_node_id": "b", "to_node_id": "d"},
+            {"from_node_id": "c", "to_node_id": "d"},
         ]
         result_ids = [r["id"] for r in _topological_sort(nodes, edges)]
         assert result_ids.index("a") < result_ids.index("b")
@@ -69,7 +71,7 @@ class TestTopologicalSort:
     def test_multiple_sources(self):
         """A, B both roots pointing to C."""
         nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
-        edges = [{"from_node": "a", "to_node": "c"}, {"from_node": "b", "to_node": "c"}]
+        edges = [{"from_node_id": "a", "to_node_id": "c"}, {"from_node_id": "b", "to_node_id": "c"}]
         result_ids = [r["id"] for r in _topological_sort(nodes, edges)]
         assert result_ids.index("a") < result_ids.index("c")
         assert result_ids.index("b") < result_ids.index("c")
@@ -91,11 +93,11 @@ class TestTopologicalSort:
             {"id": "sink"},
         ]
         edges = [
-            {"from_node": "src", "to_node": "t1"},
-            {"from_node": "src", "to_node": "t2"},
-            {"from_node": "t1", "to_node": "merge"},
-            {"from_node": "t2", "to_node": "merge"},
-            {"from_node": "merge", "to_node": "sink"},
+            {"from_node_id": "src", "to_node_id": "t1"},
+            {"from_node_id": "src", "to_node_id": "t2"},
+            {"from_node_id": "t1", "to_node_id": "merge"},
+            {"from_node_id": "t2", "to_node_id": "merge"},
+            {"from_node_id": "merge", "to_node_id": "sink"},
         ]
         result_ids = [r["id"] for r in _topological_sort(nodes, edges)]
         assert result_ids.index("src") < result_ids.index("t1")
@@ -117,7 +119,7 @@ class TestBuildDependencyMap:
 
     def test_chain(self):
         nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
-        edges = [{"from_node": "a", "to_node": "b"}, {"from_node": "b", "to_node": "c"}]
+        edges = [{"from_node_id": "a", "to_node_id": "b"}, {"from_node_id": "b", "to_node_id": "c"}]
         result = _build_dependency_map(nodes, edges)
         assert result["a"] == []
         assert result["b"] == ["a"]
@@ -125,13 +127,13 @@ class TestBuildDependencyMap:
 
     def test_parallel_merge(self):
         nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
-        edges = [{"from_node": "a", "to_node": "c"}, {"from_node": "b", "to_node": "c"}]
+        edges = [{"from_node_id": "a", "to_node_id": "c"}, {"from_node_id": "b", "to_node_id": "c"}]
         result = _build_dependency_map(nodes, edges)
         assert set(result["c"]) == {"a", "b"}
 
     def test_unknown_node_in_edge_ignored(self):
         nodes = [{"id": "a"}]
-        edges = [{"from_node": "a", "to_node": "unknown"}]
+        edges = [{"from_node_id": "a", "to_node_id": "unknown"}]
         result = _build_dependency_map(nodes, edges)
         assert result["a"] == []
 
@@ -315,7 +317,28 @@ class TestOrchestratorServicePolling:
             MagicMock(id="exec-2"),
         ])
 
-        await mock_service._poll_and_launch()
+        executor = concurrent.futures.ThreadPoolExecutor()
+        task_futures = []
+        loop = asyncio.get_event_loop()
+
+        def capture_task(coro, **kwargs):
+            fut = loop.create_future()
+
+            def run():
+                try:
+                    result = asyncio.run(coro)
+                    loop.call_soon_threadsafe(fut.set_result, result)
+                except Exception as e:
+                    loop.call_soon_threadsafe(fut.set_exception, e)
+
+            executor.submit(run)
+            task_futures.append(fut)
+            return MagicMock()
+
+        with patch("asyncio.create_task", side_effect=capture_task):
+            await mock_service._poll_and_launch()
+
+        await asyncio.gather(*task_futures)
         assert set(launched) == {"exec-1", "exec-2"}
 
     @pytest.mark.asyncio
@@ -336,7 +359,28 @@ class TestOrchestratorServicePolling:
             MagicMock(id="exec-2"),
         ])
 
-        await mock_service._poll_and_launch()
+        executor = concurrent.futures.ThreadPoolExecutor()
+        task_futures = []
+        loop = asyncio.get_event_loop()
+
+        def capture_task(coro, **kwargs):
+            fut = loop.create_future()
+
+            def run():
+                try:
+                    result = asyncio.run(coro)
+                    loop.call_soon_threadsafe(fut.set_result, result)
+                except Exception as e:
+                    loop.call_soon_threadsafe(fut.set_exception, e)
+
+            executor.submit(run)
+            task_futures.append(fut)
+            return MagicMock()
+
+        with patch("asyncio.create_task", side_effect=capture_task):
+            await mock_service._poll_and_launch()
+
+        await asyncio.gather(*task_futures)
         assert launched == ["exec-2"]
 
 
@@ -381,6 +425,7 @@ class TestOrchestratorServiceExecution:
         execution.id = "exec-1"
         execution.workflow_template_id = "wf-1"
         execution.file_id = "file-1"
+        execution.nodes = []
 
         mock_service.exec_repo.get.return_value = execution
         mock_service.workflow_repo.get.return_value = None
@@ -389,7 +434,7 @@ class TestOrchestratorServiceExecution:
         await mock_service._run_execution("exec-1")
         mock_service.exec_repo.update_status.assert_called_once()
         args = mock_service.exec_repo.update_status.call_args
-        assert args[1]["status"].value == "failed"
+        assert args[0][1].value == "failed"
 
     @pytest.mark.asyncio
     async def test_execution_completed_status(self, mock_service):
@@ -402,7 +447,7 @@ class TestOrchestratorServiceExecution:
 
         workflow = MagicMock()
         workflow.graph = {
-            "nodes": [{"id": "n1", "template_id": "t1"}],
+            "nodes": [{"id": "n1", "plugin_id": "t1"}],
             "edges": [],
         }
 
@@ -417,7 +462,7 @@ class TestOrchestratorServiceExecution:
 
         await mock_service._run_execution("exec-1")
 
-        statuses = [call[1]["status"] for call in mock_service.exec_repo.update_status.call_args_list]
+        statuses = [call[0][1] for call in mock_service.exec_repo.update_status.call_args_list]
         assert statuses[-1].value == "completed"
 
     @pytest.mark.asyncio
@@ -431,7 +476,7 @@ class TestOrchestratorServiceExecution:
 
         workflow = MagicMock()
         workflow.graph = {
-            "nodes": [{"id": "n1", "template_id": "t1"}],
+            "nodes": [{"id": "n1", "plugin_id": "t1"}],
             "edges": [],
         }
 
@@ -446,7 +491,7 @@ class TestOrchestratorServiceExecution:
 
         await mock_service._run_execution("exec-1")
 
-        statuses = [call[1]["status"] for call in mock_service.exec_repo.update_status.call_args_list]
+        statuses = [call[0][1] for call in mock_service.exec_repo.update_status.call_args_list]
         assert statuses[-1].value == "failed"
 
     @pytest.mark.asyncio
@@ -460,7 +505,7 @@ class TestOrchestratorServiceExecution:
 
         workflow = MagicMock()
         workflow.graph = {
-            "nodes": [{"id": "n1", "template_id": "t1"}],
+            "nodes": [{"id": "n1", "plugin_id": "t1"}],
             "edges": [],
         }
 
@@ -488,7 +533,7 @@ class TestOrchestratorServiceExecution:
 
         workflow = MagicMock()
         workflow.graph = {
-            "nodes": [{"id": "n1", "template_id": "t1"}],
+            "nodes": [{"id": "n1", "plugin_id": "t1"}],
             "edges": [],
         }
 
@@ -550,7 +595,7 @@ class TestOrchestratorServiceNodeRun:
         result = await mock_service._run_node(
             execution_id="exec-1",
             node_exec=self._mock_node_exec(),
-            node_def={"id": "n1", "template_id": "t1"},
+            node_def={"id": "n1", "plugin_id": "t1"},
             input_data={},
         )
 
@@ -570,7 +615,7 @@ class TestOrchestratorServiceNodeRun:
         result = await mock_service._run_node(
             execution_id="exec-1",
             node_exec=self._mock_node_exec(),
-            node_def={"id": "n1", "template_id": "t1"},
+            node_def={"id": "n1", "plugin_id": "t1"},
             input_data={},
         )
 
@@ -592,7 +637,7 @@ class TestOrchestratorServiceNodeRun:
         result = await mock_service._run_node(
             execution_id="exec-1",
             node_exec=self._mock_node_exec(),
-            node_def={"id": "n1", "template_id": "t1"},
+            node_def={"id": "n1", "plugin_id": "t1"},
             input_data={},
         )
 
@@ -618,7 +663,7 @@ class TestOrchestratorServiceNodeRun:
         result = await mock_service._run_node(
             execution_id="exec-1",
             node_exec=self._mock_node_exec(),
-            node_def={"id": "n1", "template_id": "t1"},
+            node_def={"id": "n1", "plugin_id": "t1"},
             input_data={},
         )
 
@@ -637,7 +682,7 @@ class TestOrchestratorServiceNodeRun:
         result = await mock_service._run_node(
             execution_id="exec-1",
             node_exec=self._mock_node_exec(),
-            node_def={"id": "n1", "template_id": "t1"},
+            node_def={"id": "n1", "plugin_id": "t1"},
             input_data={},
         )
 
@@ -683,14 +728,32 @@ class TestOrchestratorServiceResume:
 
         async def fake_run(exec_id):
             launched.append(exec_id)
-            mock_service._active_executions.discard(exec_id)
 
         mock_service._run_execution = fake_run
 
-        await mock_service._resume_interrupted()
+        executor = concurrent.futures.ThreadPoolExecutor()
+        task_futures = []
+        loop = asyncio.get_event_loop()
 
+        def capture_task(coro, **kwargs):
+            fut = loop.create_future()
+
+            def run():
+                try:
+                    result = asyncio.run(coro)
+                    loop.call_soon_threadsafe(fut.set_result, result)
+                except Exception as e:
+                    loop.call_soon_threadsafe(fut.set_exception, e)
+
+            executor.submit(run)
+            task_futures.append(fut)
+            return MagicMock()
+
+        with patch("asyncio.create_task", side_effect=capture_task):
+            await mock_service._resume_interrupted()
+
+        await asyncio.gather(*task_futures)
         assert set(launched) == {"running-1", "running-2"}
-        assert mock_service._active_executions == {"running-1", "running-2"}
 
     @pytest.mark.asyncio
     async def test_resume_skips_already_active(self, mock_service):

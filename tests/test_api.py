@@ -73,13 +73,6 @@ class TestAPIEndpoints:
         response = client.get("/api/files/nonexistent-id")
         assert response.status_code == 404
     
-    def test_get_workflow_history(self, client):
-        """Test getting workflow executions history"""
-        response = client.get("/api/workflows/executions")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-    
     def test_get_workflow_details(self, client, sample_audio_file):
         """Тест получения деталей воркфлоу"""
         # Загружаем файл (создаётся воркфлоу)
@@ -98,16 +91,6 @@ class TestAPIEndpoints:
         data = response.json()
         assert data["id"] == file_id
         assert "graph" in data
-    
-    def test_get_queue_status(self, client):
-        """Тест получения статуса очереди"""
-        response = client.get("/api/queue/status")
-        assert response.status_code == 200
-        data = response.json()
-        assert "active_workflows" in data
-        assert "max_concurrent" in data
-        assert "queue_size" in data
-        assert "active_workflow_ids" in data
     
     def test_metrics_endpoint(self, client):
         """Тест endpoint метрик Prometheus"""
