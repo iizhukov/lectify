@@ -1,0 +1,35 @@
+#!/bin/bash
+# Start mock backend for frontend development
+
+cd "$(dirname "$0")/.."
+
+echo "🚀 Starting mock backend..."
+echo "📝 Frontend will be available at: http://localhost:5002"
+echo ""
+echo "Routes:"
+echo "  /                    - Index page"
+echo "  /workflows           - Workflows page"
+echo "  /executions          - Executions page"
+echo "  /prompts             - Prompts page"
+echo ""
+echo "API Endpoints (all return mock data):"
+echo "  GET  /api/workflows"
+echo "  GET  /api/workflows/{id}"
+echo "  POST /api/workflows"
+echo "  PUT  /api/workflows/{id}"
+echo "  DELETE /api/workflows/{id}"
+echo "  POST /api/workflows/{id}/execute"
+echo "  GET  /api/workflows/executions"
+echo "  GET  /api/workflows/executions/{id}"
+echo "  GET  /api/workflows/executions/{id}/nodes"
+echo "  GET  /api/nodes"
+echo "  GET  /api/nodes/plugins"
+echo "  POST /api/nodes"
+echo "  GET  /api/prompts"
+echo "  POST /api/prompts"
+echo "  GET  /api/files"
+echo "  GET  /api/queue/status"
+echo "  ..."
+echo ""
+
+uvicorn mock.main_mock:app --host 0.0.0.0 --port 5002 --reload
