@@ -57,12 +57,14 @@ class Config:
     @property
     def openai_api_key(self) -> str:
         """OpenAI API ключ"""
-        return self._config.get("OpenAI", "API_KEY")
+        import os as _os
+        return _os.environ.get("OPENAI_API_KEY") or self._config.get("OpenAI", "API_KEY", fallback="")
     
     @property
     def openai_api_url(self) -> str:
         """OpenAI API URL"""
-        return self._config.get("OpenAI", "URL")
+        import os as _os
+        return _os.environ.get("OPENAI_API_URL") or self._config.get("OpenAI", "URL", fallback="")
     
     @property
     def openai_model(self) -> str:
@@ -125,8 +127,9 @@ class Config:
     
     @property
     def minio_endpoint(self) -> str:
-        """MinIO endpoint"""
-        return self._config.get("MinIO", "ENDPOINT", fallback="localhost:9000")
+        """MinIO endpoint — env var overrides config file."""
+        import os
+        return os.environ.get("MINIO_ENDPOINT") or self._config.get("MinIO", "ENDPOINT", fallback="localhost:9000")
     
     @property
     def minio_access_key(self) -> str:
@@ -266,9 +269,14 @@ class Config:
         return self._config.getboolean("Orchestrator", "ENABLED", fallback=True)
 
     @property
+    def orchestrator_max_concurrent_nodes(self) -> int:
+        """Максимальное количество одновременно выполняемых нод"""
+        return self._config.getint("Orchestrator", "MAX_CONCURRENT_NODES", fallback=5)
+
+    @property
     def orchestrator_max_concurrent_workflows(self) -> int:
-        """Максимальное количество одновременных воркфлоу"""
-        return self._config.getint("Orchestrator", "MAX_CONCURRENT_WORKFLOWS", fallback=3)
+        """Максимальное количество одновременных воркфлоу (для обратной совместимости)"""
+        return self._config.getint("Orchestrator", "MAX_CONCURRENT_WORKFLOWS", fallback=100)
 
     @property
     def orchestrator_poll_interval_seconds(self) -> int:

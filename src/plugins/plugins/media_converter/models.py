@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class MediaConverterInput(BaseModel):
     """Input for media converter plugin"""
-    file_id: str
+    file_id: str = ""
     file_path: str
 
 

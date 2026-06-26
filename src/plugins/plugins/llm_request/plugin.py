@@ -19,7 +19,7 @@ from src.plugins.base import (
 
 class LLMRequestInput(BaseModel):
     """Input for LLM request plugin"""
-    file_id: str
+    file_id: str = ""
     prompt_id: Optional[str] = None
     system_prompt: Optional[str] = None
     user_prompt_template: Optional[str] = None

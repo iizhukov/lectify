@@ -62,7 +62,7 @@ class OrchestratorService:
         logger.info(
             "orchestrator_started",
             poll_interval=self.config.poll_interval_seconds,
-            max_concurrent=self.config.max_concurrent_workflows,
+            max_concurrent_nodes=self.config.max_concurrent_nodes,
         )
 
         # Восстановление прерванных воркфлоу
@@ -105,6 +105,9 @@ class OrchestratorService:
             exec_record = self.exec_repo.get(execution_id)
             if exec_record and exec_record.status != ExecutionStatus.PENDING:
                 continue
+            # Mark RUNNING immediately — before the task is scheduled — so the next poll
+            # iteration (5 seconds later) won't pick up this execution again.
+            self.exec_repo.update_status(execution_id, ExecutionStatus.RUNNING)
             asyncio.create_task(self._run_execution(execution_id))
             self._active_executions.add(execution_id)
             self._metrics.workflows_total.inc()
@@ -124,7 +127,7 @@ class OrchestratorService:
     # ------------------------------------------------------------------
 
     async def _run_execution(self, execution_id: str):
-        """Выполнить воркфлоу: топологическая сортировка → ноды по порядку."""
+        """Выполнить воркфлоу: топологическая сортировка → параллельное выполнение нод."""
         logger.info("execution_started", execution_id=execution_id)
         self._metrics.workflow_active_count.inc()
         start_time = time.monotonic()
@@ -141,7 +144,6 @@ class OrchestratorService:
                 self.exec_repo.update_status(execution_id, ExecutionStatus.FAILED, "Workflow template not found")
                 return
 
-            self.exec_repo.update_status(execution_id, ExecutionStatus.RUNNING)
             graph = workflow.graph
             graph_nodes = [n.model_dump() for n in graph.nodes]
             graph_edges = [e.model_dump() for e in graph.edges]
@@ -155,38 +157,108 @@ class OrchestratorService:
             execution_file_id = str(execution.file_id)
             execution_file_path = self._get_file_path(execution_file_id)
 
+            # Пропускаем уже завершённые ноды, восстанавливаем их outputs
             for node_def in sorted_nodes:
                 node_id = node_def["id"]
                 node_exec = execution_nodes.get(node_id)
-                if not node_exec:
-                    logger.error("node_execution_record_not_found", node_id=node_id)
-                    continue
+                if node_exec and node_exec.status == NodeExecutionStatus.COMPLETED:
+                    logger.info("node_already_completed_skipping", node_id=node_id)
+                    completed.add(node_id)
+                    node_outputs[node_id] = node_exec.output_data or {}
 
-                # Ждём готовности зависимостей
-                while not all(dep in completed for dep in deps[node_id]):
-                    await asyncio.sleep(0.5)
-                    running_exec = self.exec_repo.get(execution_id)
-                    if running_exec is not None and str(running_exec.status) == str(ExecutionStatus.CANCELLED):
+            # Параллельное выполнение нод с глобальным лимитом
+            semaphore = asyncio.Semaphore(self.config.max_concurrent_nodes)
+            tasks: Dict[str, asyncio.Task] = {}
+            pending_ids = {n["id"] for n in sorted_nodes} - completed
+            completed_event = asyncio.Event()
+            failed = False
+
+            async def run_node_task(node_def: Dict) -> None:
+                nonlocal failed
+                node_id = node_def["id"]
+                await semaphore.acquire()
+                try:
+                    # Ждём готовности зависимостей
+                    while not all(dep in completed for dep in deps[node_id]):
+                        await asyncio.sleep(0.2)
+                        try:
+                            exec_record = self.exec_repo.get(execution_id)
+                            if exec_record and str(exec_record.status) == str(ExecutionStatus.CANCELLED):
+                                return
+                        except Exception:
+                            pass
+
+                    node_exec = execution_nodes.get(node_id)
+                    if not node_exec:
                         return
 
-                # Маппим входы
-                input_data = _map_inputs(node_def, deps[node_id], node_outputs, execution_file_id, execution_file_path)
+                    input_data = _map_inputs(node_def, deps[node_id], node_outputs, execution_file_id, execution_file_path)
+                    node_output = await self._run_node(
+                        execution_id=execution_id,
+                        node_exec=node_exec,
+                        node_def=node_def,
+                        input_data=input_data,
+                    )
 
-                # Выполняем ноду
-                success = await self._run_node(
-                    execution_id=execution_id,
-                    node_exec=node_exec,
-                    node_def=node_def,
-                    input_data=input_data,
-                )
+                    async with self._lock:
+                        if node_output is not None:
+                            completed.add(node_id)
+                            node_outputs[node_id] = node_output
+                            del tasks[node_id]
+                            # Запускаем newly ready ноды
+                            for nid in list(pending_ids - completed):
+                                if all(dep in completed for dep in deps[nid]) and nid not in tasks:
+                                    node_def_ready = next(n for n in sorted_nodes if n["id"] == nid)
+                                    tasks[nid] = asyncio.create_task(run_node_task(node_def_ready))
+                        else:
+                            logger.error("node_failed_stopping_workflow", node_id=node_id)
+                            self.exec_repo.update_status(execution_id, ExecutionStatus.FAILED, f"Node {node_id} failed")
+                            failed = True
+                            for t in tasks.values():
+                                t.cancel()
+                            tasks.clear()
+                            completed_event.set()
+                finally:
+                    semaphore.release()
+                    async with self._lock:
+                        if not tasks and not failed:
+                            completed_event.set()
 
-                if success:
-                    completed.add(node_id)
-                else:
-                    logger.error("node_failed_stopping_workflow", node_id=node_id)
-                    self.exec_repo.update_status(execution_id, ExecutionStatus.FAILED, f"Node {node_id} failed")
-                    self._active_executions.discard(execution_id)
+            # Запускаем все ноды, готовые сразу (без pending зависимостей)
+            async with self._lock:
+                for node_def in sorted_nodes:
+                    node_id = node_def["id"]
+                    if node_id in completed or node_id in tasks:
+                        continue
+                    if all(dep in completed for dep in deps[node_id]):
+                        tasks[node_id] = asyncio.create_task(run_node_task(node_def))
+
+            # Если нечего запускать — сразу завершаем
+            if not tasks:
+                if not failed:
+                    self.exec_repo.update_status(execution_id, ExecutionStatus.COMPLETED)
+                    logger.info("execution_completed", execution_id=execution_id)
+                return
+
+            # Ждём завершения (с периодической проверкой CANCELLED)
+            while True:
+                if completed_event.is_set():
+                    break
+                await asyncio.sleep(1.0)
+                exec_record = self.exec_repo.get(execution_id)
+                if exec_record and str(exec_record.status) == str(ExecutionStatus.CANCELLED):
+                    for t in tasks.values():
+                        t.cancel()
                     return
+
+            exec_record = self.exec_repo.get(execution_id)
+            if failed or (exec_record and str(exec_record.status) == str(ExecutionStatus.FAILED)):
+                return
+
+            pending_not_done = pending_ids - completed
+            if pending_not_done:
+                self.exec_repo.update_status(execution_id, ExecutionStatus.FAILED, f"Nodes failed: {pending_not_done}")
+                return
 
             self.exec_repo.update_status(execution_id, ExecutionStatus.COMPLETED)
             logger.info("execution_completed", execution_id=execution_id)
@@ -200,7 +272,6 @@ class OrchestratorService:
             self._metrics.workflow_active_count.dec()
             self._active_executions.discard(execution_id)
 
-            # Record completion vs failure based on final status
             try:
                 execution = self.exec_repo.get(execution_id)
                 if execution is not None:
@@ -219,10 +290,10 @@ class OrchestratorService:
         node_def: Dict[str, Any],
         input_data: Dict[str, Any],
         attempt: int = 0,
-    ) -> bool:
+    ) -> Dict[str, Any] | None:
         """
         Выполнить одну ноду с retry-логикой.
-        Возвращает True при успехе, False при неудаче.
+        Возвращает output_data при успехе, None при неудаче.
         """
         node_id = node_def["id"]
         plugin_id = node_def["plugin_id"]
@@ -263,6 +334,7 @@ class OrchestratorService:
                     node_id=node_id,
                     timeout_seconds=self.config.node_timeout_seconds,
                     on_progress=progress_callback,
+                    attempt=attempt + 1,
                 ),
             )
 
@@ -276,7 +348,7 @@ class OrchestratorService:
             elapsed_ms = (time.monotonic() - node_start) * 1000
             self._metrics.node_execution_duration.labels(node_id=node_id).observe(elapsed_ms / 1000)
             logger.info("node_completed", execution_id=execution_id, node_id=node_id)
-            return True
+            return output_data if output_data else None
 
         except Exception as e:
             error_msg = str(e)
@@ -314,7 +386,7 @@ class OrchestratorService:
                 progress_message=f"Ошибка: {error_msg}",
                 error_message=error_msg,
             )
-            return False
+            return None
 
     def _find_node(self, execution, node_id: str):
         """Найти DBExecutionNode по node_id внутри execution."""
@@ -405,6 +477,7 @@ def _map_inputs(
             result["file_path"] = file_path
         return result
 
+    # Always pass file_id from the workflow execution root file
     result = {}
     for rule in input_mapping:
         target = rule["target_field"]
@@ -428,6 +501,40 @@ def _map_inputs(
         else:
             result[target] = source
 
+    # Preserve file_id from upstream if it was set via input_mapping.
+    # Only fall back to execution-level file_id if the mapping didn't already set one.
+    if "file_id" not in result:
+        # Check if any dependency already has file_id in its output
+        # (e.g. speech_to_text returns file_id for its txt artifact)
+        for dep in dependencies:
+            dep_output = node_outputs.get(dep, {})
+            if dep_output.get("file_id"):
+                result["file_id"] = dep_output["file_id"]
+                break
+        # Last fallback: execution-level file_id
+        if "file_id" not in result:
+            result["file_id"] = file_id
+    if file_path:
+        result["file_path"] = file_path
+
+    logger.debug(
+        "input_mapping_complete",
+        node_id=node_def.get("id"),
+        input_mapping=input_mapping,
+        result_keys=list(result.keys()),
+        result_file_id=result.get("file_id"),
+        execution_file_id=file_id,
+    )
+    logger.info(
+        "input_data_for_node",
+        node_id=node_def.get("id"),
+        input_data_keys=list(result.keys()),
+        txt_path=result.get("txt_path"),
+        media_path=result.get("media_path"),
+        latex_path=result.get("latex_path"),
+        file_path=result.get("file_path"),
+        file_id=result.get("file_id"),
+    )
     return result
 
 

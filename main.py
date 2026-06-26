@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uvicorn
 import sys
 import pathlib
@@ -89,11 +90,20 @@ except Exception as e:
 
 try:
     from src.plugins.registry import scan_and_register_plugins
+    from src.plugins.image_manager import build_missing_plugin_images
     from src.workflows.migration import run_all_migrations
 
     scan_and_register_plugins()
     logger.info("plugins_scanned")
     print("OK: Plugins scanned", file=sys.stderr)
+
+    # Only rebuild on first run (worker process). With uvicorn reload=True the
+    # watcher process also imports this module — it should NOT delete/rebuild images.
+    # Detect watcher by the WORKER_PID env var set only in the watcher process.
+    is_reloader = os.environ.get("WORKER_PID") is None
+    build_missing_plugin_images(rebuild=is_reloader)
+    logger.info("plugin_images_built", is_reloader=is_reloader)
+    print("OK: Plugin images ready", file=sys.stderr)
 
     run_all_migrations()
     logger.info("migrations_completed")

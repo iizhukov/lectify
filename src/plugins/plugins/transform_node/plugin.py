@@ -21,7 +21,7 @@ from src.plugins.base import (
 
 class TransformInput(BaseModel):
     """Input for transform plugin"""
-    file_id: str
+    file_id: str = ""
     data: Any  # Can be any type from previous node output
 
 

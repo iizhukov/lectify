@@ -385,26 +385,28 @@ class MinIOStorage:
     def upload_log(
         self,
         log_file_path: str,
-        log_type: str = "application"
+        execution_id: str,
+        attempt: int,
+        log_type: str = "node"
     ) -> Optional[str]:
         """
         Загрузка лог-файла в MinIO
-        
+
         Args:
             log_file_path: Путь к лог-файлу
-            log_type: Тип лога (application, system, etc.)
-        
+            execution_id: ID исполнения
+            attempt: Номер попытки (1, 2, ...)
+            log_type: Тип ноды (node, media, stt, etc.)
+
         Returns:
             Путь к объекту в MinIO или None при ошибке
         """
         if not os.path.exists(log_file_path):
             return None
-        
-        # Структура: logs/{log_type}/{date}/{filename}
-        date_str = datetime.now().strftime("%Y/%m/%d")
-        file_name = Path(log_file_path).name
-        object_name = f"{log_type}/{date_str}/{file_name}"
-        
+
+        # Структура: logs/executions/{execution_id}/{attempt}/{log_type}/node.log
+        object_name = f"executions/{execution_id}/{attempt}/{log_type}/node.log"
+
         try:
             self.client.fput_object(
                 self.logs_bucket,
@@ -412,18 +414,22 @@ class MinIOStorage:
                 log_file_path,
                 content_type="text/plain"
             )
-            
+
             logger.info(
                 "log_uploaded",
+                execution_id=execution_id,
+                attempt=attempt,
                 log_type=log_type,
                 object_name=object_name
             )
-            
+
             return object_name
-            
+
         except S3Error as e:
             logger.error(
                 "log_upload_failed",
+                execution_id=execution_id,
+                attempt=attempt,
                 log_type=log_type,
                 error=str(e)
             )

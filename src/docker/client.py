@@ -266,6 +266,7 @@ class DockerClient:
                 mem_limit=mem_limit,
                 cpu_period=cpu_period,
                 cpu_quota=cpu_quota,
+                extra_hosts={"host.docker.internal": "host-gateway"},
                 detach=True,
                 remove=False
             )

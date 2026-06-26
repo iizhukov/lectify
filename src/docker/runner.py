@@ -8,12 +8,13 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, cast
 
 if TYPE_CHECKING:
     from src.docker.client import DockerClient
 
 from src.docker.client import DockerClient, get_docker_client
+from src.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -211,13 +212,25 @@ class ContainerRunner:
         parameters: Dict[str, Any]
     ) -> str:
         """Write input.json to temp directory, downloading the uploaded file from MinIO."""
+        logger.info(
+            f"_write_input_to_temp_enter "
+            f"plugin_id={plugin_id} execution_id={execution_id} node_id={node_id} "
+            f"input_data_keys={list(input_data.keys())} "
+            f"txt_path={input_data.get('txt_path')} "
+            f"media_path={input_data.get('media_path')} "
+            f"latex_path={input_data.get('latex_path')} "
+            f"file_path={input_data.get('file_path')} "
+            f"file_id={input_data.get('file_id')}"
+        )
         temp_dir = Path(tempfile.gettempdir()) / "lectify"
         temp_dir.mkdir(exist_ok=True)
 
         node_dir = temp_dir / execution_id / node_id
         node_dir.mkdir(parents=True, exist_ok=True)
+        (node_dir / "input").mkdir(exist_ok=True)
+        (node_dir / "output").mkdir(exist_ok=True)
 
-        input_file = node_dir / "input.json"
+        input_file = (node_dir / "input") / "input.json"
 
         # Build input_data with plugin metadata
         full_input = {
@@ -231,42 +244,143 @@ class ContainerRunner:
         # Download the uploaded file from MinIO into node_dir if file_path is a MinIO object name
         file_path = input_data.get("file_path")
         file_id = input_data.get("file_id")
-        if file_path and file_id and not file_path.startswith("/") and not file_path.startswith("minio://"):
-            # file_path is a MinIO object name like "uploads/{file_id}/{filename}"
-            # Use original filename from DB so the extension is preserved.
-            # Path(file_path).name loses the extension when the key has no filename part
-            # (e.g. "uploads/{file_id}" → returns UUID with no extension).
+        media_path = input_data.get("media_path")
+
+        def _download_minio(url: str, fid: str, field_name: str) -> str | None:
+            """Download a minio:// URL to node_dir and return container path."""
+            logger.info(
+                f"download_minio_start "
+                f"field={field_name} url={url} file_id={fid}"
+            )
+            if not url or not url.startswith("minio://"):
+                logger.warning(f"download_minio_skip_not_minio_url field={field_name} url={url}")
+                return None
+            object_name = url.replace("minio://", "")
+            # Use original filename from DB, fall back to filename in URL
             from src.db.entity import DBFile
             from src.db.database import SessionLocal
             with SessionLocal() as session:
-                db_file = session.query(DBFile).filter(DBFile.id == file_id).first()
-                filename = db_file.filename if db_file else Path(file_path).name
-            local_path = node_dir / filename
-            try:
-                from src.utils.storage import MinIOStorage
-                storage = MinIOStorage()
-                bytes_data = storage.get_file_bytes(file_path)
-                if bytes_data is not None:
-                    with open(local_path, "wb") as f:
-                        f.write(bytes_data)
-                    container_path = f"/input/{filename}"
-                    full_input["file_path"] = container_path
-                    # media_path is required by speech_to_text and similar media plugins
-                    full_input["media_path"] = container_path
+                db_file = session.query(DBFile).filter(DBFile.id == fid).first() if fid else None
+                _col_filename = cast(str, db_file.filename) if db_file else None
+                filename: str = _col_filename if _col_filename else str(Path(object_name).name)
+                if db_file:
                     logger.info(
-                        f"file_downloaded_to_node_dir "
-                        f"file_id={file_id} file_path={file_path} local_path={local_path}"
+                        f"download_minio_dbfile_found "
+                        f"field={field_name} db_file_id={db_file.id} filename={db_file.filename} "
+                        f"minio_path={db_file.minio_path}"
                     )
                 else:
                     logger.warning(
+                        f"download_minio_dbfile_not_found "
+                        f"field={field_name} file_id={fid} using_url_filename={filename}"
+                    )
+            local_path = node_dir / "input" / filename
+            logger.info(f"download_minio_will_write field={field_name} local_path={local_path}")
+            try:
+                from src.utils.storage import MinIOStorage
+                storage = MinIOStorage()
+                bytes_data = storage.get_file_bytes(object_name)
+                if bytes_data is not None:
+                    with open(local_path, "w" if field_name == "text" else "wb") as f:
+                        f.write(bytes_data)
+                    container_path = f"/input/{filename}"
+                    logger.info(
+                        f"file_downloaded_to_node_dir "
+                        f"field={field_name} file_id={fid} local_path={local_path}"
+                    )
+                    return container_path
+                else:
+                    logger.warning(
                         f"file_not_found_in_minio "
-                        f"file_id={file_id} file_path={file_path}"
+                        f"field={field_name} file_id={fid} object_name={object_name}"
                     )
             except Exception as e:
                 logger.warning(
                     f"minio_download_failed "
-                    f"file_id={file_id} file_path={file_path} error={e}"
+                    f"field={field_name} file_id={fid} object_name={object_name} error={e}"
                 )
+            return None
+
+        # file_path: download if MinIO object name (no scheme) or minio:// URL
+        if file_path and file_id:
+            if not file_path.startswith("/") and not file_path.startswith("minio://"):
+                # file_path is a MinIO object name like "uploads/{file_id}/{filename}"
+                from src.db.entity import DBFile
+                from src.db.database import SessionLocal
+                with SessionLocal() as session:
+                    db_file = session.query(DBFile).filter(DBFile.id == file_id).first()
+                    db_filename: str | None = cast(str | None, db_file.filename) if db_file else None
+                    filename: str = db_filename if db_filename else str(Path(file_path).name)
+                local_path = node_dir / "input" / filename
+                try:
+                    from src.utils.storage import MinIOStorage
+                    storage = MinIOStorage()
+                    bytes_data = storage.get_file_bytes(file_path)
+                    if bytes_data is not None:
+                        with open(local_path, "wb") as f:
+                            f.write(bytes_data)
+                        container_path = f"/input/{filename}"
+                        full_input["file_path"] = container_path
+                        # media_path is required by speech_to_text and similar media plugins
+                        full_input["media_path"] = container_path
+                        logger.info(
+                            f"file_downloaded_to_node_dir "
+                            f"file_id={file_id} file_path={file_path} local_path={local_path}"
+                        )
+                    else:
+                        logger.warning(
+                            f"file_not_found_in_minio "
+                            f"file_id={file_id} file_path={file_path}"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"minio_download_failed "
+                        f"file_id={file_id} file_path={file_path} error={e}"
+                    )
+            elif file_path.startswith("minio://"):
+                # file_path is already a minio:// URL — download it
+                downloaded = _download_minio(file_path, file_id, "file_path")
+                if downloaded:
+                    full_input["file_path"] = downloaded
+                    full_input["media_path"] = downloaded
+
+        # media_path: handle minio:// URLs (set by _upload_output_files from upstream node)
+        if media_path and media_path.startswith("minio://"):
+            file_id_val = input_data.get("file_id", "")
+            downloaded = _download_minio(media_path, file_id_val, "media_path") if file_id_val else None
+            if downloaded:
+                full_input["media_path"] = downloaded
+            elif not file_id_val:
+                # No file_id means upstream didn't create a DBFile — leave minio:// URL
+                # for the plugin to resolve directly via _download_minio_to_temp()
+                pass
+
+        # txt_path: handle minio:// URLs (set by speech_to_text upstream node)
+        txt_path = input_data.get("txt_path")
+        if txt_path and txt_path.startswith("minio://"):
+            file_id_val = input_data.get("file_id", "")
+            logger.info(
+                f"txt_path_minio_block "
+                f"txt_path={txt_path} file_id={file_id_val}"
+            )
+            downloaded = _download_minio(txt_path, file_id_val, "txt_path")
+            if downloaded:
+                full_input["txt_path"] = downloaded
+                if "file_path" not in full_input:
+                    full_input["file_path"] = downloaded
+                logger.info(f"txt_path_downloaded_success path={downloaded}")
+            else:
+                logger.warning(f"txt_path_download_failed keeping_minio_url {txt_path}")
+
+        # latex_path: handle minio:// URLs (set by text_to_latex upstream node)
+        latex_path = input_data.get("latex_path")
+        if latex_path and latex_path.startswith("minio://"):
+            file_id_val = input_data.get("file_id", "")
+            downloaded = _download_minio(latex_path, file_id_val, "latex_path")
+            if downloaded:
+                full_input["latex_path"] = downloaded
+                if "file_path" not in full_input:
+                    full_input["file_path"] = downloaded
 
         with open(input_file, "w") as f:
             json.dump(full_input, f)
@@ -284,15 +398,23 @@ class ContainerRunner:
         temp_dir = Path(tempfile.gettempdir()) / "lectify"
         node_dir = temp_dir / execution_id / node_id
 
+        # Create separate host directories for input and output mounts
+        input_dir = node_dir / "input"
+        output_dir = node_dir / "output"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         environment = {
             "PLUGIN_INPUT": "/input/input.json",
-            "PLUGIN_OUTPUT": "/output/output.json"
+            "PLUGIN_OUTPUT": "/output/output.json",
+            "MINIO_ENDPOINT": "host.docker.internal:9000",
+            "OPENAI_API_KEY": config.openai_api_key,
+            "OPENAI_API_URL": config.openai_api_url,
         }
 
-        # composite key "host_path:container_path" ensures unique dict keys
         volumes = {
-            f"{node_dir}:/input":  {"bind": "/input",  "mode": "ro"},
-            f"{node_dir}:/output": {"bind": "/output", "mode": "rw"},
+            f"{input_dir}:/input":  {"bind": "/input",  "mode": "ro"},
+            f"{output_dir}:/output": {"bind": "/output", "mode": "rw"},
         }
 
         container = self.docker.create_container(
@@ -314,7 +436,7 @@ class ContainerRunner:
         """Read output.json from temp directory"""
         temp_dir = Path(tempfile.gettempdir()) / "lectify"
         node_dir = temp_dir / execution_id / node_id
-        output_file = node_dir / "output.json"
+        output_file = node_dir / "output" / "output.json"
 
         if not output_file.exists():
             raise FileNotFoundError(f"Output file not found: {output_file}")
@@ -434,6 +556,14 @@ class PollingContainerRunner(ContainerRunner):
         finally:
             self._stop_polling.set()
             if container_id:
+                # Get logs BEFORE stopping/removing container
+                try:
+                    logs = self.docker.get_container_logs(container_id)
+                    if logs and log_path:
+                        with open(log_path, "a", encoding="utf-8") as f:
+                            f.write(logs)
+                except Exception:
+                    pass
                 self.docker.stop_container(container_id, timeout=5)
                 self.docker.remove_container(container_id, force=True)
             # NOTE: _cleanup_temp_files is called by ContainerRunnerOrchestrator,

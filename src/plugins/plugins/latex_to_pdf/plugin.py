@@ -2,9 +2,11 @@
 LaTeX to PDF Plugin — compile LaTeX to PDF
 """
 
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 from typing import Any, Dict
 
 from pydantic import BaseModel
@@ -12,15 +14,13 @@ from pydantic import BaseModel
 from src.plugins.base import (
     Plugin,
     PluginContext,
-    PluginInput,
-    PluginOutput,
     PluginParameter
 )
 
 
 class LatexToPDFInput(BaseModel):
     """Input for LaTeX-to-PDF plugin"""
-    file_id: str
+    file_id: str = ""
     latex_path: str
 
 
@@ -29,6 +29,30 @@ class LatexToPDFOutput(BaseModel):
     file_id: str
     pdf_path: str
     attempts: int = 1
+
+
+def _download_minio_to_temp(minio_url: str, max_retries: int = 5) -> str:
+    """Download a minio:// URL to a temp file. Retries on eventual-consistency delays."""
+    import time as _time
+    object_name = minio_url.replace("minio://", "")
+    from src.utils.storage import MinIOStorage
+    storage = MinIOStorage()
+    if object_name.startswith(storage.artifacts_bucket + "/"):
+        object_name = object_name[len(storage.artifacts_bucket) + 1:]
+    last_error = None
+    for attempt in range(max_retries):
+        bytes_data = storage.get_file_bytes(object_name)
+        if bytes_data:
+            suffix = pathlib.Path(object_name).suffix or ".tex"
+            temp_fd, temp_path = tempfile.mkstemp(suffix=suffix)
+            os.close(temp_fd)
+            with open(temp_path, "wb") as f:
+                f.write(bytes_data)
+            return temp_path
+        last_error = f"Object not found in MinIO (attempt {attempt + 1}/{max_retries}): {object_name}"
+        if attempt < max_retries - 1:
+            _time.sleep(0.5 * (2 ** attempt))
+    raise FileNotFoundError(last_error)
 
 
 class LatexToPDFPlugin(Plugin):
@@ -70,13 +94,22 @@ class LatexToPDFPlugin(Plugin):
     ) -> LatexToPDFOutput:
         """Execute LaTeX-to-PDF"""
         file_id = input_data.file_id
-        latex_path = input_data.latex_path
+        latex_path_input = input_data.latex_path
         max_attempts = parameters.get("max_attempts", 3)
         use_llm_repair = parameters.get("use_llm_repair", True)
 
         context.report_progress(10, "Проверяем файл...")
 
+        latex_path = ""
+        is_temp = False
         try:
+            # Handle minio:// URLs — download to temp file inside Docker
+            if latex_path_input.startswith("minio://"):
+                latex_path = _download_minio_to_temp(latex_path_input)
+                is_temp = True
+            else:
+                latex_path = latex_path_input
+
             latex_file = pathlib.Path(latex_path)
             if not latex_file.exists():
                 raise FileNotFoundError(f"LaTeX file not found: {latex_path}")
@@ -85,6 +118,7 @@ class LatexToPDFPlugin(Plugin):
             script_path = pathlib.Path(__file__).parent.parent.parent.parent / "latex_to_pdf.py"
 
             attempts = 0
+            success = False
             while attempts < max_attempts:
                 attempts += 1
                 context.report_progress(
@@ -103,6 +137,7 @@ class LatexToPDFPlugin(Plugin):
                 )
 
                 if res.returncode == 0:
+                    success = True
                     break
 
                 # Compilation failed, try LLM repair
@@ -113,10 +148,14 @@ class LatexToPDFPlugin(Plugin):
                     )
                     self._repair_latex(latex_file, res.stderr or res.stdout, context)
 
-            if res.returncode != 0:
+            if not success:
                 raise Exception(f"PDF compilation failed after {attempts} attempts")
 
-            pdf_path = str(latex_file.with_suffix(".pdf"))
+            # Write output to /output/ for Docker, or next to input for local
+            if latex_path_input.startswith("minio://"):
+                pdf_path = "/output/result.pdf"
+            else:
+                pdf_path = str(latex_file.with_suffix(".pdf"))
             if not pathlib.Path(pdf_path).exists():
                 raise Exception("PDF file was not created")
 
@@ -131,6 +170,13 @@ class LatexToPDFPlugin(Plugin):
         except Exception as e:
             context.log("error", f"LaTeX-to-PDF failed: {str(e)}")
             raise
+        finally:
+            # Cleanup temp file from MinIO download
+            if is_temp and os.path.exists(latex_path):
+                try:
+                    os.remove(latex_path)
+                except Exception:
+                    pass
 
     def _repair_latex(self, latex_file: pathlib.Path, error_log: str, context: PluginContext):
         """Repair LaTeX using LLM"""

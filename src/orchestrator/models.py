@@ -8,7 +8,8 @@ from dataclasses import dataclass
 class OrchestratorConfig:
     """Параметры оркестратора из config.cfg"""
     enabled: bool = True
-    max_concurrent_workflows: int = 3
+    max_concurrent_workflows: int = 100
+    max_concurrent_nodes: int = 5
     poll_interval_seconds: int = 5
     node_timeout_seconds: int = 600
     auto_retry_failed_nodes: bool = True

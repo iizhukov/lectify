@@ -148,6 +148,7 @@ def _get_input_mapping(node_id: str) -> list:
         ],
         # Transcription to Markdown workflow
         "speech_to_text_simple": [
+            {"target_field": "file_id", "source": "$media_converter_simple.output.file_id"},
             {"target_field": "media_path", "source": "$media_converter_simple.output.media_path"}
         ],
         "text_to_md_simple": [

@@ -2,7 +2,9 @@
 Text to Markdown Plugin — convert text to Markdown conspectus
 """
 
+import os
 import pathlib
+import tempfile
 from typing import Any, Dict
 
 from pydantic import BaseModel
@@ -10,15 +12,13 @@ from pydantic import BaseModel
 from src.plugins.base import (
     Plugin,
     PluginContext,
-    PluginInput,
-    PluginOutput,
     PluginParameter
 )
 
 
 class TextToMDInput(BaseModel):
     """Input for text-to-MD plugin"""
-    file_id: str
+    file_id: str = ""
     txt_path: str
     prompt_id: str = ""
 
@@ -28,6 +28,30 @@ class TextToMDOutput(BaseModel):
     file_id: str
     md_path: str
     char_count: int = 0
+
+
+def _download_minio_to_temp(minio_url: str, max_retries: int = 5) -> str:
+    """Download a minio:// URL to a temp file. Retries on eventual-consistency delays."""
+    import time as _time
+    object_name = minio_url.replace("minio://", "")
+    from src.utils.storage import MinIOStorage
+    storage = MinIOStorage()
+    if object_name.startswith(storage.artifacts_bucket + "/"):
+        object_name = object_name[len(storage.artifacts_bucket) + 1:]
+    last_error = None
+    for attempt in range(max_retries):
+        bytes_data = storage.get_file_bytes(object_name)
+        if bytes_data:
+            suffix = pathlib.Path(object_name).suffix or ".txt"
+            temp_fd, temp_path = tempfile.mkstemp(suffix=suffix)
+            os.close(temp_fd)
+            with open(temp_path, "wb") as f:
+                f.write(bytes_data)
+            return temp_path
+        last_error = f"Object not found in MinIO (attempt {attempt + 1}/{max_retries}): {object_name}"
+        if attempt < max_retries - 1:
+            _time.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s, 4s, 8s
+    raise FileNotFoundError(last_error)
 
 
 class TextToMDPlugin(Plugin):
@@ -70,18 +94,35 @@ class TextToMDPlugin(Plugin):
     ) -> TextToMDOutput:
         """Execute text-to-markdown"""
         file_id = input_data.file_id
-        txt_path = input_data.txt_path
+        txt_path_input = input_data.txt_path
         max_chars = parameters.get("max_chars", 40000)
 
         context.report_progress(10, "Читаем текст...")
 
+        txt_path = ""
+        is_temp = False
         try:
-            txt_file = pathlib.Path(txt_path)
-            if not txt_file.exists():
-                raise FileNotFoundError(f"Text file not found: {txt_path}")
+            # Handle minio:// URLs — download to temp file inside Docker
+            if txt_path_input.startswith("minio://"):
+                txt_path = _download_minio_to_temp(txt_path_input)
+                is_temp = True
+            else:
+                txt_path = txt_path_input
 
-            with open(str(txt_file), "r", encoding="utf-8") as f:
-                text = f.read()
+            try:
+                txt_file = pathlib.Path(txt_path)
+                if not txt_file.exists():
+                    raise FileNotFoundError(f"Text file not found: {txt_path}")
+
+                with open(str(txt_file), "r", encoding="utf-8") as f:
+                    text = f.read()
+            finally:
+                # Cleanup temp file from MinIO download
+                if is_temp and os.path.exists(txt_path):
+                    try:
+                        os.remove(txt_path)
+                    except Exception:
+                        pass
 
             context.report_progress(20, "Подготавливаем промпт...")
 
@@ -110,7 +151,11 @@ class TextToMDPlugin(Plugin):
 
             context.report_progress(80, "Сохраняем результат...")
 
-            md_path = str(txt_file.with_suffix(".md"))
+            # Write output to /output/ for Docker, or next to input for local
+            if txt_path_input.startswith("minio://"):
+                md_path = "/output/result.md"
+            else:
+                md_path = str(pathlib.Path(txt_path).with_suffix(".md"))
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(content)
 

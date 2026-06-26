@@ -40,43 +40,51 @@ class NodeLogManager:
         log_path: Path,
         execution_id: str,
         node_id: str,
-        log_type: str = "node"
+        log_type: str = "node",
+        attempt: int = 1,
     ) -> Optional[str]:
         """
         Сохраняет логи ноды в MinIO.
 
         Returns:
-            Путь к объекту в MinIO (logs/{log_type}/{date}/{execution_id}_{node_id}.log)
+            Путь к объекту в MinIO (logs/executions/{execution_id}/{attempt}/{log_type}/node.log)
             или None при ошибке.
         """
         if not log_path.exists() or log_path.stat().st_size == 0:
             logger.debug("no_logs_to_upload", execution_id=execution_id, node_id=node_id)
             return None
 
-        object_name = self.storage.upload_log(str(log_path), log_type=log_type)
+        object_name = self.storage.upload_log(
+            str(log_path),
+            execution_id=execution_id,
+            attempt=attempt,
+            log_type=log_type,
+        )
         if object_name:
             logger.info(
                 "node_logs_saved_to_minio",
                 execution_id=execution_id,
                 node_id=node_id,
+                attempt=attempt,
                 object_name=object_name,
                 size_bytes=log_path.stat().st_size
             )
         return object_name
 
-    def get_logs(self, execution_id: str, node_id: str, log_type: str = "node") -> Optional[str]:
+    def get_logs(self, execution_id: str, node_id: str, log_type: str = "node", attempt: int = 1) -> Optional[str]:
         """
         Читает логи ноды из MinIO.
 
         Args:
             execution_id: ID исполнения
             node_id: ID ноды
-            log_type: Тип лога (default: "node")
+            log_type: Тип ноды (default: "node")
+            attempt: Номер попытки (default: 1)
 
         Returns:
             Содержимое лога как строка, или None если не найдено.
         """
-        object_name = f"{log_type}/2026/06/{execution_id}_{node_id}.log"
+        object_name = f"executions/{execution_id}/{attempt}/{log_type}/node.log"
         return self.storage.read_log(object_name)
 
     def cleanup_local(self, log_path: Path) -> None:

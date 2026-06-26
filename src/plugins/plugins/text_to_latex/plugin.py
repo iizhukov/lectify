@@ -2,9 +2,11 @@
 Text to LaTeX Plugin — convert text to LaTeX conspectus
 """
 
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 from typing import Any, Dict
 
 from pydantic import BaseModel
@@ -12,15 +14,13 @@ from pydantic import BaseModel
 from src.plugins.base import (
     Plugin,
     PluginContext,
-    PluginInput,
-    PluginOutput,
     PluginParameter
 )
 
 
 class TextToLatexInput(BaseModel):
     """Input for text-to-LaTeX plugin"""
-    file_id: str
+    file_id: str = ""
     txt_path: str
     prompt_id: str = ""
 
@@ -29,6 +29,30 @@ class TextToLatexOutput(BaseModel):
     """Output from text-to-LaTeX plugin"""
     file_id: str
     latex_path: str
+
+
+def _download_minio_to_temp(minio_url: str, max_retries: int = 5) -> str:
+    """Download a minio:// URL to a temp file. Retries on eventual-consistency delays."""
+    import time as _time
+    object_name = minio_url.replace("minio://", "")
+    from src.utils.storage import MinIOStorage
+    storage = MinIOStorage()
+    if object_name.startswith(storage.artifacts_bucket + "/"):
+        object_name = object_name[len(storage.artifacts_bucket) + 1:]
+    last_error = None
+    for attempt in range(max_retries):
+        bytes_data = storage.get_file_bytes(object_name)
+        if bytes_data:
+            suffix = pathlib.Path(object_name).suffix or ".txt"
+            temp_fd, temp_path = tempfile.mkstemp(suffix=suffix)
+            os.close(temp_fd)
+            with open(temp_path, "wb") as f:
+                f.write(bytes_data)
+            return temp_path
+        last_error = f"Object not found in MinIO (attempt {attempt + 1}/{max_retries}): {object_name}"
+        if attempt < max_retries - 1:
+            _time.sleep(0.5 * (2 ** attempt))
+    raise FileNotFoundError(last_error)
 
 
 class TextToLatexPlugin(Plugin):
@@ -71,14 +95,23 @@ class TextToLatexPlugin(Plugin):
     ) -> TextToLatexOutput:
         """Execute text-to-latex"""
         file_id = input_data.file_id
-        txt_path = input_data.txt_path
+        txt_path_input = input_data.txt_path
         prompt_id = input_data.prompt_id
         segments = parameters.get("segments", 3)
         subject = parameters.get("subject", "auto")
 
         context.report_progress(10, "Читаем текст...")
 
+        txt_path = ""
+        is_temp = False
         try:
+            # Handle minio:// URLs — download to temp file inside Docker
+            if txt_path_input.startswith("minio://"):
+                txt_path = _download_minio_to_temp(txt_path_input)
+                is_temp = True
+            else:
+                txt_path = txt_path_input
+
             txt_file = pathlib.Path(txt_path)
             if not txt_file.exists():
                 raise FileNotFoundError(f"Text file not found: {txt_path}")
@@ -95,7 +128,6 @@ class TextToLatexPlugin(Plugin):
             if prompt_id:
                 db_prompt = self._get_prompt(prompt_id)
                 if db_prompt:
-                    import tempfile
                     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
                     tmp.write(db_prompt)
                     tmp.close()
@@ -119,7 +151,11 @@ class TextToLatexPlugin(Plugin):
             if res.returncode != 0:
                 raise Exception(f"Script failed: {res.stderr or res.stdout}")
 
-            latex_path = str(txt_file.with_suffix(".tex"))
+            # Write output to /output/ for Docker, or next to input for local
+            if txt_path_input.startswith("minio://"):
+                latex_path = "/output/result.tex"
+            else:
+                latex_path = str(txt_file.with_suffix(".tex"))
             if not pathlib.Path(latex_path).exists():
                 raise Exception("LaTeX file was not created")
 
@@ -133,6 +169,13 @@ class TextToLatexPlugin(Plugin):
         except Exception as e:
             context.log("error", f"Text-to-LaTeX failed: {str(e)}")
             raise
+        finally:
+            # Cleanup temp file from MinIO download
+            if is_temp and os.path.exists(txt_path):
+                try:
+                    os.remove(txt_path)
+                except Exception:
+                    pass
 
     def _detect_subject(self, txt_path: str, context: PluginContext) -> str:
         """Detect subject using LLM"""
