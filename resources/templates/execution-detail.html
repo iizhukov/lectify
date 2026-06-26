@@ -99,7 +99,9 @@
 
   function renderHeader(ex) {
     const style = STATUS_STYLES[ex.status] || STATUS_STYLES.pending;
-    document.getElementById('exec-id').textContent = (ex.id || '').slice(0, 12);
+    const idEl = document.getElementById('exec-id');
+    idEl.textContent = (ex.id || '').slice(0, 12);
+    idEl.dataset.execId = ex.id || '';
     document.getElementById('exec-title').textContent = ex.workflow_name || 'Запуск';
     const badge = document.getElementById('exec-status-badge');
     badge.className = style.badge;
@@ -168,18 +170,23 @@
     });
   }
 
-  async function showNodeDetail(nodeId) {
-    try {
-      const node = await api.nodes.getDetail(execId, nodeId);
-      const style = STATUS_STYLES[node.status] || STATUS_STYLES.pending;
+  let _nodeDetailInterval = null;
+  let _currentNodeDetailId = null;
 
+  async function showNodeDetail(nodeId) {
+    if (_nodeDetailInterval) { clearInterval(_nodeDetailInterval); _nodeDetailInterval = null; }
+    _currentNodeDetailId = nodeId;
+
+    async function fetchAndRender() {
+      const node = await api.nodes.getDetail(execId, nodeId);
+      if (_currentNodeDetailId !== nodeId) return null;
+
+      const style = STATUS_STYLES[node.status] || STATUS_STYLES.pending;
       const formatKV = (label, val) => {
         if (val == null) return '';
         return `<div class="flex gap-4"><dt class="text-sm text-brand-muted w-36 shrink-0">${label}</dt><dd class="text-sm text-brand-dark break-all">${escapeHtml(String(val))}</dd></div>`;
       };
-
       const elapsed = node.started_at && node.ended_at ? duration(node.started_at, node.ended_at) : '-';
-
       const body = `
         <div class="space-y-3">
           <div class="flex gap-4">
@@ -211,8 +218,22 @@
           </div>
         ` : ''}
       `;
+      return { body, node };
+    }
 
-      showModal({ title: escapeHtml(node.node_name || node.node_id || 'Узел'), body, width: 'max-w-2xl' });
+    try {
+      const first = await fetchAndRender();
+      if (!first) return;
+      showModal({ title: escapeHtml(first.node.node_name || first.node.node_id || 'Узел'), body: first.body, width: 'max-w-2xl', onClose: () => { if (_nodeDetailInterval) { clearInterval(_nodeDetailInterval); _nodeDetailInterval = null; } } });
+
+      _nodeDetailInterval = setInterval(async () => {
+        try {
+          if (_currentNodeDetailId !== nodeId) { clearInterval(_nodeDetailInterval); return; }
+          if (!document.body.contains(document.getElementById('modal-overlay'))) { clearInterval(_nodeDetailInterval); return; }
+          const result = await fetchAndRender();
+          if (result) updateModalBody(result.body);
+        } catch (_) { clearInterval(_nodeDetailInterval); }
+      }, 5000);
     } catch (e) {
       showToast('error', 'Ошибка загрузки узла: ' + e.message);
     }
@@ -290,7 +311,9 @@
 
   loadExecution();
   const _interval = setInterval(() => {
-    if (!document.getElementById('exec-id')) { clearInterval(_interval); return; }
+    const el = document.getElementById('exec-id');
+    if (!el) { clearInterval(_interval); return; }
+    if (el.dataset.execId !== execId) { clearInterval(_interval); return; }
     loadExecution();
   }, 5000);
 </script>

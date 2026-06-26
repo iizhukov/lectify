@@ -1,6 +1,10 @@
 let activeModal = null;
+let _bodyPoller = null;
+let _closeCallback = null;
 
-export function showModal({ title, body, width = 'max-w-lg' }) {
+export function showModal({ title, body, width = 'max-w-lg', onClose }) {
+  clearBodyPoller();
+  _closeCallback = onClose || null;
   closeModal();
 
   const maxW = width === 'max-w-2xl' ? '42rem' : width === 'max-w-3xl' ? '48rem' : '32rem';
@@ -54,6 +58,8 @@ export function showModal({ title, body, width = 'max-w-lg' }) {
   activeModal = { overlay };
   const firstInput = container.querySelector('input, textarea, select');
   if (firstInput) firstInput.focus();
+
+  if (typeof body === 'function') startBodyPoller(body, container);
 }
 
 function onEsc(e) {
@@ -67,6 +73,28 @@ export function closeModal() {
     document.removeEventListener('keydown', onEsc);
     activeModal = null;
   }
+  clearBodyPoller();
+  if (_closeCallback) { _closeCallback(); _closeCallback = null; }
+}
+
+export function updateModalBody(bodyFn) {
+  if (!activeModal) return;
+  clearBodyPoller();
+  startBodyPoller(bodyFn, activeModal.overlay);
+}
+
+function startBodyPoller(body, overlay) {
+  _bodyPoller = setInterval(() => {
+    if (!document.body.contains(overlay)) { clearBodyPoller(); return; }
+    const newBody = typeof body === 'function' ? body() : body;
+    const content = overlay.querySelector('div:last-child');
+    if (content) content.innerHTML = newBody;
+  }, 5000);
+  if (typeof body === 'function') body();
+}
+
+function clearBodyPoller() {
+  if (_bodyPoller) { clearInterval(_bodyPoller); _bodyPoller = null; }
 }
 
 export function buildBody(fields) {
