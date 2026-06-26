@@ -121,7 +121,9 @@ class ContainerRunnerOrchestrator:
             self._metrics.node_cpu_percent.labels(node_id=node_id).set(0)
             self._metrics.node_memory_mb.labels(node_id=node_id).set(0)
             # Сохраняем логи в MinIO
-            self._upload_node_logs(log_path, execution_id, node_id)
+            minio_logs_path = self._upload_node_logs(log_path, execution_id, node_id)
+            if minio_logs_path:
+                self.node_repo.update(node_id=node_exec_id, logs_path=minio_logs_path)
 
     def _upload_node_logs(
         self,

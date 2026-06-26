@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from src.db.models import WorkflowTemplateModel, ExecutionModel, ExecutionNodeModel
 from src.db.repository import WorkflowTemplateRepository, ExecutionRepository, ExecutionNodeRepository
+from src.orchestrator.logs import NodeLogManager
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 repo = WorkflowTemplateRepository()
@@ -95,6 +96,21 @@ async def get_execution_node(execution_id: str, node_id: str):
         if n.node_id == node_id or n.id == node_id:
             return n
     raise HTTPException(status_code=404, detail="Node not found")
+
+
+@router.get("/executions/{execution_id}/nodes/{node_id}/logs")
+async def get_node_logs(execution_id: str, node_id: str):
+    nodes = node_repo.get_by_execution(execution_id)
+    node = next((n for n in nodes if n.node_id == node_id or n.id == node_id), None)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    log_manager = NodeLogManager()
+    log_type = "node"
+    logs = log_manager.get_logs(execution_id, node_id, log_type=log_type)
+    if logs is None:
+        return ""
+    return logs
 
 
 @router.post("/executions/{execution_id}/restart")

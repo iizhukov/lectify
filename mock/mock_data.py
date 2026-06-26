@@ -112,6 +112,34 @@ MOCK_WORKFLOWS = [
         "is_public": False,
         "created_at": "2025-06-10T16:00:00Z",
         "updated_at": "2025-06-10T16:00:00Z"
+    },
+    {
+        "id": "lecture_workflow_v2",
+        "user_id": None,
+        "name": "Конспект лекции",
+        "description": "Полный цикл: видео → M4A → текст → Markdown/LaTeX → PDF",
+        "graph": {
+            "nodes": [
+                {"id": "media_converter", "plugin_id": "media_converter", "name": "Конвертация медиа", "description": "", "parameters": {"format": "m4a", "bitrate": "64k"}, "input_mapping": [], "prompt_id": None},
+                {"id": "speech_to_text", "plugin_id": "speech_to_text", "name": "Распознавание речи", "description": "", "parameters": {"language": "ru"}, "input_mapping": [{"target_field": "media_path", "source": "$media_converter.output.media_path", "transform": "passthrough"}], "prompt_id": None},
+                {"id": "prompt_for_md", "plugin_id": "prompt_selector", "name": "Промпт → Markdown", "description": "", "parameters": {"prompt_id": ""}, "input_mapping": [], "prompt_id": "prompt-001"},
+                {"id": "prompt_for_latex", "plugin_id": "prompt_selector", "name": "Промпт → LaTeX", "description": "", "parameters": {"prompt_id": ""}, "input_mapping": [], "prompt_id": "prompt-001"},
+                {"id": "text_to_md", "plugin_id": "text_to_md", "name": "Создание Markdown", "description": "", "parameters": {"max_chars": 40000}, "input_mapping": [{"target_field": "txt_path", "source": "$speech_to_text.output.txt_path", "transform": "passthrough"}, {"target_field": "prompt_id", "source": "$prompt_for_md.output.prompt_id", "transform": "passthrough"}], "prompt_id": None},
+                {"id": "text_to_latex", "plugin_id": "text_to_latex", "name": "Создание LaTeX", "description": "", "parameters": {"segments": 3, "subject": "auto"}, "input_mapping": [{"target_field": "txt_path", "source": "$speech_to_text.output.txt_path", "transform": "passthrough"}, {"target_field": "prompt_id", "source": "$prompt_for_latex.output.prompt_id", "transform": "passthrough"}], "prompt_id": None},
+                {"id": "latex_to_pdf", "plugin_id": "latex_to_pdf", "name": "Компиляция PDF", "description": "", "parameters": {"max_attempts": 3}, "input_mapping": [{"target_field": "latex_path", "source": "$text_to_latex.output.latex_path", "transform": "passthrough"}], "prompt_id": None},
+            ],
+            "edges": [
+                {"from_node_id": "media_converter", "to_node_id": "speech_to_text"},
+                {"from_node_id": "speech_to_text", "to_node_id": "text_to_md"},
+                {"from_node_id": "speech_to_text", "to_node_id": "text_to_latex"},
+                {"from_node_id": "prompt_for_md", "to_node_id": "text_to_md"},
+                {"from_node_id": "prompt_for_latex", "to_node_id": "text_to_latex"},
+                {"from_node_id": "text_to_latex", "to_node_id": "latex_to_pdf"},
+            ]
+        },
+        "is_public": True,
+        "created_at": "2025-06-01T10:00:00Z",
+        "updated_at": "2025-06-01T10:00:00Z"
     }
 ]
 
@@ -959,36 +987,100 @@ MOCK_PLUGINS = [
         "name": "Media Converter",
         "description": "Конвертация медиафайлов в стандартные форматы (MP4, MP3)",
         "version": "1.0.0",
-        "node_count": 1
+        "node_count": 1,
+        "inputs": ["file_path"],
+        "outputs": ["file_id", "media_path", "format", "duration_ms"],
     },
     {
         "id": "transcriber",
         "name": "Transcriber",
         "description": "Транскрибация аудио в текст через OpenAI Whisper",
         "version": "1.0.0",
-        "node_count": 1
+        "node_count": 1,
+        "inputs": ["media_path"],
+        "outputs": ["file_id", "txt_path", "duration_ms", "language"],
     },
     {
         "id": "formatter",
         "name": "Formatter",
         "description": "Форматирование текста в конспект с использованием LLM",
         "version": "1.0.0",
-        "node_count": 1
+        "node_count": 1,
+        "inputs": ["transcript"],
+        "outputs": ["file_id", "formatted_text", "format"],
     },
     {
         "id": "topic_analyzer",
         "name": "Topic Analyzer",
         "description": "Анализ ключевых тем с использованием LLM",
         "version": "1.0.0",
-        "node_count": 1
+        "node_count": 1,
+        "inputs": ["text"],
+        "outputs": ["file_id", "topics"],
     },
     {
         "id": "term_extractor",
         "name": "Term Extractor",
         "description": "Извлечение и объяснение специальных терминов",
         "version": "1.0.0",
-        "node_count": 1
-    }
+        "node_count": 1,
+        "inputs": ["text"],
+        "outputs": ["file_id", "terms"],
+    },
+    {
+        "id": "prompt_selector",
+        "name": "Prompt Selector",
+        "description": "Выбирает и рендерит промпт по переменным",
+        "version": "1.0.0",
+        "node_count": 0,
+        "inputs": [],
+        "outputs": ["prompt_id", "prompt_name", "system_prompt", "user_prompt_template", "resolved_variables"],
+    },
+    {
+        "id": "speech_to_text",
+        "name": "Speech to Text",
+        "description": "Преобразование аудио/видео в текст",
+        "version": "1.0.0",
+        "node_count": 0,
+        "inputs": ["media_path"],
+        "outputs": ["file_id", "txt_path", "duration_ms", "language"],
+    },
+    {
+        "id": "text_to_md",
+        "name": "Text to Markdown",
+        "description": "Генерация Markdown-конспекта из текста",
+        "version": "1.0.0",
+        "node_count": 0,
+        "inputs": ["txt_path", "prompt_id"],
+        "outputs": ["file_id", "md_path", "char_count"],
+    },
+    {
+        "id": "text_to_latex",
+        "name": "Text to LaTeX",
+        "description": "Генерация LaTeX-документа из текста",
+        "version": "1.0.0",
+        "node_count": 0,
+        "inputs": ["txt_path", "prompt_id"],
+        "outputs": ["file_id", "latex_path"],
+    },
+    {
+        "id": "latex_to_pdf",
+        "name": "LaTeX to PDF",
+        "description": "Компиляция LaTeX в PDF",
+        "version": "1.0.0",
+        "node_count": 0,
+        "inputs": ["latex_path"],
+        "outputs": ["file_id", "pdf_path", "attempts"],
+    },
+    {
+        "id": "llm_request",
+        "name": "LLM Request",
+        "description": "Запрос к LLM с шаблонизированным промптом",
+        "version": "1.0.0",
+        "node_count": 0,
+        "inputs": ["prompt_id", "system_prompt", "user_prompt_template", "variables"],
+        "outputs": ["file_id", "response", "model", "tokens_used", "execution_time_ms"],
+    },
 ]
 
 

@@ -16,6 +16,7 @@ class DBFile(Base):
     status = Column(String, nullable=False)
     size_bytes = Column(Integer, nullable=False)
     mime_type = Column(String, nullable=False)
+    minio_path = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

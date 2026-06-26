@@ -6,6 +6,7 @@ from sqlalchemy.orm import joinedload
 from src.db.repository.base import BaseRepository
 from src.db.entity import DBExecution, DBExecutionNode
 from src.db.models.execution import ExecutionModel, ExecutionNodeModel
+from src.db.models.workflow_template import WorkflowTemplateModel
 
 
 def _node_to_model(node: DBExecutionNode) -> ExecutionNodeModel:
@@ -40,6 +41,21 @@ def _execution_to_model(exec: DBExecution) -> ExecutionModel:
         return v.isoformat() if v else None
 
     nodes = [_node_to_model(n) for n in exec.nodes] if exec.nodes else None
+
+    workflow_template = None
+    if exec.workflow_template:
+        wt = exec.workflow_template
+        workflow_template = WorkflowTemplateModel(
+            id=wt.id,
+            user_id=wt.user_id,
+            name=wt.name or "",
+            description=wt.description,
+            graph=wt.graph,
+            is_public=wt.is_public or False,
+            created_at=_dt(wt.created_at),
+            updated_at=_dt(wt.updated_at) if hasattr(wt, 'updated_at') else None,
+        )
+
     return ExecutionModel(
         id=exec.id,
         workflow_template_id=exec.workflow_template_id,
@@ -54,6 +70,7 @@ def _execution_to_model(exec: DBExecution) -> ExecutionModel:
         error_message=exec.error_message,
         created_at=_dt(exec.created_at),
         nodes=nodes,
+        workflow_template=workflow_template,
     )
 
 
@@ -70,7 +87,8 @@ class ExecutionRepository(BaseRepository):
     def get(self, execution_id: str) -> Optional[ExecutionModel]:
         with self.session() as s:
             exec = s.query(DBExecution).options(
-                joinedload(DBExecution.nodes)
+                joinedload(DBExecution.nodes),
+                joinedload(DBExecution.workflow_template),
             ).filter(DBExecution.id == execution_id).first()
             if not exec:
                 return None

@@ -191,6 +191,58 @@ class MinIOStorage:
             )
             return None
     
+    def upload_user_file(
+        self,
+        data: bytes,
+        filename: str,
+        file_id: str
+    ) -> Optional[str]:
+        """
+        Загрузка пользовательского файла в MinIO (артефакты/входные файлы).
+
+        Args:
+            data: Байты файла
+            filename: Имя файла
+            file_id: ID файла в системе
+
+        Returns:
+            Путь к объекту в MinIO или None при ошибке
+        """
+        import io
+
+        object_name = f"uploads/{file_id}/{filename}"
+
+        try:
+            content_type = self._get_content_type_from_filename(filename)
+            data_stream = io.BytesIO(data)
+            self.client.put_object(
+                self.artifacts_bucket,
+                object_name,
+                data_stream,
+                length=len(data),
+                content_type=content_type
+            )
+
+            logger.info(
+                "user_file_uploaded",
+                file_id=file_id,
+                filename=filename,
+                object_name=object_name,
+                file_size=len(data)
+            )
+
+            return object_name
+
+        except S3Error as e:
+            logger.error(
+                "user_file_upload_failed",
+                file_id=file_id,
+                filename=filename,
+                error=str(e),
+                exc_info=True
+            )
+            return None
+
     def download_artifact(
         self,
         object_name: str,
@@ -394,6 +446,25 @@ class MinIOStorage:
             response.close()
             response.release_conn()
             return data.decode("utf-8", errors="replace")
+        except S3Error:
+            return None
+
+    def get_file_bytes(self, object_name: str) -> Optional[bytes]:
+        """
+        Читает содержимое файла из MinIO как байты.
+
+        Args:
+            object_name: Путь к объекту в MinIO (e.g. "uploads/{file_id}/{filename}")
+
+        Returns:
+            Байты файла или None если не найден.
+        """
+        try:
+            response = self.client.get_object(self.artifacts_bucket, object_name)
+            data = response.read()
+            response.close()
+            response.release_conn()
+            return data
         except S3Error:
             return None
 

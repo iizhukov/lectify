@@ -103,8 +103,8 @@ def migrate_lecture_workflow() -> str | None:
         ],
         "edges": [
             {"from_node_id": "media_converter", "to_node_id": "speech_to_text"},
-            {"from_node_id": "speech_to_text", "to_node_id": "prompt_for_md"},
-            {"from_node_id": "speech_to_text", "to_node_id": "prompt_for_latex"},
+            {"from_node_id": "speech_to_text", "to_node_id": "text_to_md"},
+            {"from_node_id": "speech_to_text", "to_node_id": "text_to_latex"},
             {"from_node_id": "prompt_for_md", "to_node_id": "text_to_md"},
             {"from_node_id": "prompt_for_latex", "to_node_id": "text_to_latex"},
             {"from_node_id": "text_to_latex", "to_node_id": "latex_to_pdf"},

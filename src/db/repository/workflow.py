@@ -40,7 +40,8 @@ class WorkflowRepository(BaseRepository):
         original_path: str,
         language: str,
         size_bytes: int,
-        mime_type: str
+        mime_type: str,
+        minio_path: Optional[str] = None
     ) -> FileModel:
         with self.session() as s:
             db_file = DBFile(
@@ -50,7 +51,8 @@ class WorkflowRepository(BaseRepository):
                 language=language,
                 status=FileStatus.PENDING,
                 size_bytes=size_bytes,
-                mime_type=mime_type
+                mime_type=mime_type,
+                minio_path=minio_path
             )
             s.add(db_file)
             s.commit()

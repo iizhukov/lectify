@@ -133,14 +133,15 @@ class OrchestratorService:
                 return
 
             self.exec_repo.update_status(execution_id, ExecutionStatus.RUNNING)
-            graph = cast(Dict[str, Any], workflow.graph)
-            sorted_nodes = _topological_sort(cast(List[Dict], graph["nodes"]), cast(List[Dict], graph["edges"]))
-
-            deps = _build_dependency_map(cast(List[Dict], graph["nodes"]), cast(List[Dict], graph["edges"]))
+            graph = workflow.graph
+            graph_nodes = [n.model_dump() for n in graph.nodes]
+            graph_edges = [e.model_dump() for e in graph.edges]
+            sorted_nodes = _topological_sort(graph_nodes, graph_edges)
+            deps = _build_dependency_map(graph_nodes, graph_edges)
             completed: Set[str] = set()
             node_outputs: Dict[str, Dict[str, Any]] = {}
             execution_nodes: Dict[str, Any] = {
-                cast(str, n["id"]): self._find_node(execution, cast(str, n["id"])) for n in graph["nodes"]
+                cast(str, n["id"]): self._find_node(execution, cast(str, n["id"])) for n in graph_nodes
             }
             execution_file_id = str(execution.file_id)
 

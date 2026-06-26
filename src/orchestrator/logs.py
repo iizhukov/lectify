@@ -64,6 +64,21 @@ class NodeLogManager:
             )
         return object_name
 
+    def get_logs(self, execution_id: str, node_id: str, log_type: str = "node") -> Optional[str]:
+        """
+        Читает логи ноды из MinIO.
+
+        Args:
+            execution_id: ID исполнения
+            node_id: ID ноды
+            log_type: Тип лога (default: "node")
+
+        Returns:
+            Содержимое лога как строка, или None если не найдено.
+        """
+        object_name = f"{log_type}/2026/06/{execution_id}_{node_id}.log"
+        return self.storage.read_log(object_name)
+
     def cleanup_local(self, log_path: Path) -> None:
         """Удаляет локальный лог-файл после сохранения в MinIO."""
         try:

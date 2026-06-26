@@ -71,6 +71,7 @@ class FileModel(BaseModelConfig):
     status: FileStatus
     size_bytes: int
     mime_type: str
+    minio_path: Optional[str] = None
 
     created_at: datetime
     updated_at: datetime

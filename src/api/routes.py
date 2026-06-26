@@ -1,9 +1,10 @@
 import os
+import uuid
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File as FastAPIFile
+from fastapi.responses import FileResponse, Response
 
 from src.db.models import FileModel, WorkflowStateModel, ArtifactModel
 from src.db.repository import DBRepository
@@ -18,6 +19,33 @@ api_router = APIRouter()
 
 repository = DBRepository()
 minio_storage = MinIOStorage()
+
+
+@api_router.post(
+    "/api/files",
+    response_model=FileModel
+)
+async def upload_file(
+    file: UploadFile = FastAPIFile(...),
+    language: str = "ru"
+):
+    file_id = str(uuid.uuid4())
+    content = await file.read()
+    size_bytes = len(content)
+
+    minio_path = minio_storage.upload_user_file(content, file.filename or "", file_id)
+
+    file_record = repository.create_file(
+        file_id=file_id,
+        filename=file.filename or "",
+        original_path=minio_path or "",
+        language=language,
+        size_bytes=size_bytes,
+        mime_type=file.content_type or "application/octet-stream",  # type: ignore[arg-type]
+        minio_path=minio_path,
+    )
+
+    return file_record
 
 
 @api_router.get(
@@ -45,6 +73,30 @@ async def get_file_details(
         )
 
     return file
+
+
+@api_router.get("/download/files/{file_id}")
+async def download_file(file_id: str):
+    """
+    Скачивает файл из MinIO по file_id.
+    """
+    file = repository.get_file_details(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    minio_path = file.minio_path or file.original_path
+    if not minio_path:
+        raise HTTPException(status_code=404, detail="File not found in storage")
+
+    data = minio_storage.get_file_bytes(minio_path)
+    if data is None:
+        raise HTTPException(status_code=404, detail="File not found in MinIO")
+
+    return Response(
+        content=data,
+        media_type=file.mime_type,
+        headers={"Content-Disposition": f"attachment; filename=\"{file.filename}\""}
+    )
 
 
 @api_router.get(

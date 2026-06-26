@@ -84,3 +84,5 @@ test_data/
 node_modules/
 
 .claude/
+
+storage/
