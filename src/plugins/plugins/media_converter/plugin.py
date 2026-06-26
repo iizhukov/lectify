@@ -98,7 +98,13 @@ class MediaConverterPlugin(Plugin):
             from pydub import AudioSegment
 
             input_path = pathlib.Path(local_path)
-            output_path = input_path.with_suffix(f".{format}")
+
+            # When running in Docker, /input/ is read-only — write output to /output/
+            if str(input_path).startswith("/input/"):
+                stem = input_path.stem
+                output_path = pathlib.Path("/output") / f"{stem}.{format}"
+            else:
+                output_path = input_path.with_suffix(f".{format}")
 
             if input_path.suffix.lower() == f".{format}":
                 context.report_progress(100, "Конвертация не требуется")
@@ -116,7 +122,7 @@ class MediaConverterPlugin(Plugin):
 
                 audio.export(
                     str(output_path),
-                    format=format.replace(".", ""),
+                    format="ipod" if format == "m4a" else format.replace(".", ""),
                     bitrate=bitrate
                 )
 

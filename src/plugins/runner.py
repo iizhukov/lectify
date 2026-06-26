@@ -29,9 +29,10 @@ def main():
         raise ValueError("__plugin_id not found in input")
 
     # Import and execute plugin
-    from src.plugins.registry import get_plugin_registry
+    from src.plugins.registry import PluginRegistry
 
-    registry = get_plugin_registry()
+    registry = PluginRegistry()
+    registry.scan_plugins_folder()
     plugin_class = registry.get_plugin(plugin_id)
 
     if not plugin_class:

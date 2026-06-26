@@ -24,15 +24,18 @@ class Config:
     def _load_config(self):
         """Загрузка конфигурации из config.cfg"""
         config_path = ROOT_DIR / "config.cfg"
-        
-        if not config_path.exists():
-            print("ERROR:  Ошибка: файл config.cfg не найден!")
-            print(f"📝 Создайте config.cfg на основе config.cfg.example в {ROOT_DIR}")
-            sys.exit(1)
-        
+
         self._config = ConfigParser()
+
+        if not config_path.exists():
+            # config.cfg is not required in Docker containers where only
+            # plugins run (no DB connection available anyway). Use defaults.
+            import warnings
+            warnings.warn(f"config.cfg not found at {config_path} — using defaults (Docker mode?)")
+            return
+
         self._config.read(config_path)
-        
+
         # Валидация критических секций
         self._validate_config()
     

@@ -95,10 +95,19 @@ class OrchestratorService:
 
         for execution in pending[: self.config.max_concurrent_workflows - len(self._active_executions)]:
             execution_id = str(execution.id)
-            if execution_id not in self._active_executions:
-                asyncio.create_task(self._run_execution(execution_id))
-                self._active_executions.add(execution_id)
-                self._metrics.workflows_total.inc()
+            # Guard against: this execution was picked up by _resume_interrupted()
+            # in the same event-loop iteration. Tasks are scheduled but haven't run yet
+            # (status not changed to RUNNING), so we must also filter by status.
+            if execution_id in self._active_executions:
+                continue
+            # Re-read status to handle the race where _resume_interrupted() already
+            # changed this execution to RUNNING (its task is scheduled but not yet executing).
+            exec_record = self.exec_repo.get(execution_id)
+            if exec_record and exec_record.status != ExecutionStatus.PENDING:
+                continue
+            asyncio.create_task(self._run_execution(execution_id))
+            self._active_executions.add(execution_id)
+            self._metrics.workflows_total.inc()
 
     async def _resume_interrupted(self):
         """Восстановить воркфлоу со статусом RUNNING (были прерваны при рестарте)."""
@@ -144,6 +153,7 @@ class OrchestratorService:
                 cast(str, n["id"]): self._find_node(execution, cast(str, n["id"])) for n in graph_nodes
             }
             execution_file_id = str(execution.file_id)
+            execution_file_path = self._get_file_path(execution_file_id)
 
             for node_def in sorted_nodes:
                 node_id = node_def["id"]
@@ -160,7 +170,7 @@ class OrchestratorService:
                         return
 
                 # Маппим входы
-                input_data = _map_inputs(node_def, deps[node_id], node_outputs, execution_file_id)
+                input_data = _map_inputs(node_def, deps[node_id], node_outputs, execution_file_id, execution_file_path)
 
                 # Выполняем ноду
                 success = await self._run_node(
@@ -313,6 +323,26 @@ class OrchestratorService:
                 return node
         return None
 
+    def _get_file_path(self, file_id: str) -> str | None:
+        """Получить путь к файлу по file_id для передачи в плагин."""
+        try:
+            from src.db.entity import DBFile
+            from src.db.database import SessionLocal
+            session = SessionLocal()
+            try:
+                db_file = session.query(DBFile).filter(DBFile.id == file_id).first()
+                if db_file is None:
+                    return None
+                original_path = getattr(db_file, "original_path", None)
+                if original_path is None:
+                    return None
+                return str(original_path)
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning("file_lookup_failed", file_id=file_id, error=str(e))
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers (topological sort, input mapping) — no I/O, no state
@@ -361,14 +391,19 @@ def _map_inputs(
     dependencies: List[str],
     node_outputs: Dict[str, Dict],
     file_id: str,
+    file_path: str | None = None,
 ) -> Dict[str, Any]:
     """Применить input_mapping: $node_id.output.field или $__input.field → value."""
     input_mapping = node_def.get("input_mapping", [])
 
     if not input_mapping:
+        result = {}
         if dependencies:
-            return node_outputs.get(dependencies[0], {})
-        return {}
+            result = node_outputs.get(dependencies[0], {}).copy()
+        result["file_id"] = file_id
+        if file_path:
+            result["file_path"] = file_path
+        return result
 
     result = {}
     for rule in input_mapping:

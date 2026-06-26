@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system deps needed by common Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (for caching)
+COPY requirements.txt .
+
+# Install Python deps
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application source
+COPY . .
+
+# Create input/output mount points
+RUN mkdir -p /input /output
+
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["python", "-m", "src.plugins.runner"]

@@ -77,17 +77,21 @@ def migrate_lecture_workflow() -> str | None:
     for node_id, config in node_mapping.items():
         template_id = f"{node_id}_template"
         existing_tmpl = node_repo.get(template_id)
+        create_data = {
+            "id": template_id,
+            "user_id": None,
+            "plugin_id": config["plugin_id"],
+            "name": config["name"],
+            "parameters": config["parameters"],
+            "input_mapping": _get_input_mapping(node_id),
+        }
+        # Set prompt_id FK column for prompt_selector nodes
+        if node_id in ("prompt_for_md", "prompt_for_latex"):
+            create_data["prompt_id"] = config["parameters"].get("prompt_id")
         if existing_tmpl:
             node_template_ids[node_id] = existing_tmpl.id
         else:
-            template = node_repo.create({
-                "id": template_id,
-                "user_id": None,
-                "plugin_id": config["plugin_id"],
-                "name": config["name"],
-                "parameters": config["parameters"],
-                "input_mapping": _get_input_mapping(node_id)
-            })
+            template = node_repo.create(create_data)
             node_template_ids[node_id] = template.id
 
     # Build workflow graph
@@ -141,9 +145,87 @@ def _get_input_mapping(node_id: str) -> list:
         ],
         "latex_to_pdf": [
             {"target_field": "latex_path", "source": "$text_to_latex.output.latex_path"}
-        ]
+        ],
+        # Transcription to Markdown workflow
+        "speech_to_text_simple": [
+            {"target_field": "media_path", "source": "$media_converter_simple.output.media_path"}
+        ],
+        "text_to_md_simple": [
+            {"target_field": "txt_path", "source": "$speech_to_text_simple.output.txt_path"},
+            {"target_field": "prompt_id", "source": "$prompt_selector_md.output.prompt_id"}
+        ],
     }
     return mappings.get(node_id, [])
+
+
+def migrate_transcription_workflow() -> str | None:
+    """
+    Create the simple transcription-to-markdown workflow.
+
+    Graph:
+      media_converter_simple → speech_to_text_simple
+                                              ├→ text_to_md_simple
+      prompt_selector_md ──────────────────────┘
+
+    text_to_md_simple has two parents: speech_to_text_simple (txt_path)
+    and prompt_selector_md (prompt_id from transcript_to_md_system prompt).
+    """
+    wf_repo = WorkflowTemplateRepository()
+
+    existing = wf_repo.get("transcription_to_markdown")
+    if existing:
+        logger.info("transcription_to_markdown already exists")
+        return existing.id
+
+    graph = {
+        "nodes": [
+            {
+                "id": "media_converter_simple",
+                "plugin_id": "media_converter",
+                "name": "Конвертация медиа",
+                "parameters": {"format": "m4a", "bitrate": "64k"},
+                "input_mapping": []
+            },
+            {
+                "id": "speech_to_text_simple",
+                "plugin_id": "speech_to_text",
+                "name": "Распознавание речи",
+                "parameters": {"language": "auto"},
+                "input_mapping": _get_input_mapping("speech_to_text_simple")
+            },
+            {
+                "id": "prompt_selector_md",
+                "plugin_id": "prompt_selector",
+                "name": "Промпт → Markdown",
+                "parameters": {"prompt_id": "transcript_to_md_system"},
+                "input_mapping": []
+            },
+            {
+                "id": "text_to_md_simple",
+                "plugin_id": "text_to_md",
+                "name": "Создание Markdown",
+                "parameters": {"max_chars": 40000},
+                "input_mapping": _get_input_mapping("text_to_md_simple")
+            },
+        ],
+        "edges": [
+            {"from_node_id": "media_converter_simple", "to_node_id": "speech_to_text_simple"},
+            {"from_node_id": "speech_to_text_simple", "to_node_id": "text_to_md_simple"},
+            {"from_node_id": "prompt_selector_md", "to_node_id": "text_to_md_simple"},
+        ]
+    }
+
+    workflow = wf_repo.create({
+        "id": "transcription_to_markdown",
+        "user_id": None,
+        "name": "Транскрибация → Markdown",
+        "description": "Медиа → M4A → транскрибация → структурированный Markdown-конспект",
+        "graph": graph,
+        "is_public": True
+    })
+
+    logger.info(f"Created transcription_to_markdown workflow: {workflow.id}")
+    return workflow.id
 
 
 def sync_plugins_on_startup():
@@ -216,6 +298,8 @@ def run_all_migrations():
 
     # 2. Migrate lecture workflow
     migrate_lecture_workflow()
+    # 2b. Migrate simple transcription workflow
+    migrate_transcription_workflow()
     logger.info("Workflows migrated")
 
     # 3. Seed initial data (idempotent)
