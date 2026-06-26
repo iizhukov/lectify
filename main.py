@@ -1,25 +1,20 @@
 import asyncio
 import uvicorn
 import sys
-import os
-import logging
+import pathlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.config import config
 from src.db.database import init_sqlalchemy_db
-from src.llm.manager import LLMManager
 from src.api import api_router
-from src.api.routes import api_router as legacy_router
 from src.web.routes import web_router
-from src.workflows.orchestrator import LectureOrchestrator
 from src.utils.logging import setup_logging, get_logger
-from src.utils.metrics import get_metrics
 
 from src.orchestrator import OrchestratorService, OrchestratorConfig
 
@@ -59,12 +54,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ИИ Конспектирование", lifespan=lifespan)
 
-# Mount static files
-import pathlib
 STATIC_PATH = pathlib.Path(__file__).parent / "resources" / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
 
-# Настройка логирования
 setup_logging()
 logger = get_logger(__name__)
 
@@ -99,7 +91,6 @@ try:
     from src.plugins.registry import scan_and_register_plugins
     from src.workflows.migration import run_all_migrations
 
-    # Scan and register plugins from filesystem
     scan_and_register_plugins()
     logger.info("plugins_scanned")
     print("OK: Plugins scanned", file=sys.stderr)
@@ -113,35 +104,7 @@ except Exception as e:
     print(f"WARNING:  Plugin system init warning: {str(e)}", file=sys.stderr)
     import traceback
     traceback.print_exc()
-    # Don't exit - allow app to start without new features
 
-
-# =============================================
-# LLM MANAGER + ORCHESTRATOR
-# =============================================
-
-try:
-    llm_manager = LLMManager(
-        api_key=config.openai_api_key,
-        base_url=config.openai_api_url,
-    )
-    orchestrator = LectureOrchestrator(llm_manager)
-    logger.info("orchestrator_initialized", max_concurrent=orchestrator.max_concurrent_workflows)
-    print(f"OK: Orchestrator initialized", file=sys.stderr)
-
-    orchestrator.resume_interrupted_workflows()
-    print("OK: Recovered interrupted workflows", file=sys.stderr)
-except Exception as e:
-    logger.error("orchestrator_initialization_failed", error=str(e), exc_info=True)
-    print(f"ERROR:  Orchestrator initialization failed: {str(e)}", file=sys.stderr)
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-
-
-# =============================================
-# FASTAPI SETUP
-# =============================================
 
 # Prometheus metrics
 Instrumentator().instrument(app).expose(app)
@@ -153,10 +116,8 @@ async def metrics():
     return generate_latest()
 
 
-# Include routers
 app.include_router(web_router)
-app.include_router(api_router)  # New workflow API
-app.include_router(legacy_router)  # Legacy API
+app.include_router(api_router)
 
 
 logger.info("application_ready", host="0.0.0.0", port=5001)
