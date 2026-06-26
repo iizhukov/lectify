@@ -13,6 +13,7 @@ export function showToast(type, message) {
   toast.className = `px-4 py-3 rounded-lg shadow-lg text-white transform transition-all duration-300 translate-x-full ${colors[type] || colors.info}`;
   toast.textContent = message;
   toast.style.opacity = '0';
+  toast.style.zIndex = '10010';
 
   container.appendChild(toast);
   requestAnimationFrame(() => {

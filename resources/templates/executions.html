@@ -156,6 +156,8 @@
 
     let selectedWorkflow = null;
     let currentFilter = '';
+    let fileId = null;
+    let uploadPromise = null;
 
     const firstNode = (wf) => wf.graph.nodes.find(n => n.input_mapping && n.input_mapping.length === 0);
 
@@ -295,6 +297,8 @@
       if (removeBtn) {
         removeBtn.addEventListener('click', () => {
           fileInput.value = '';
+          fileId = null;
+          uploadPromise = null;
           if (preview) preview.classList.add('hidden');
           if (dropZone) dropZone.classList.remove('hidden');
         });
@@ -303,6 +307,12 @@
       function setFile(file) {
         if (preview) { preview.classList.remove('hidden'); if (fileName) fileName.textContent = file.name; }
         if (dropZone) dropZone.classList.add('hidden');
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('language', 'ru');
+        uploadPromise = api.files.upload(formData)
+          .then(result => { fileId = result.id; uploadPromise = null; })
+          .catch(err => { showToast('error', 'Ошибка загрузки файла: ' + err.message); fileId = null; uploadPromise = null; });
       }
     }
 
@@ -337,6 +347,14 @@
       const filePath = fileInput && fileInput.files.length > 0 ? fileInput.files[0].name : '';
 
       try {
+        if (uploadPromise) {
+          await uploadPromise;
+        }
+        if (selectedWorkflow && !fileId) {
+          showToast('error', 'Пожалуйста, загрузите файл');
+          submitBtn.disabled = false;
+          return;
+        }
         await api.workflows.execute(selectedWorkflow.id, { file_id: fileId, file_path: filePath, parameters: {} });
         closeModal();
         showToast('success', 'Конспект запущен!');

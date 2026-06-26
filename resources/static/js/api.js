@@ -81,5 +81,11 @@ export const api = {
   files: {
     list: () => req('GET', '/api/files'),
     get: (id) => req('GET', `/api/files/${id}`),
+    upload: (formData) => {
+      const opts = { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` } };
+      opts.body = formData;
+      delete opts.headers['Content-Type'];
+      return fetch(BASE + '/api/files', opts).then(handle);
+    },
   },
 };

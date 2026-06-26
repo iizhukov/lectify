@@ -265,7 +265,7 @@
       ]);
       renderHeader(ex);
       renderArtifacts(execId);
-      const workflow = ex.workflow_graph || ex.graph || null;
+      const workflow = ex.workflow_template?.graph || null;
       renderGraph(nodes, workflow);
     } catch (e) {
       showToast('error', 'Ошибка загрузки запуска: ' + e.message);

@@ -534,6 +534,15 @@
 
     applyTransform();
 
+    // Build parallel edge index: "fromId|toId" -> count seen so far
+    const parallelIdx = {};
+    const PARALLEL_STEP = 18;
+    edges.forEach((edge, idx) => {
+      const key = `${edge.from_node_id}|${edge.to_node_id}`;
+      if (!parallelIdx.hasOwnProperty(key)) parallelIdx[key] = 0;
+      edge._parallelGroupIdx = parallelIdx[key]++;
+    });
+
     // Edges
     const edgeEls = [];
     edges.forEach((edge, idx) => {
@@ -541,15 +550,29 @@
       const to = pos[edge.to_node_id];
       if (!from || !to) return;
 
+      const key = `${edge.from_node_id}|${edge.to_node_id}`;
+      const groupSize = parallelIdx[key];
+      const myIdx = edge._parallelGroupIdx;
+      const offset = groupSize > 1 ? (myIdx - (groupSize - 1) / 2) * PARALLEL_STEP : 0;
+
       const sx = from.x + NODE_W;
-      const sy = from.y + NODE_H / 2;
+      const sy = from.y + NODE_H / 2 + offset;
       const tx = to.x;
-      const ty = to.y + NODE_H / 2;
-      const cx = sx + (tx - sx) * 0.5;
+      const ty = to.y + NODE_H / 2 + offset;
+
+      let d;
+      if (groupSize > 1) {
+        const mx = sx + (tx - sx) * 0.4;
+        const midY = (sy + ty) / 2;
+        d = `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${midY}, ${(sx + tx) / 2} ${midY} S ${tx - (tx - sx) * 0.4} ${ty}, ${tx} ${ty}`;
+      } else {
+        const cx = sx + (tx - sx) * 0.5;
+        d = `M ${sx} ${sy} C ${cx} ${sy}, ${cx} ${ty}, ${tx} ${ty}`;
+      }
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       const isSelected = idx === selectedEdgeIndex;
-      path.setAttribute('d', `M ${sx} ${sy} C ${cx} ${sy}, ${cx} ${ty}, ${tx} ${ty}`);
+      path.setAttribute('d', d);
       path.setAttribute('fill', 'none');
       path.setAttribute('stroke', isSelected ? '#0066CC' : '#AAAAAA');
       path.setAttribute('stroke-width', isSelected ? '2.5' : '1.5');
@@ -823,9 +846,10 @@
     // Prompt select for llm nodes
     const promptSection = document.getElementById('prompt-section');
     const promptSelect = document.getElementById('node-prompt-select');
-    if (node.plugin_id === 'llm_request') {
+    if (node.plugin_id === 'llm_request' || node.plugin_id === 'prompt_selector') {
       promptSelect.innerHTML = '<option value="">— без промпта —</option>' +
         prompts.map(p => `<option value="${p.id}" ${node.prompt_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+      promptSection.classList.remove('hidden');
     } else {
       promptSection.classList.add('hidden');
     }
@@ -835,18 +859,16 @@
     renderGraph();
     updateHint(null);
 
-    // Center the selected node in the viewport (after renderGraph stores positions)
-    requestAnimationFrame(() => {
-      const svgEl = document.getElementById('graph-svg');
-      const pos = _nodePositions[node.id];
-      if (pos) {
-        const svgW = svgEl.clientWidth || 600;
-        const svgH = svgEl.clientHeight || 400;
-        panX = (svgW / 2) - (pos.x + NODE_W / 2) * scale;
-        panY = (svgH / 2) - (pos.y + NODE_H / 2) * scale;
-        applyTransform();
-      }
-    });
+    // [center-on-click disabled]
+    // const svgEl = document.getElementById('graph-svg');
+    // const pos = _nodePositions[node.id];
+    // if (pos) {
+    //   const svgW = svgEl.clientWidth || 600;
+    //   const svgH = svgEl.clientHeight || 400;
+    //   panX = (svgW / 2) - (pos.x + NODE_W / 2) * scale;
+    //   panY = (svgH / 2) - (pos.y + NODE_H / 2) * scale;
+    //   applyTransform();
+    // }
   }
 
   function deselectNode() {
@@ -1086,7 +1108,10 @@
   function renderParams(node) {
     const list = document.getElementById('params-list');
     const params = node.parameters || {};
-    const keys = Object.keys(params);
+    // prompt_selector and llm_request handle prompt_id via the dedicated select section
+    const hiddenKeys = (node.plugin_id === 'prompt_selector' || node.plugin_id === 'llm_request')
+      ? ['prompt_id'] : [];
+    const keys = Object.keys(params).filter(k => !hiddenKeys.includes(k));
 
     if (!keys.length) {
       list.innerHTML = '<p class="text-xs text-brand-muted italic">Нет параметров.</p>';
@@ -1168,7 +1193,7 @@
     node.name = name;
     node.plugin_id = type || node.plugin_id;
     node.description = desc;
-    if (node.plugin_id === 'llm_request') {
+    if (node.plugin_id === 'llm_request' || node.plugin_id === 'prompt_selector') {
       node.prompt_id = document.getElementById('node-prompt-select').value || null;
     }
 
