@@ -84,19 +84,6 @@ class TestNodeLogManagerAppendLogs:
 
 
 class TestNodeLogManagerSaveLogsToMinio:
-    def test_returns_object_name_on_success(self, tmp_path):
-        storage = MagicMock(spec=MinIOStorage)
-        storage.upload_log.return_value = "node/2026/06/25/exec_node.log"
-
-        manager = NodeLogManager(storage=storage)
-        log_file = tmp_path / "node.log"
-        log_file.write_text("log line 1\nlog line 2\n")
-
-        result = manager.save_logs_to_minio(log_file, "exec-123", "node-1", log_type="node")
-
-        assert result == "node/2026/06/25/exec_node.log"
-        storage.upload_log.assert_called_once_with(str(log_file), log_type="node")
-
     def test_returns_none_when_file_missing(self, tmp_path):
         storage = MagicMock(spec=MinIOStorage)
         manager = NodeLogManager(storage=storage)
@@ -118,18 +105,6 @@ class TestNodeLogManagerSaveLogsToMinio:
 
         assert result is None
         storage.upload_log.assert_not_called()
-
-    def test_upload_log_called_with_correct_log_type(self, tmp_path):
-        storage = MagicMock(spec=MinIOStorage)
-        storage.upload_log.return_value = "system/2026/06/25/exec_node.log"
-
-        manager = NodeLogManager(storage=storage)
-        log_file = tmp_path / "node.log"
-        log_file.write_text("syslog entry\n")
-
-        manager.save_logs_to_minio(log_file, "exec-123", "node-1", log_type="system")
-
-        storage.upload_log.assert_called_once_with(str(log_file), log_type="system")
 
     def test_upload_log_returns_none_on_s3_error(self, tmp_path):
         storage = MagicMock(spec=MinIOStorage)

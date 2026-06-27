@@ -125,7 +125,9 @@ class TestMinIOStorage:
         """Тест загрузки лог-файла"""
         minio_path = test_storage.upload_log(
             log_file_path=str(sample_text_file),
-            log_type="application"
+            log_type="application",
+            execution_id="uuid",
+            attempt=1,
         )
         
         assert minio_path is not None
@@ -136,8 +138,8 @@ class TestMinIOStorage:
         test_cases = [
             ("/path/to/file.mp3", "audio/mpeg"),
             ("/path/to/file.mp4", "video/mp4"),
-            ("/path/to/file.txt", "text/plain"),
-            ("/path/to/file.md", "text/markdown"),
+            ("/path/to/file.txt", "text/plain; charset=utf-8"),
+            ("/path/to/file.md", "text/markdown; charset=utf-8"),
             ("/path/to/file.pdf", "application/pdf"),
             ("/path/to/file.unknown", "application/octet-stream")
         ]
