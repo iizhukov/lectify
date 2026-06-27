@@ -1,0 +1,99 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: lectify_test
+          POSTGRES_USER: lectify
+          POSTGRES_PASSWORD: lectify_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      minio:
+        image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        command: server /data --console-address ":9001"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Create virtual environment
+        run: python -m venv venv
+
+      - name: Install dependencies
+        run: venv/bin/pip install -r requirements.txt pytest pytest-asyncio pytest-cov pytest-env pytest-mock
+
+      - name: Copy config
+        run: cp config.cfg.example config.cfg
+
+      - name: Create MinIO buckets
+        run: |
+          sleep 5
+          docker run --rm \
+            --network host \
+            minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            sh -c "mc alias set myminio http://localhost:9000 minioadmin minioadmin; \
+                   mc mb myminio/test-artifacts --ignore-existing; \
+                   mc mb myminio/test-logs --ignore-existing"
+
+      - name: Run unit tests (no DB required)
+        run: >
+          venv/bin/pytest tests/
+          -m "not database and not storage and not integration"
+          --ignore=tests/test_database.py
+          --ignore=tests/test_storage.py
+          --ignore=tests/test_api.py
+          --ignore=tests/test_auth_api.py
+          --ignore=tests/test_orchestrator_service.py
+          --ignore=tests/test_orchestrator_container_runner.py
+          --ignore=tests/test_nodes.py
+          -v --tb=short -p no:cov
+
+      - name: Run all tests (including DB-dependent)
+        run: >
+          venv/bin/pytest tests/
+          -v --tb=short
+          --cov=src
+          --cov-report=xml
+          --cov-report=term-missing
+        env:
+          TESTING: "true"
+          TESTING_DB_URL: postgresql://lectify:lectify_password@localhost:5432/lectify_test
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
