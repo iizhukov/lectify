@@ -26,20 +26,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      minio:
-        image: minio/minio:RELEASE.2024-01-16T16-07-38Z
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        command: server /data --console-address ":9001"
-
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +33,38 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Start MinIO
+        run: |
+          docker run -d \
+            --name minio \
+            -p 9000:9000 \
+            -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2024-01-16T16-07-38Z \
+            server /data --console-address ":9001"
+
+          echo "Waiting for MinIO to be ready..."
+          for i in {1..30}; do
+            if curl -f http://localhost:9000/minio/health/live 2>/dev/null; then
+              echo "MinIO is ready"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Create MinIO buckets
+        run: |
+          docker run --rm \
+            --network host \
+            minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            sh -c "mc alias set myminio http://localhost:9000 minioadmin minioadmin && \
+                   mc mb myminio/test-artifacts --ignore-existing && \
+                   mc mb myminio/test-logs --ignore-existing && \
+                   mc mb myminio/artifacts --ignore-existing && \
+                   mc mb myminio/logs --ignore-existing"
 
       - name: Create virtual environment
         run: python -m venv venv
@@ -56,16 +74,6 @@ jobs:
 
       - name: Copy config
         run: cp config.cfg.example config.cfg
-
-      - name: Create MinIO buckets
-        run: |
-          sleep 5
-          docker run --rm \
-            --network host \
-            minio/mc:RELEASE.2024-01-16T16-06-34Z \
-            sh -c "mc alias set myminio http://localhost:9000 minioadmin minioadmin; \
-                   mc mb myminio/test-artifacts --ignore-existing; \
-                   mc mb myminio/test-logs --ignore-existing"
 
       - name: Run unit tests (no DB required)
         run: >
