@@ -343,6 +343,7 @@ class OrchestratorService:
                 status=NodeExecutionStatus.COMPLETED,
                 progress_percent=100,
                 progress_message="Готово",
+                input_data=input_data,
                 output_data=output_data,
             )
             elapsed_ms = (time.monotonic() - node_start) * 1000

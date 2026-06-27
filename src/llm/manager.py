@@ -1,5 +1,7 @@
 from openai import OpenAI
 
+from src.utils.metrics import metrics
+
 
 MODELS = {
     "smart": "deepseek/deepseek-r1",
@@ -31,11 +33,20 @@ class LLMManager:
 
     def completion(self, purpose: str, messages: list, **kwargs) -> str:
         """Вспомогательный метод для быстрых текстовых запросов"""
+        import time
         model = self.get_model_name(purpose)
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
-        )
-
-        return response.choices[0].message.content
+        start = time.time()
+        try:
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **kwargs
+            )
+            duration = time.time() - start
+            metrics.llm_api_requests.labels(purpose=purpose, status="success").inc()
+            metrics.llm_api_duration.labels(purpose=purpose).observe(duration)
+            return response.choices[0].message.content
+        except Exception:
+            metrics.llm_api_requests.labels(purpose=purpose, status="error").inc()
+            metrics.llm_api_errors.labels(purpose=purpose, error_type="request_failed").inc()
+            raise

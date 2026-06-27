@@ -86,16 +86,114 @@ async def get_execution_nodes(execution_id: str):
 
 @router.get("/executions/{execution_id}/artifacts")
 async def get_execution_artifacts(execution_id: str):
-    return []
+    from src.utils.storage import get_storage
+    from src.db.repository.workflow import WorkflowRepository
+    storage = get_storage()
+    file_repo = WorkflowRepository()
+
+    execution = exec_repo.get(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+
+    workflow_id = execution_id
+    result = []
+
+    # Original user file first
+    if execution.file_id:
+        db_file = file_repo.get_file(execution.file_id)
+        if db_file and db_file.minio_path:
+            url = storage.get_artifact_url(db_file.minio_path, expires_hours=24)
+            result.append({
+                "node_id": None,
+                "filename": db_file.filename,
+                "artifact_type": "original",
+                "url": url,
+                "size": db_file.size_bytes,
+                "minio_path": db_file.minio_path,
+            })
+
+    # Terminal nodes: those with no outgoing edges in the workflow graph.
+    # Their artifacts are promoted to the top level (node_id=None) as the final output.
+    terminal_node_ids = set()
+    if execution.workflow_template and execution.workflow_template.graph:
+        graph = execution.workflow_template.graph
+        all_from_ids = {e.from_node_id for e in (graph.edges or [])}
+        for n in (graph.nodes or []):
+            if n.id not in all_from_ids:
+                terminal_node_ids.add(n.id)
+
+    # Per-node artifacts
+    nodes = node_repo.get_by_execution(execution_id)
+    all_artifacts = storage.list_workflow_artifacts(workflow_id)
+    for node in nodes:
+        prefix = f"{workflow_id}/{node.node_id}/"
+        for art in all_artifacts:
+            obj_name = art["object_name"]
+            if not obj_name.startswith(prefix):
+                continue
+            filename = obj_name.split("/")[-1]
+            if filename == "output.json":
+                continue
+            url = storage.get_artifact_url(obj_name, expires_hours=24)
+            artifact_type = obj_name[len(prefix):].split("/")[0] if "/" in obj_name[len(prefix):] else "unknown"
+
+            # Always include with node's own node_id
+            result.append({
+                "node_id": node.node_id,
+                "filename": filename,
+                "artifact_type": artifact_type,
+                "url": url,
+                "size": art.get("size"),
+                "minio_path": obj_name,
+            })
+
+            # If this is a terminal node, also promote to top level (node_id=None)
+            if node.node_id in terminal_node_ids:
+                result.append({
+                    "node_id": None,
+                    "filename": filename,
+                    "artifact_type": artifact_type,
+                    "url": url,
+                    "size": art.get("size"),
+                    "minio_path": obj_name,
+                })
+    return result
 
 
 @router.get("/executions/{execution_id}/nodes/{node_id}", response_model=ExecutionNodeModel)
 async def get_execution_node(execution_id: str, node_id: str):
+    from src.utils.storage import get_storage
+    storage = get_storage()
+
     nodes = node_repo.get_by_execution(execution_id)
-    for n in nodes:
-        if n.node_id == node_id or n.id == node_id:
-            return n
-    raise HTTPException(status_code=404, detail="Node not found")
+    node = next((n for n in nodes if n.node_id == node_id or n.id == node_id), None)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    execution = exec_repo.get(execution_id)
+    workflow_id = execution_id if execution else execution_id
+    prefix = f"{workflow_id}/{node.node_id}/"
+    all_artifacts = storage.list_workflow_artifacts(workflow_id)
+    node_artifacts = []
+    for art in all_artifacts:
+        obj_name = art["object_name"]
+        if not obj_name.startswith(prefix):
+            continue
+        filename = obj_name.split("/")[-1]
+        if filename == "output.json":
+            continue
+        url = storage.get_artifact_url(obj_name, expires_hours=24)
+        artifact_type = obj_name[len(prefix):].split("/")[0] if "/" in obj_name[len(prefix):] else "unknown"
+        node_artifacts.append({
+            "filename": filename,
+            "artifact_type": artifact_type,
+            "url": url,
+            "size": art.get("size"),
+            "minio_path": obj_name,
+        })
+
+    result = node.model_copy(update={"artifacts": node_artifacts})
+    return result
 
 
 @router.get("/executions/{execution_id}/nodes/{node_id}/logs")
@@ -105,12 +203,14 @@ async def get_node_logs(execution_id: str, node_id: str):
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
 
-    log_manager = NodeLogManager()
-    log_type = "node"
-    logs = log_manager.get_logs(execution_id, node_id, log_type=log_type)
-    if logs is None:
-        return ""
-    return logs
+    from src.utils.storage import get_storage
+    storage = get_storage()
+
+    attempt = 1
+    object_name = f"executions/{execution_id}/{attempt}/{node.plugin_id}/node.log"
+    url = storage.get_log_url(object_name, expires_hours=24)
+
+    return {"attempt": attempt, "url": url}
 
 
 @router.post("/executions/{execution_id}/restart")
@@ -118,7 +218,9 @@ async def restart_execution(execution_id: str):
     execution = exec_repo.get(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="Execution not found")
-    exec_repo.update_status(execution_id, "pending")
+    exec_repo.update_status(execution_id, "pending", error_message="")
+    for node in node_repo.get_by_execution(execution_id):
+        node_repo.update(str(node.id), status="pending", error_message=None)
     return {"execution_id": execution_id, "status": "pending"}
 
 
@@ -161,6 +263,10 @@ async def execute_workflow(
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow template not found")
 
+    # Look up workflow name and input file name
+    workflow_name = wf.name or ""
+    file_name = request.file_path.split("/")[-1] if request.file_path else request.file_id
+
     node_defs = wf.graph.nodes if hasattr(wf.graph, "nodes") else []
 
     exec_repo.create({
@@ -168,6 +274,9 @@ async def execute_workflow(
         "workflow_template_id": workflow_id,
         "file_id": request.file_id,
         "user_id": user_id,
+        "workflow_name": workflow_name,
+        "file_name": file_name,
+        "language": request.language,
         "status": ExecutionStatus.PENDING,
         "created_at": datetime.now(timezone.utc),
     })

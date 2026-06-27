@@ -13,11 +13,23 @@ def _node_to_model(node: DBExecutionNode) -> ExecutionNodeModel:
     def _dt(v):
         return v.isoformat() if v else None
 
+    duration_str = None
+    if node.execution_time_ms:
+        total_s = node.execution_time_ms / 1000
+        h, rem = divmod(int(total_s), 3600)
+        m, s = divmod(rem, 60)
+        duration_str = f"{h:02d}:{m:02d}:{s:02d}"
+
+    avg_cpu = None
+    if node.cpu_percent is not None:
+        avg_cpu = node.cpu_percent
+
     return ExecutionNodeModel(
         id=node.id,
         execution_id=node.execution_id,
         node_template_id=node.node_template_id,
         node_id=node.node_id,
+        plugin_id=node.plugin_id,
         node_name=node.node_name or "",
         status=node.status,
         progress_percent=node.progress_percent,
@@ -26,8 +38,10 @@ def _node_to_model(node: DBExecutionNode) -> ExecutionNodeModel:
         output_data=node.output_data,
         container_id=node.container_id,
         cpu_percent=node.cpu_percent,
+        avg_cpu_percent=avg_cpu,
         memory_mb=node.memory_mb,
         execution_time_ms=node.execution_time_ms,
+        duration_str=duration_str,
         error_message=node.error_message,
         logs_path=node.logs_path,
         started_at=_dt(node.started_at),
@@ -141,8 +155,8 @@ class ExecutionRepository(BaseRepository):
             if not exec:
                 return None
             exec.status = status
-            if error_message:
-                exec.error_message = error_message
+            if error_message is not None:
+                exec.error_message = error_message if error_message else None
             if status == "running":
                 exec.started_at = datetime.now(timezone.utc)
             if status in ("completed", "failed", "cancelled"):
@@ -182,6 +196,7 @@ class ExecutionNodeRepository(BaseRepository):
         status: Optional[str] = None,
         progress_percent: Optional[int] = None,
         progress_message: Optional[str] = None,
+        input_data: Optional[dict] = None,
         output_data: Optional[dict] = None,
         container_id: Optional[str] = None,
         cpu_percent: Optional[float] = None,
@@ -204,6 +219,8 @@ class ExecutionNodeRepository(BaseRepository):
                 node.progress_percent = progress_percent
             if progress_message is not None:
                 node.progress_message = progress_message
+            if input_data is not None:
+                node.input_data = input_data
             if output_data is not None:
                 node.output_data = output_data
             if container_id is not None:

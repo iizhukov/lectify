@@ -27,6 +27,7 @@ class ExecutionNodeModel(BaseModelConfig):
     execution_id: str
     node_template_id: Optional[str] = None
     node_id: str
+    plugin_id: Optional[str] = None
     node_name: str = ""
     status: NodeExecutionStatus
     progress_percent: Optional[int] = None
@@ -35,8 +36,10 @@ class ExecutionNodeModel(BaseModelConfig):
     output_data: Optional[dict] = None
     container_id: Optional[str] = None
     cpu_percent: Optional[float] = None
+    avg_cpu_percent: Optional[float] = None
     memory_mb: Optional[float] = None
     execution_time_ms: Optional[int] = None
+    duration_str: Optional[str] = None
     error_message: Optional[str] = None
     logs_path: Optional[str] = None
     started_at: Optional[str] = None
@@ -44,6 +47,7 @@ class ExecutionNodeModel(BaseModelConfig):
     created_at: Optional[str] = None
 
     node_template: Optional[NodeTemplateModel] = None
+    artifacts: Optional[list] = None
 
 
 class ExecutionModel(BaseModelConfig):

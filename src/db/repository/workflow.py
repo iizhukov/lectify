@@ -85,6 +85,13 @@ class WorkflowRepository(BaseRepository):
                 return None
             return FileModel.model_validate(db_file)
 
+    def get_file(self, file_id: str) -> Optional[FileModel]:
+        with self.session() as s:
+            db_file = s.query(DBFile).filter(DBFile.id == file_id).first()
+            if not db_file:
+                return None
+            return FileModel.model_validate(db_file)
+
     def update_file_status(self, file_id: str, status: FileStatus):
         with self.session() as s:
             db_file = s.query(DBFile).filter(DBFile.id == file_id).first()

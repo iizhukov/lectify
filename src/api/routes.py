@@ -10,6 +10,7 @@ from src.db.models import FileModel, WorkflowStateModel, ArtifactModel
 from src.db.repository import DBRepository
 from src.utils.storage import MinIOStorage
 from src.utils.logging import get_logger
+from src.utils.metrics import metrics
 
 
 logger = get_logger(__name__)
@@ -44,6 +45,10 @@ async def upload_file(
         mime_type=file.content_type or "application/octet-stream",  # type: ignore[arg-type]
         minio_path=minio_path,
     )
+
+    if minio_path:
+        metrics.files_uploaded.inc()
+        metrics.file_size_bytes.observe(size_bytes)
 
     return file_record
 

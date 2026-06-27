@@ -127,8 +127,8 @@ class LLMRequestPlugin(Plugin):
 
             context.report_progress(50, "Ожидание ответа...")
 
-            response = client.chat.completions.create(
-                model=model,
+            response = client.completion(
+                purpose="llm_request",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -137,8 +137,8 @@ class LLMRequestPlugin(Plugin):
                 max_tokens=max_tokens
             )
 
-            result_text = response.choices[0].message.content
-            tokens_used = response.usage.total_tokens if hasattr(response, 'usage') else 0
+            result_text = response
+            tokens_used = 0
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 

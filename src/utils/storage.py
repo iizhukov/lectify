@@ -314,7 +314,21 @@ class MinIOStorage:
                 error=str(e)
             )
             return None
-    
+
+    def get_log_url(self, object_name: str, expires_hours: int = 24) -> Optional[str]:
+        """Получить presigned URL для лога."""
+        try:
+            from datetime import timedelta
+            url = self.client.presigned_get_object(
+                self.logs_bucket,
+                object_name,
+                expires=timedelta(hours=expires_hours)
+            )
+            return url
+        except S3Error as e:
+            logger.error("presigned_log_url_failed", object_name=object_name, error=str(e))
+            return None
+
     def list_workflow_artifacts(self, workflow_id: str) -> list:
         """
         Получить список всех артефактов воркфлоу
@@ -483,11 +497,11 @@ class MinIOStorage:
             ".mp4": "video/mp4",
             ".m4a": "audio/mp4",
             ".wav": "audio/wav",
-            ".txt": "text/plain",
-            ".md": "text/markdown",
-            ".tex": "text/x-tex",
+            ".txt": "text/plain; charset=utf-8",
+            ".md": "text/markdown; charset=utf-8",
+            ".tex": "text/x-tex; charset=utf-8",
             ".pdf": "application/pdf",
-            ".json": "application/json"
+            ".json": "application/json; charset=utf-8"
         }
         
         return content_types.get(ext, "application/octet-stream")
@@ -505,11 +519,11 @@ class MinIOStorage:
             ".mov": "video/quicktime",
             ".webm": "video/webm",
             ".wav": "audio/wav",
-            ".txt": "text/plain",
-            ".md": "text/markdown",
-            ".tex": "text/x-tex",
+            ".txt": "text/plain; charset=utf-8",
+            ".md": "text/markdown; charset=utf-8",
+            ".tex": "text/x-tex; charset=utf-8",
             ".pdf": "application/pdf",
-            ".json": "application/json"
+            ".json": "application/json; charset=utf-8"
         }
         
         return content_types.get(ext, "application/octet-stream")
