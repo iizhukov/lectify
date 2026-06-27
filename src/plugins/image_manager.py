@@ -95,7 +95,15 @@ def _prepare_build_context(
     plugin_id: str,
 ) -> Path:
     """
-    Copy plugin source + requirements into a temp build context directory.
+    Copy only necessary files for plugin runtime into a temp build context directory.
+
+    This creates a minimal context containing:
+    - Plugin runtime files (base.py, registry.py, runner.py)
+    - Specific plugin code
+    - Minimal utils (storage, logging)
+    - Minimal db module
+    - LLM client
+    - Config file
 
     Returns path to the build context directory.
     """
@@ -104,25 +112,101 @@ def _prepare_build_context(
 
     context_dir = Path(tempfile.mkdtemp(prefix=f"lectify-plugin-build-{plugin_id}-"))
 
-    # Always copy the project root (contains src/, requirements.txt, etc.)
-    src_dest = context_dir / "src"
-    shutil.copytree(
-        project_root / "src",
-        src_dest,
-        dirs_exist_ok=True,
+    # Copy only necessary src files (not entire src/)
+    def copy_if_exists(src_path: Path, dest_path: Path):
+        """Copy file or directory if it exists"""
+        if src_path.exists():
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            if src_path.is_dir():
+                shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_path, dest_path)
+
+    # Copy config module (needed by storage, db, llm)
+    copy_if_exists(
+        project_root / "src" / "config.py",
+        context_dir / "src" / "config.py"
+    )
+
+    # Plugin runtime files
+    plugin_runtime_files = [
+        "src/plugins/__init__.py",
+        "src/plugins/base.py",
+        "src/plugins/registry.py",
+        "src/plugins/runner.py",
+    ]
+    for file_path in plugin_runtime_files:
+        copy_if_exists(
+            project_root / file_path,
+            context_dir / file_path
+        )
+
+    # Create empty __init__.py for plugins directory
+    # (avoid cross-plugin imports that would fail in isolated container)
+    plugins_init = context_dir / "src" / "plugins" / "plugins" / "__init__.py"
+    plugins_init.parent.mkdir(parents=True, exist_ok=True)
+    plugins_init.write_text("")
+
+    # Copy specific plugin directory
+    copy_if_exists(
+        plugin_dir,
+        context_dir / "src" / "plugins" / "plugins" / plugin_id
+    )
+
+    # Copy utils (storage, logging, metrics)
+    utils_files = [
+        "src/utils/storage.py",
+        "src/utils/logging.py",
+        "src/utils/metrics.py",
+    ]
+    for file_path in utils_files:
+        copy_if_exists(
+            project_root / file_path,
+            context_dir / file_path
+        )
+
+    # Copy db module (for plugins that need DB access)
+    db_files = [
+        "src/db/__init__.py",
+        "src/db/database.py",
+    ]
+    for file_path in db_files:
+        copy_if_exists(
+            project_root / file_path,
+            context_dir / file_path
+        )
+
+    # Copy db/entity directory (contains all entity definitions)
+    copy_if_exists(
+        project_root / "src" / "db" / "entity",
+        context_dir / "src" / "db" / "entity"
+    )
+
+    # Copy db/models directory (if exists)
+    copy_if_exists(
+        project_root / "src" / "db" / "models",
+        context_dir / "src" / "db" / "models"
+    )
+
+    # Copy llm client (for plugins using OpenAI API)
+    copy_if_exists(
+        project_root / "src" / "llm",
+        context_dir / "src" / "llm"
+    )
+
+    # Copy config.cfg
+    copy_if_exists(
+        project_root / "config.cfg",
+        context_dir / "config.cfg"
     )
 
     # Copy project-level requirements
     shutil.copy2(project_root / "requirements.txt", context_dir / "requirements.txt")
 
-    # Copy plugin-specific requirements if present
+    # Copy plugin-specific requirements if present (overwrites project-level)
     req = _get_plugin_requirements(plugin_dir)
     if req:
         shutil.copy2(req, context_dir / "requirements.txt")
-
-    # Copy plugin directory itself
-    plugin_dest = context_dir / "src" / "plugins" / "plugins" / plugin_id
-    shutil.copytree(plugin_dir, plugin_dest, dirs_exist_ok=True)
 
     # Copy Dockerfile
     shutil.copy2(plugin_dockerfile, context_dir / "Dockerfile")
@@ -156,7 +240,7 @@ def build_missing_plugin_images(
     if project_root is None:
         project_root = Path(__file__).parent.parent.parent
 
-    plugin_dockerfile = Path(__file__).parent / "docker" / "Dockerfile.plugin"
+    plugin_dockerfile = Path(__file__).parent / "docker" / "Dockerfile.plugin.optimized"
 
     if not plugin_dockerfile.exists():
         logger.warning("plugin_dockerfile_not_found", path=str(plugin_dockerfile))

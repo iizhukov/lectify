@@ -3,23 +3,25 @@
 {% block title %}Сценарии{% endblock %}
 
 {% block content %}
-<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-  <h1 class="text-2xl font-bold text-brand-dark">Сценарии</h1>
-  <div class="flex items-center gap-3">
-    <button id="create-btn" class="btn-primary text-sm flex items-center gap-1.5">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
-      Создать сценарий
-    </button>
-  </div>
-</div>
-
 <div class="max-w-5xl mx-auto">
+
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <h1 class="text-2xl font-bold text-brand-dark">Сценарии</h1>
+    <div class="flex items-center gap-3">
+      <button id="create-btn" class="btn-primary text-sm flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Создать сценарий
+      </button>
+    </div>
+  </div>
+
   <div id="workflows-list" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3"></div>
   <div id="workflows-empty" class="hidden text-center py-16">
     <p class="text-brand-muted">Сценариев пока нет.</p>
   </div>
+
 </div>
 
 <!-- Create modal -->

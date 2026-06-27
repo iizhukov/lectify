@@ -1,0 +1,54 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system deps needed by common Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (for caching)
+COPY requirements.txt .
+
+# Install Python deps
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy config module (needed by storage, db, llm)
+COPY src/config.py src/
+
+# Copy only necessary files for plugin runtime
+COPY src/plugins/__init__.py src/plugins/
+COPY src/plugins/base.py src/plugins/
+COPY src/plugins/registry.py src/plugins/
+COPY src/plugins/runner.py src/plugins/
+
+# Create plugins directory and empty __init__.py (avoid cross-plugin imports)
+RUN mkdir -p src/plugins/plugins && echo "" > src/plugins/plugins/__init__.py
+
+# Copy specific plugin code (ARG will be passed during build)
+ARG PLUGIN_ID
+COPY src/plugins/plugins/${PLUGIN_ID}/ src/plugins/plugins/${PLUGIN_ID}/
+
+# Copy minimal utils (storage, logging, metrics)
+COPY src/utils/storage.py src/utils/
+COPY src/utils/logging.py src/utils/
+COPY src/utils/metrics.py src/utils/
+
+# Copy minimal db module (for plugins that need DB access)
+COPY src/db/__init__.py src/db/
+COPY src/db/database.py src/db/
+COPY src/db/entity/ src/db/entity/
+COPY src/db/models/ src/db/models/
+
+# Copy LLM client (for plugins that use OpenAI API)
+COPY src/llm/ src/llm/
+
+# Copy config (needed for storage/db/llm connections)
+COPY config.cfg config.cfg
+
+# Create input/output mount points
+RUN mkdir -p /input /output
+
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["python", "-m", "src.plugins.runner"]

@@ -113,7 +113,7 @@ class DockerClient:
 
         plugin_dockerfile = (
             Path(__file__).parent.parent
-            / "plugins" / "docker" / "Dockerfile.plugin"
+            / "plugins" / "docker" / "Dockerfile.plugin.omptimized"
         )
         if not plugin_dockerfile.exists():
             logger.error(

@@ -45,7 +45,7 @@ async def create_workflow(req: WorkflowCreateRequest, authorization: str = Heade
         "name": req.name,
         "description": req.description,
         "graph": req.graph,
-        "is_public": req.is_public,
+        "is_public": True,
     })
 
 
@@ -234,10 +234,17 @@ async def get_workflow(workflow_id: str):
 
 @router.put("/{workflow_id}", response_model=WorkflowTemplateModel)
 async def update_workflow(workflow_id: str, req: WorkflowCreateRequest):
-    wf = repo.update(workflow_id, name=req.name, description=req.description,
-                     graph=req.graph, is_public=req.is_public)
+    wf = repo.update(
+        workflow_id,
+        name=req.name,
+        description=req.description,
+        graph=req.graph,
+        is_public=True
+    )
+
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
+
     return wf
 
 

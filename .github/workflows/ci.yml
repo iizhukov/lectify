@@ -57,14 +57,20 @@ jobs:
 
       - name: Create MinIO buckets
         run: |
-          docker run --rm \
-            --network host \
-            minio/mc:RELEASE.2024-01-16T16-06-34Z \
-            sh -c "mc alias set myminio http://localhost:9000 minioadmin minioadmin && \
-                   mc mb myminio/test-artifacts --ignore-existing && \
-                   mc mb myminio/test-logs --ignore-existing && \
-                   mc mb myminio/artifacts --ignore-existing && \
-                   mc mb myminio/logs --ignore-existing"
+          docker run --rm --network host minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            alias set myminio http://localhost:9000 minioadmin minioadmin
+
+          docker run --rm --network host minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            mb myminio/test-artifacts --ignore-existing
+
+          docker run --rm --network host minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            mb myminio/test-logs --ignore-existing
+
+          docker run --rm --network host minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            mb myminio/artifacts --ignore-existing
+
+          docker run --rm --network host minio/mc:RELEASE.2024-01-16T16-06-34Z \
+            mb myminio/logs --ignore-existing
 
       - name: Create virtual environment
         run: python -m venv venv

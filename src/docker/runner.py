@@ -116,7 +116,8 @@ class ContainerRunner:
                 image_name,
                 execution_id,
                 node_id,
-                input_key
+                input_key,
+                plugin_id
             )
 
             if not container_id:
@@ -392,7 +393,8 @@ class ContainerRunner:
         image_name: str,
         execution_id: str,
         node_id: str,
-        input_path: str
+        input_path: str,
+        plugin_id: str = ""
     ) -> Optional[str]:
         """Start container with plugin image"""
         temp_dir = Path(tempfile.gettempdir()) / "lectify"
@@ -407,6 +409,9 @@ class ContainerRunner:
         environment = {
             "PLUGIN_INPUT": "/input/input.json",
             "PLUGIN_OUTPUT": "/output/output.json",
+            "PLUGIN_ID": plugin_id,
+            "EXECUTION_ID": execution_id,
+            "PUSHGATEWAY_URL": getattr(config, 'pushgateway_url', "host.docker.internal:9091"),
             "MINIO_ENDPOINT": "host.docker.internal:9000",
             "OPENAI_API_KEY": config.openai_api_key,
             "OPENAI_API_URL": config.openai_api_url,
