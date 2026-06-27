@@ -436,29 +436,40 @@
 
   // --- Layout ---
   function layoutNodes() {
-    const inDeg = {};
-    nodes.forEach(n => { inDeg[n.id] = 0; });
-    edges.forEach(e => { if (inDeg[e.to_node_id] !== undefined) inDeg[e.to_node_id]++; });
-
-    const depth = {};
-    const queue = nodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
-    queue.forEach(id => { depth[id] = 0; });
     const adj = {};
+    const parents = {};
     edges.forEach(e => {
       if (!adj[e.from_node_id]) adj[e.from_node_id] = [];
       adj[e.from_node_id].push(e.to_node_id);
+      if (!parents[e.to_node_id]) parents[e.to_node_id] = [];
+      parents[e.to_node_id].push(e.from_node_id);
     });
-    let qi = 0;
-    while (qi < queue.length) {
-      const cur = queue[qi++];
+
+    // Kahn's topological sort
+    const inDeg = {};
+    nodes.forEach(n => { inDeg[n.id] = (parents[n.id] || []).length; });
+    const queue = Object.keys(inDeg).filter(id => inDeg[id] === 0);
+    const topo = [];
+    while (queue.length) {
+      const cur = queue.shift();
+      topo.push(cur);
       (adj[cur] || []).forEach(next => {
-        if (depth[next] === undefined) {
-          depth[next] = depth[cur] + 1;
-          queue.push(next);
-        }
+        inDeg[next]--;
+        if (inDeg[next] === 0) queue.push(next);
       });
     }
-    nodes.forEach(n => { if (depth[n.id] === undefined) depth[n.id] = 0; });
+    nodes.forEach(n => { if (!topo.includes(n.id)) topo.push(n.id); });
+
+    // Longest-path DP + flip so roots=0, leaves=max
+    const rawDepth = {};
+    for (let i = topo.length - 1; i >= 0; i--) {
+      const cur = topo[i];
+      const childDepths = (adj[cur] || []).map(c => rawDepth[c] ?? 0);
+      rawDepth[cur] = childDepths.length ? Math.max(...childDepths) + 1 : 0;
+    }
+    const maxDepth = Math.max(0, ...Object.values(rawDepth));
+    const depth = {};
+    nodes.forEach(n => { depth[n.id] = maxDepth - (rawDepth[n.id] ?? 0); });
 
     const cols = {};
     nodes.forEach(n => {

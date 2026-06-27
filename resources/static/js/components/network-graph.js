@@ -12,35 +12,67 @@ export function renderNetworkGraph(svgEl, nodes, edges, onNodeClick) {
   svgEl.innerHTML = '';
   if (!nodes || !nodes.length) return;
 
-  let panX = 0, panY = 0, scale = 1;
+  // Restore pan/zoom from previous render (survives poll re-renders).
+  // On very first render, compute initial panY to vertically centre the leftmost column.
+  const isFirstRender = svgEl._panState === undefined;
+  let panX = 0;
+  let panY = 0;
+  let scale = 1;
+
+  if (isFirstRender) {
+    // Will compute panY after layout so we can centre the leftmost column
+    svgEl._panState = false;
+  } else {
+    panX   = svgEl._panX ?? 0;
+    panY   = svgEl._panY ?? 0;
+    scale  = svgEl._scale ?? 1;
+  }
+
   let isPanning = false;
   let lastX = 0, lastY = 0;
 
   // --- Layout ---
-  // Build column depths via BFS from roots
-  const inDeg = {};
-  nodes.forEach(n => { inDeg[n.id] = 0; });
-  (edges || []).forEach(e => { if (inDeg[e.to_node_id] !== undefined) inDeg[e.to_node_id]++; });
-
-  const depth = {};
-  const queue = nodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
-  queue.forEach(id => { depth[id] = 0; });
-  const adj = {};
+  // Build column depths via longest-path DP on topological order.
+  // Correctly handles diamonds (e.g. 1→2→3, 1→4→3).
+  const adj = {};   // from → [to]
+  const parents = {}; // to → [from]
   (edges || []).forEach(e => {
     if (!adj[e.from_node_id]) adj[e.from_node_id] = [];
     adj[e.from_node_id].push(e.to_node_id);
+    if (!parents[e.to_node_id]) parents[e.to_node_id] = [];
+    parents[e.to_node_id].push(e.from_node_id);
   });
-  let qi = 0;
-  while (qi < queue.length) {
-    const cur = queue[qi++];
+
+  // inDeg = number of incoming edges (original graph direction: from → to)
+  const inDeg = {};
+  nodes.forEach(n => { inDeg[n.id] = (parents[n.id] || []).length; });
+
+  // Kahn's topological sort
+  const queue = Object.keys(inDeg).filter(id => inDeg[id] === 0); // roots first
+  const topo = [];
+  while (queue.length) {
+    const cur = queue.shift();
+    topo.push(cur);
     (adj[cur] || []).forEach(next => {
-      if (depth[next] === undefined) {
-        depth[next] = depth[cur] + 1;
-        queue.push(next);
-      }
+      inDeg[next]--;
+      if (inDeg[next] === 0) queue.push(next);
     });
   }
-  nodes.forEach(n => { if (depth[n.id] === undefined) depth[n.id] = 0; });
+  // Safety: any remaining nodes (cycle / disconnected) append in any order
+  nodes.forEach(n => { if (!topo.includes(n.id)) topo.push(n.id); });
+
+  // DP: depth = longest distance from any leaf (node with no outgoing edges).
+  // Iterate in reverse topological order so children are processed before parents.
+  // Then flip: roots should be depth 0 (leftmost), leaves max (rightmost).
+  const rawDepth = {};
+  for (let i = topo.length - 1; i >= 0; i--) {
+    const cur = topo[i];
+    const childDepths = (adj[cur] || []).map(c => rawDepth[c] ?? 0);
+    rawDepth[cur] = childDepths.length ? Math.max(...childDepths) + 1 : 0;
+  }
+  const maxDepth = Math.max(...Object.values(rawDepth));
+  const depth = {};
+  nodes.forEach(n => { depth[n.id] = maxDepth - rawDepth[n.id]; });
 
   // Group by column
   const cols = {};
@@ -64,6 +96,18 @@ export function renderNetworkGraph(svgEl, nodes, edges, onNodeClick) {
       pos[n.id] = { x, y };
     });
   });
+
+  // --- Initial centering: shift panY so the leftmost column's first node
+  // sits at the vertical midpoint of the SVG container ---
+  if (isFirstRender) {
+    const col0Bucket = cols[0] || [];
+    const svgCenterY = svgEl.clientHeight / 2;
+    if (col0Bucket.length > 0) {
+      const firstNode = col0Bucket[0];
+      const firstNodeCenterY = pos[firstNode.id].y + NODE_H / 2;
+      panY = svgCenterY - firstNodeCenterY;
+    }
+  }
 
   // --- SVG setup ---
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -111,9 +155,16 @@ export function renderNetworkGraph(svgEl, nodes, edges, onNodeClick) {
   g.setAttribute('id', 'graph-viewport');
   svgEl.appendChild(g);
 
+  function savePanState() {
+    svgEl._panX = panX;
+    svgEl._panY = panY;
+    svgEl._scale = scale;
+  }
+
   function applyTransform() {
     g.setAttribute('transform', `translate(${panX},${panY}) scale(${scale})`);
     updateBackground();
+    savePanState();
   }
   applyTransform();
 

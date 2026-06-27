@@ -1,11 +1,18 @@
-let activeModal = null;
+let _modalStack = [];
+let _activeModal = null;
 let _bodyPoller = null;
 let _closeCallback = null;
 
-export function showModal({ title, body, width = 'max-w-lg', onClose }) {
+export function activeModal() { return _activeModal; }
+
+export function showModal({ title, body, width = 'max-w-lg', onClose, onRender }) {
   clearBodyPoller();
+  if (_modalStack.length > 0) {
+    const top = _modalStack[_modalStack.length - 1];
+    top.bodyDiv.style.visibility = 'hidden';
+    top.overlay.style.pointerEvents = 'none';
+  }
   _closeCallback = onClose || null;
-  closeModal();
 
   const maxW = width === 'max-w-2xl' ? '42rem' : width === 'max-w-3xl' ? '48rem' : '32rem';
 
@@ -37,13 +44,16 @@ export function showModal({ title, body, width = 'max-w-lg', onClose }) {
     'margin:auto',
   ].join(';');
 
+  const bodyDiv = document.createElement('div');
+  bodyDiv.style.cssText = 'padding:1rem 1.5rem;overflow-y:auto;flex:1';
+
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem;border-bottom:1px solid #DCDCDC;flex-shrink:0">
       <h2 style="font-size:1.1rem;font-weight:600;color:#222;margin:0">${title}</h2>
       <button id="modal-close" style="color:#787878;font-size:1.5rem;line-height:1;background:none;border:none;cursor:pointer;padding:0 0.25rem">&times;</button>
     </div>
-    <div style="padding:1rem 1.5rem;overflow-y:auto;flex:1">${body}</div>
   `;
+  container.appendChild(bodyDiv);
 
   overlay.appendChild(container);
   document.body.appendChild(overlay);
@@ -55,11 +65,16 @@ export function showModal({ title, body, width = 'max-w-lg', onClose }) {
   container.querySelector('#modal-close').addEventListener('click', closeModal);
   document.addEventListener('keydown', onEsc);
 
-  activeModal = { overlay };
-  const firstInput = container.querySelector('input, textarea, select');
-  if (firstInput) firstInput.focus();
+  const entry = { overlay, bodyDiv, onRender: onRender || null };
+  _modalStack.push(entry);
+  _activeModal = entry;
 
   if (typeof body === 'function') startBodyPoller(body, container);
+  else bodyDiv.innerHTML = body;
+
+  if (onRender) onRender();
+  const firstInput = container.querySelector('input, textarea, select');
+  if (firstInput) firstInput.focus();
 }
 
 function onEsc(e) {
@@ -67,30 +82,40 @@ function onEsc(e) {
 }
 
 export function closeModal() {
-  if (activeModal) {
-    activeModal.overlay.remove();
-    document.body.style.overflow = '';
+  const top = _modalStack.pop();
+  if (top) {
+    top.overlay.remove();
     document.removeEventListener('keydown', onEsc);
-    activeModal = null;
+    clearBodyPoller();
+    if (_closeCallback && _modalStack.length === 0) { _closeCallback(); _closeCallback = null; }
   }
-  clearBodyPoller();
-  if (_closeCallback) { _closeCallback(); _closeCallback = null; }
+  if (_modalStack.length > 0) {
+    const next = _modalStack[_modalStack.length - 1];
+    next.bodyDiv.style.visibility = '';
+    next.overlay.style.pointerEvents = '';
+    _activeModal = next;
+  } else {
+    document.body.style.overflow = '';
+    _activeModal = null;
+  }
 }
 
 export function updateModalBody(bodyFn) {
-  if (!activeModal) return;
+  if (!_activeModal) return;
   clearBodyPoller();
-  startBodyPoller(bodyFn, activeModal.overlay);
+  startBodyPoller(bodyFn, _activeModal.overlay);
 }
 
 function startBodyPoller(body, overlay) {
+  const getBodyContent = (b) => typeof b === 'function' ? b() : (b.body || b);
+  const content = overlay.querySelector('div:last-child');
   _bodyPoller = setInterval(() => {
     if (!document.body.contains(overlay)) { clearBodyPoller(); return; }
-    const newBody = typeof body === 'function' ? body() : body;
-    const content = overlay.querySelector('div:last-child');
-    if (content) content.innerHTML = newBody;
+    const newBody = getBodyContent(body);
+    if (content) { content.innerHTML = newBody; if (_activeModal?.onRender) _activeModal.onRender(content); }
   }, 5000);
-  if (typeof body === 'function') body();
+  if (content) { content.innerHTML = getBodyContent(body); }
+  if (_activeModal?.onRender) _activeModal.onRender(content);
 }
 
 function clearBodyPoller() {

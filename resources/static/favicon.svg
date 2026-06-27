@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#0066CC"/>
+  <!-- Bottom folder (w=24, full height) -->
+  <path d="M4 20h24v6a2 2 0 01-2 2H6a2 2 0 01-2-2v-6z"
+        stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Middle folder (w=16, 2/3 of bottom, bottom hidden behind bottom) -->
+  <path d="M8 13h16v5a2 2 0 01-2 2H10a2 2 0 01-2-2v-5z"
+        stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Top folder (w=11, 2/3 of middle, bottom hidden behind middle) -->
+  <path d="M10 5h12v6a2 2 0 01-2 2H12a2 2 0 01-2-2V5z"
+        stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

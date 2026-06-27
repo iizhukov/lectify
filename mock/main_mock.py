@@ -484,7 +484,8 @@ async def get_node_detail(execution_id: str, node_id: str):
 async def get_node_logs(execution_id: str, node_id: str):
     """Get node logs"""
     from mock.mock_data import MOCK_NODE_LOGS
-    return {"logs": MOCK_NODE_LOGS.get(node_id, f"No logs for {node_id}")}
+    _ = MOCK_NODE_LOGS.get(node_id, "")
+    return {"attempt": 1, "url": f"http://localhost:9000/mock-logs/{execution_id}/{node_id}/node.log"}
 
 
 @workflows_router.get("/executions/{execution_id}/artifacts", response_model=List[dict])
@@ -738,8 +739,8 @@ async def get_node_logs(execution_id: str, node_id: str):
     nodes = MOCK_EXECUTION_NODES.get(execution_id, [])
     for node in nodes:
         if node["id"] == node_id:
-            logs = MOCK_NODE_LOGS.get(node_id, f"Mock logs for {node_id}\nNo logs available.")
-            return {"logs": logs}
+            _ = MOCK_NODE_LOGS.get(node_id, "")
+            return {"attempt": 1, "url": f"http://localhost:9000/mock-logs/{execution_id}/{node_id}/node.log"}
 
     raise HTTPException(status_code=404, detail="Node not found")
 

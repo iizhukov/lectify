@@ -2,7 +2,11 @@ import { isAuthenticated } from './auth.js';
 
 const PUBLIC_ROUTES = ['/login', '/register', '/forgot-password', '/reset-password', '/'];
 
+let _routerInitialized = false;
+
 export function initRouter() {
+  if (_routerInitialized) return;
+  _routerInitialized = true;
   window.addEventListener('popstate', () => renderRoute());
   document.addEventListener('click', (e) => {
     const link = e.target.closest('a[href^="/"]');

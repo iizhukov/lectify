@@ -38,7 +38,7 @@
 <script type="module">
   import { api } from '/static/js/api.js';
   import { showToast } from '/static/js/components/toast.js';
-  import { showModal, closeModal } from '/static/js/components/modal.js';
+  import { showModal, closeModal, activeModal } from '/static/js/components/modal.js';
 
   let executions = [];
 
@@ -249,31 +249,50 @@
       `;
     }
 
-    showModal({ title: 'Создать конспект', body: buildModalBody(), width: 'max-w-lg' });
-    const overlay = document.getElementById('modal-overlay');
+    showModal({
+      title: 'Создать конспект',
+      body: buildModalBody(),
+      width: 'max-w-lg',
+      onRender() {
+        // Attach all listeners once — event delegation handles all future clicks
+        const overlay = activeModal().overlay;
+        const searchInput = document.getElementById('ce-search');
+        if (searchInput) {
+          searchInput.addEventListener('input', (e) => {
+            currentFilter = e.target.value;
+            const listEl = document.getElementById('ce-wf-list');
+            if (listEl) listEl.innerHTML = renderWorkflowList(currentFilter);
+            // re-attach wf click listeners after innerHTML change
+            listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
+              btn.addEventListener('click', () => {
+                selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
+                refreshBody();
+              });
+            });
+          });
+          searchInput.focus();
+        }
+        // workflow buttons on initial render
+        const listEl = document.getElementById('ce-wf-list');
+        if (listEl) {
+          listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
+              refreshBody();
+            });
+          });
+        }
+      },
+    });
 
     function refreshBody() {
-      const bodyEl = overlay.querySelector('[style*="overflow-y:auto"]');
-      if (bodyEl) bodyEl.innerHTML = buildModalBody();
-      if (selectedWorkflow) {
-        const backBtn = document.getElementById('ce-back-btn');
-        if (backBtn) backBtn.addEventListener('click', () => { selectedWorkflow = null; refreshBody(); });
-        attachFileHandlers();
-      } else {
-        attachWfListeners();
-        setTimeout(() => { const s = document.getElementById('ce-search'); if (s) s.focus(); }, 0);
-      }
-    }
-
-    function attachWfListeners() {
-      const listEl = document.getElementById('ce-wf-list');
-      if (!listEl) return;
-      listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
-          refreshBody();
-        });
-      });
+      const top = activeModal();
+      if (!top) return;
+      top.bodyDiv.innerHTML = buildModalBody();
+      // re-attach listeners for new body
+      const backBtn = document.getElementById('ce-back-btn');
+      if (backBtn) backBtn.addEventListener('click', () => { selectedWorkflow = null; refreshBody(); });
+      attachFileHandlers();
     }
 
     function attachFileHandlers() {
@@ -316,23 +335,7 @@
       }
     }
 
-    // Search input
-    setTimeout(() => {
-      const searchInput = document.getElementById('ce-search');
-      if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-          currentFilter = e.target.value;
-          const listEl = document.getElementById('ce-wf-list');
-          if (listEl) listEl.innerHTML = renderWorkflowList(currentFilter);
-          attachWfListeners();
-        });
-        searchInput.focus();
-      }
-    }, 0);
-
-    attachWfListeners();
-
-    overlay.addEventListener('click', async (e) => {
+    activeModal().overlay.addEventListener('click', async (e) => {
       const cancelBtn = e.target.closest('#ce-cancel-btn');
       if (cancelBtn) { closeModal(); return; }
       const submitBtn = e.target.closest('#ce-submit-btn');
@@ -368,10 +371,14 @@
     });
   });
 
+  let _alive = false;
   loadExecutions();
+  _alive = true;
   const _interval = setInterval(() => {
+    if (!_alive) { clearInterval(_interval); return; }
     if (!document.getElementById('status-filter')) { clearInterval(_interval); return; }
     loadExecutions();
   }, 8000);
+  window.addEventListener('beforeunload', () => { _alive = false; });
 </script>
 {% endblock %}

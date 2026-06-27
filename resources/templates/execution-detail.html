@@ -55,6 +55,8 @@
   import { showToast } from '/static/js/components/toast.js';
   import { renderNetworkGraph } from '/static/js/components/network-graph.js';
 
+  let _alive = false; // SPA cleanup guard
+
   const execId = window.location.pathname.split('/').pop();
   const STATUS_STYLES = {
     completed: { badge: 'badge-success', dot: 'bg-green-500', color: '#16a34a' },
@@ -121,7 +123,7 @@
     }
 
     const restartBtn = document.getElementById('restart-btn');
-    if (ex.status === 'failed' || ex.status === 'completed') {
+    if (ex.status === 'failed') {
       restartBtn.classList.remove('hidden');
     } else {
       restartBtn.classList.add('hidden');
@@ -174,6 +176,7 @@
   let _currentNodeDetailId = null;
 
   async function showNodeDetail(nodeId) {
+    if (!_alive) return;
     if (_nodeDetailInterval) { clearInterval(_nodeDetailInterval); _nodeDetailInterval = null; }
     _currentNodeDetailId = nodeId;
 
@@ -193,6 +196,7 @@
             <dt class="text-sm text-brand-muted">Статус</dt>
             <dd><span class="${style.badge}">${STATUS_LABELS[node.status] || node.status}</span></dd>
           </div>
+          ${formatKV('node_id', node.node_id)}
           ${formatKV('Запущен', formatDate(node.started_at))}
           ${formatKV('Завершён', formatDate(node.ended_at))}
           ${formatKV('Длительность', elapsed)}
@@ -217,6 +221,23 @@
             <pre class="bg-brand-bg p-3 rounded text-xs text-brand-dark overflow-auto max-h-48 font-mono">${escapeHtml(JSON.stringify(node.output_data, null, 2))}</pre>
           </div>
         ` : ''}
+        ${node.artifacts && node.artifacts.length ? `
+          <div class="mt-4 pt-4 border-t border-brand-light">
+            <h3 class="text-sm font-semibold text-brand-dark mb-2">Артефакты (${node.artifacts.length})</h3>
+            <div class="space-y-1">
+              ${node.artifacts.map(art => `
+                <div class="flex items-center justify-between gap-4 p-2 rounded bg-brand-bg">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-xs font-medium text-brand-dark truncate">${escapeHtml(art.filename)}</span>
+                    <span class="text-xs text-brand-muted">${formatBytes(art.size)}</span>
+                    <span class="badge badge-muted">${escapeHtml(art.artifact_type)}</span>
+                  </div>
+                  <a href="${art.url}" download="${escapeHtml(art.filename || '')}" class="btn-secondary text-xs py-1 px-2 shrink-0" target="_blank" rel="noopener noreferrer">Скачать</a>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
       `;
       return { body, node };
     }
@@ -224,10 +245,17 @@
     try {
       const first = await fetchAndRender();
       if (!first) return;
-      showModal({ title: escapeHtml(first.node.node_name || first.node.node_id || 'Узел'), body: first.body, width: 'max-w-2xl', onClose: () => { if (_nodeDetailInterval) { clearInterval(_nodeDetailInterval); _nodeDetailInterval = null; } } });
+      showModal({
+        title: escapeHtml(first.node.node_name || first.node.node_id || ''),
+        body: first.body,
+        width: 'max-w-2xl',
+        onClose: () => { if (_nodeDetailInterval) { clearInterval(_nodeDetailInterval); _nodeDetailInterval = null; } },
+        onRender: (container) => { bindCollapseHandlers(container); },
+      });
 
       _nodeDetailInterval = setInterval(async () => {
         try {
+          if (!_alive) { clearInterval(_nodeDetailInterval); return; }
           if (_currentNodeDetailId !== nodeId) { clearInterval(_nodeDetailInterval); return; }
           if (!document.body.contains(document.getElementById('modal-overlay'))) { clearInterval(_nodeDetailInterval); return; }
           const result = await fetchAndRender();
@@ -239,12 +267,32 @@
     }
   }
 
+  function bindCollapseHandlers(container) {
+    (container || document).querySelectorAll('.collapse-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = document.getElementById(btn.dataset.target);
+        const icon = btn.querySelector('.collapse-icon');
+        if (!target) return;
+        const isOpen = target.style.maxHeight && target.style.maxHeight !== '0px';
+        if (isOpen) {
+          target.style.maxHeight = '0px';
+          icon.style.transform = '';
+        } else {
+          target.style.maxHeight = target.scrollHeight + 'px';
+          icon.style.transform = 'rotate(180deg)';
+        }
+      });
+    });
+  }
+
   async function showNodeLogs(nodeId) {
+    if (!_alive) return;
     try {
-      const logs = await api.nodes.logs(execId, nodeId);
+      const { attempt, url } = await api.nodes.logs(execId, nodeId);
+      const text = await fetch(url).then(r => { if (!r.ok) throw new Error('Failed to fetch logs'); return r.text(); });
       showModal({
-        title: 'Логи узла',
-        body: `<pre class="bg-gray-900 text-green-400 p-4 rounded text-xs font-mono overflow-auto max-h-[60vh]">${escapeHtml(logs)}</pre>`,
+        title: `Логи узла — Попытка ${attempt}`,
+        body: `<pre class="bg-gray-900 text-green-400 p-4 rounded text-xs font-mono overflow-auto max-h-[60vh]">${escapeHtml(text)}</pre>`,
         width: 'max-w-3xl',
       });
     } catch (e) {
@@ -252,7 +300,81 @@
     }
   }
 
-  async function renderArtifacts(id) {
+  function groupArtifacts(artifacts, nodeNameMap, startedAtMap) {
+    const original = artifacts.filter(art => art.artifact_type === 'original');
+    const outputFile = artifacts.filter(art => art.artifact_type !== 'original' && art.node_id == null);
+    const byNode = {};
+    artifacts.forEach(art => {
+      if (art.artifact_type !== 'original' && art.node_id != null) {
+        const name = nodeNameMap[art.node_id] || art.node_id || 'Неизвестный узел';
+        if (!byNode[name]) byNode[name] = [];
+        byNode[name].push(art);
+      }
+    });
+
+    const sortedNodes = Object.keys(byNode).sort((a, b) => {
+      const ta = startedAtMap[byNode[a][0].node_id] || '9999';
+      const tb = startedAtMap[byNode[b][0].node_id] || '9999';
+      return ta.localeCompare(tb);
+    });
+
+    return { original, outputFile, byNode, sortedNodes };
+  }
+
+  function artifactItem(art, idx) {
+    const uid = `art-${art.id || idx}`;
+    const filename = escapeHtml(art.name || art.filename || 'download');
+    return `
+    <div id="${uid}" class="flex items-center justify-between gap-4 p-2 rounded">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-xs font-medium text-brand-dark truncate">${filename}</span>
+        <span class="text-xs text-brand-muted">${formatBytes(art.size_bytes || art.size)}</span>
+        <span class="badge badge-muted">${escapeHtml(art.artifact_type)}</span>
+      </div>
+      <button class="btn-secondary text-xs py-1 px-2 shrink-0 art-download-btn" data-url="${escapeHtml(art.url)}" data-filename="${filename}">Скачать</button>
+    </div>`;
+  }
+
+  function downloadFile(url, filename) {
+    fetch(url)
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      })
+      .catch(() => {
+        window.open(url, '_blank');
+      });
+  }
+
+  function collapseSectionHtml({ uid, label, content }) {
+    return `
+    <div class="art-section">
+      <button
+        class="collapse-toggle w-full flex items-center justify-between p-3 bg-brand-bg rounded text-sm font-medium text-brand-dark"
+        data-target="art-group-${uid}"
+        style="padding-left:0;padding-right:0;background:transparent;border-radius:0"
+      >
+        <span>${label}</span>
+        <svg class="collapse-icon w-4 h-4 transition-transform duration-200 text-brand-muted flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/>
+        </svg>
+      </button>
+
+      <div id="art-group-${uid}" class="collapse-content overflow-hidden transition-all duration-200" style="max-height:0">
+        <div style="padding-left: 1.5rem; border-left: 3px solid #e5e7eb; padding-top: 0.5rem; padding-bottom: 0.5rem;">
+          ${content}
+        </div>
+      </div>
+
+      <div class="art-separator" style="height:1px;background:#DCDCDC"></div>
+    </div>`;
+  }
+
+  async function renderArtifacts(id, nodes) {
     const list = document.getElementById('artifacts-list');
     const empty = document.getElementById('artifacts-empty');
     try {
@@ -263,16 +385,71 @@
         return;
       }
       empty.classList.add('hidden');
-      list.innerHTML = artifacts.map(art => `
-        <div class="flex items-center justify-between gap-4 p-3 bg-brand-bg rounded border border-brand-light">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="text-sm font-medium text-brand-dark truncate">${escapeHtml(art.name)}</span>
-            <span class="text-xs text-brand-muted">${formatBytes(art.size_bytes)}</span>
-            <span class="badge badge-muted">${escapeHtml(art.artifact_type || art.ext || 'файл')}</span>
-          </div>
-          <a href="${api.artifacts.download(art.id)}" class="btn-secondary text-xs py-1.5 px-3 shrink-0" download>Скачать</a>
-        </div>
-      `).join('');
+
+      const nodeNameMap = {};
+      (nodes || []).forEach(n => { if (n.node_name) nodeNameMap[n.node_id] = n.node_name; });
+      const startedAtMap = {};
+      (nodes || []).forEach(n => { if (n.node_id != null) startedAtMap[n.node_id] = n.started_at || '9999'; });
+
+      const { original, outputFile, byNode, sortedNodes } = groupArtifacts(artifacts, nodeNameMap, startedAtMap);
+
+      // Save which sections are open before re-render
+      const openIds = new Set(
+        [...list.querySelectorAll('.collapse-content')]
+          .filter(el => el.style.maxHeight && el.style.maxHeight !== '0px')
+          .map(el => el.id)
+      );
+
+      const sections = [];
+      if (original.length) {
+        sections.push({ uid: 'original', label: 'Входной файл', content: original.map((art, i) => artifactItem(art, 'orig-' + i)).join('') });
+      }
+      if (outputFile.length) {
+        sections.push({ uid: 'output', label: 'Выходной файл', content: outputFile.map((art, i) => artifactItem(art, 'out-' + i)).join('') });
+      }
+      sortedNodes.forEach(nodeName => {
+        const arts = byNode[nodeName];
+        const uid = 'node-' + nodeName.replace(/[^a-zA-Z0-9]/g, '_');
+        const label = arts.length > 1 ? `${nodeName} (${arts.length})` : nodeName;
+        sections.push({ uid, label, content: arts.map((art, i) => artifactItem(art, uid + '-' + i)).join('') });
+      });
+
+      list.innerHTML = sections.map(s => collapseSectionHtml(s)).join('');
+
+      // Restore open state (no animation for sections already open before re-render)
+      list.querySelectorAll('.collapse-content').forEach(el => {
+        const wasOpen = openIds.has(el.id);
+        el.style.transition = 'none';
+        if (wasOpen) {
+          el.style.maxHeight = el.scrollHeight + 'px';
+          const btn = list.querySelector(`[data-target="${el.id}"]`);
+          if (btn) btn.querySelector('.collapse-icon').style.transform = 'rotate(180deg)';
+        } else {
+          el.style.maxHeight = '0px';
+        }
+        // eslint-disable-next-line no-unused-expressions
+        el.offsetWidth; // force reflow
+        el.style.transition = '';
+      });
+
+      list.querySelectorAll('.collapse-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const target = document.getElementById(btn.dataset.target);
+          if (!target) return;
+          const isOpen = target.style.maxHeight && target.style.maxHeight !== '0px';
+          if (isOpen) {
+            target.style.maxHeight = '0px';
+            btn.querySelector('.collapse-icon').style.transform = '';
+          } else {
+            target.style.maxHeight = target.scrollHeight + 'px';
+            btn.querySelector('.collapse-icon').style.transform = 'rotate(180deg)';
+          }
+        });
+      });
+
+      list.querySelectorAll('.art-download-btn').forEach(btn => {
+        btn.addEventListener('click', () => downloadFile(btn.dataset.url, btn.dataset.filename));
+      });
     } catch (e) {
       list.innerHTML = '<p class="text-sm text-red-600">Ошибка загрузки артефактов.</p>';
     }
@@ -285,7 +462,7 @@
         api.executions.getNodes(execId),
       ]);
       renderHeader(ex);
-      renderArtifacts(execId);
+      renderArtifacts(execId, nodes);
       const workflow = ex.workflow_template?.graph || null;
       renderGraph(nodes, workflow);
     } catch (e) {
@@ -305,16 +482,21 @@
   });
 
   document.addEventListener('click', (e) => {
+    if (!_alive) return;
     const btn = e.target.closest('.view-logs-btn');
     if (btn) showNodeLogs(btn.dataset.nodeId);
   });
 
+  _alive = true;
   loadExecution();
   const _interval = setInterval(() => {
+    if (!_alive) { clearInterval(_interval); return; }
     const el = document.getElementById('exec-id');
     if (!el) { clearInterval(_interval); return; }
     if (el.dataset.execId !== execId) { clearInterval(_interval); return; }
     loadExecution();
   }, 5000);
+
+  window.addEventListener('beforeunload', () => { _alive = false; });
 </script>
 {% endblock %}

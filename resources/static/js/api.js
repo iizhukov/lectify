@@ -66,7 +66,6 @@ export const api = {
 
   artifacts: {
     list: (execId) => req('GET', `/api/workflows/executions/${execId}/artifacts`),
-    download: (id) => BASE + `/api/artifacts/${id}/download`,
   },
 
   prompts: {
