@@ -544,11 +544,24 @@ def _map_inputs(
         result = {}
         if dependencies:
             result = node_outputs.get(dependencies[0], {}).copy()
-        # Для input плагина НЕ добавляем execution.file_id автоматически
+        if is_input_plugin:
+            node_id = node_def.get("id")
+
+            if node_id and "__input" in node_outputs:
+                for field in ["file_id", "filename", "minio_path", "file_path", "size", "content_type"]:
+                    key = f"{node_id}.{field}"
+
+                    if key in node_outputs["__input"]:
+                        result[field] = node_outputs["__input"][key]
+            
+            return result
+
         if not is_input_plugin:
             result["file_id"] = file_id
+
             if file_path:
                 result["file_path"] = file_path
+
         return result
 
     # Always pass file_id from the workflow execution root file

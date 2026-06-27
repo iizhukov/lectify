@@ -120,6 +120,9 @@ class Plugin(abc.ABC):
     color: str = "#9ca3af"  # Hex color for UI (fallback)
     icon_svg: str = ""  # SVG markup for UI icon (fallback)
 
+    # System packages required by this plugin (installed via apt-get)
+    system_packages: List[str] = []  # e.g., ["texlive-latex-base", "texlive-fonts-recommended"]
+
     input_model: Type[PluginInput] = PluginInput
     output_model: Type[PluginOutput] = PluginOutput
     parameters_schema: List[PluginParameter] = Field(default_factory=list)

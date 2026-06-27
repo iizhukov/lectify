@@ -240,7 +240,7 @@ def build_missing_plugin_images(
     if project_root is None:
         project_root = Path(__file__).parent.parent.parent
 
-    plugin_dockerfile = Path(__file__).parent / "docker" / "Dockerfile.plugin.optimized"
+    plugin_dockerfile = Path(__file__).parent / "docker" / "Dockerfile.plugin"
 
     if not plugin_dockerfile.exists():
         logger.warning("plugin_dockerfile_not_found", path=str(plugin_dockerfile))

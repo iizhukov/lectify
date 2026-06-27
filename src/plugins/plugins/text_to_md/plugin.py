@@ -62,7 +62,7 @@ class TextToMDPlugin(Plugin):
     description = "Преобразует распознанный текст в Markdown-конспект"
     version = "1.0.0"
     category = "ai"
-    color = "#10b981"
+    color = "#800080"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>'
 
     input_model = TextToMDInput
@@ -151,11 +151,12 @@ class TextToMDPlugin(Plugin):
 
             context.report_progress(80, "Сохраняем результат...")
 
-            # Write output to /output/ for Docker, or next to input for local
-            if txt_path_input.startswith("minio://"):
-                md_path = "/output/result.md"
+            if txt_path_input.startswith("minio://") or txt_path.startswith("/input/"):
+                base_name = pathlib.Path(txt_path).stem if not txt_path_input.startswith("minio://") else "result"
+                md_path = f"/output/{base_name}.md"
             else:
                 md_path = str(pathlib.Path(txt_path).with_suffix(".md"))
+
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(content)
 

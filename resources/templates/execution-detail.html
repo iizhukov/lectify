@@ -28,6 +28,7 @@
         <p id="exec-error" class="text-sm text-red-600 mt-2 hidden"></p>
       </div>
       <div class="flex gap-2 shrink-0">
+        <button id="cancel-btn" class="btn-secondary text-sm hidden">Остановить</button>
         <button id="restart-btn" class="btn-secondary text-sm hidden">Перезапустить</button>
       </div>
     </div>
@@ -127,6 +128,13 @@
       restartBtn.classList.remove('hidden');
     } else {
       restartBtn.classList.add('hidden');
+    }
+
+    const cancelBtn = document.getElementById('cancel-btn');
+    if (ex.status === 'running' || ex.status === 'pending') {
+      cancelBtn.classList.remove('hidden');
+    } else {
+      cancelBtn.classList.add('hidden');
     }
   }
 
@@ -416,7 +424,7 @@
     const uid = `art-${art.id || idx}`;
     const filename = escapeHtml(art.name || art.filename || 'download');
     return `
-    <div id="${uid}" class="flex items-center justify-between gap-4 p-2 rounded">
+    <div id="${uid}" class="flex items-center justify-between gap-4 p-2 rounded mb-2">
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-xs font-medium text-brand-dark truncate">${filename}</span>
         <span class="text-xs text-brand-muted">${formatBytes(art.size_bytes || art.size)}</span>
@@ -501,7 +509,7 @@
       sortedNodes.forEach(nodeName => {
         const arts = byNode[nodeName];
         const uid = 'node-' + nodeName.replace(/[^a-zA-Z0-9]/g, '_');
-        const label = arts.length > 1 ? `${nodeName} (${arts.length})` : nodeName;
+        const label = `${nodeName}`
         sections.push({ uid, label, content: arts.map((art, i) => artifactItem(art, uid + '-' + i)).join('') });
       });
 
@@ -566,6 +574,17 @@
     try {
       await api.executions.restart(execId);
       showToast('success', 'Запуск перезапущен.');
+      loadExecution();
+    } catch (e) {
+      showToast('error', e.message);
+    }
+  });
+
+  document.getElementById('cancel-btn').addEventListener('click', async () => {
+    if (!confirm('Остановить выполнение? Запущенные ноды будут отменены.')) return;
+    try {
+      await api.executions.cancel(execId);
+      showToast('success', 'Выполнение остановлено.');
       loadExecution();
     } catch (e) {
       showToast('error', e.message);

@@ -2,7 +2,7 @@ import uuid
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Header, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.db.models import WorkflowTemplateModel, ExecutionModel, ExecutionNodeModel
 from src.db.repository import WorkflowTemplateRepository, ExecutionRepository, ExecutionNodeRepository
@@ -18,13 +18,13 @@ class ExecuteWorkflowRequest(BaseModel):
     file_id: Optional[str] = None  # deprecated, для single-file workflows
     file_path: Optional[str] = None  # deprecated
     language: str = "ru"
-    input_files: Optional[dict] = {}  # {node_id: file_id} для множественных входов
+    input_files: Optional[dict] = Field(default_factory=dict)  # {node_id: file_id} для множественных входов
 
 
 class WorkflowCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
-    graph: dict = {}
+    graph: dict = Field(default_factory=dict)
     is_public: bool = False
 
 
@@ -263,6 +263,32 @@ async def restart_execution(execution_id: str):
             node_repo.update(str(node.id), status="pending", error_message=None)
 
     return {"execution_id": execution_id, "status": "pending"}
+
+
+@router.post("/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: str):
+    """Cancel a running or pending execution."""
+    execution = exec_repo.get(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+
+    if execution.status not in ["running", "pending"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel execution with status {execution.status}"
+        )
+
+    exec_repo.update_status(execution_id, "cancelled", error_message="Cancelled by user")
+
+    for node in node_repo.get_by_execution(execution_id):
+        if node.status in ["running", "pending"]:
+            node_repo.update(
+                str(node.id),
+                status="cancelled",
+                error_message="Cancelled by user"
+            )
+
+    return {"execution_id": execution_id, "status": "cancelled"}
 
 
 @router.get("/{workflow_id}", response_model=WorkflowTemplateModel)

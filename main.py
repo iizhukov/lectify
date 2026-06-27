@@ -90,15 +90,33 @@ except Exception as e:
 
 try:
     from src.plugins.registry import scan_and_register_plugins
-    from src.plugins.image_manager import build_missing_plugin_images
     from src.workflows.migration import run_all_migrations
 
     scan_and_register_plugins()
     logger.info("plugins_scanned")
     print("OK: Plugins scanned", file=sys.stderr)
 
-    build_missing_plugin_images(rebuild=True)
-    print("OK: Plugin images ready", file=sys.stderr)
+    # Build plugin Docker images if configured
+    if config.plugins_build_on_startup:
+        print("Building plugin Docker images...", file=sys.stderr)
+        try:
+            from src.docker.client import DockerClient
+            from src.plugins.registry import PluginRegistry
+            registry = PluginRegistry()
+            registry.scan_plugins_folder()
+            plugin_ids = list(registry.get_all_plugins().keys())
+            if plugin_ids:
+                client = DockerClient()
+                for plugin_id in plugin_ids:
+                    success = client.build_plugin_image(plugin_id)
+                    if success:
+                        print(f"  OK: lectify-plugin-{plugin_id}", file=sys.stderr)
+                    else:
+                        print(f"  FAIL: lectify-plugin-{plugin_id}", file=sys.stderr)
+        except Exception as e:
+            print(f"WARNING: Plugin build failed: {str(e)}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
 
     run_all_migrations()
     logger.info("migrations_completed")

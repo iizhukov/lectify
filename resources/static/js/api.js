@@ -55,6 +55,7 @@ export const api = {
     get: (id) => req('GET', `/api/workflows/executions/${id}`),
     getNodes: (id) => req('GET', `/api/workflows/executions/${id}/nodes`),
     restart: (id) => req('POST', `/api/workflows/executions/${id}/restart`, {}),
+    cancel: (id) => req('POST', `/api/workflows/executions/${id}/cancel`, {}),
   },
 
   nodes: {

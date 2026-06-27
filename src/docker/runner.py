@@ -411,9 +411,9 @@ class ContainerRunner:
             "PLUGIN_OUTPUT": "/output/output.json",
             "PLUGIN_ID": plugin_id,
             "EXECUTION_ID": execution_id,
-            "PUSHGATEWAY_URL": getattr(config, 'pushgateway_url', "host.docker.internal:9091"),
-            "MINIO_ENDPOINT": "host.docker.internal:9000",
-            "DATABASE_URL": "postgresql://lectify:lectify_password@host.docker.internal:5432/lectify",
+            "PUSHGATEWAY_URL": "pushgateway:9091",  # Use Docker network name
+            "MINIO_ENDPOINT": "minio:9000",  # Use Docker network name
+            "DATABASE_URL": "postgresql://lectify:lectify_password@postgres:5432/lectify",  # Use Docker network name
             "OPENAI_API_KEY": config.openai_api_key,
             "OPENAI_API_URL": config.openai_api_url,
         }
@@ -428,6 +428,7 @@ class ContainerRunner:
             command="python -m src.plugins.runner",
             volumes=volumes,
             environment=environment,
+            network="lectify_lectify",  # Docker Compose prefixes network name with project name
             mem_limit="1g",
             cpu_quota=50000  # 50% CPU
         )

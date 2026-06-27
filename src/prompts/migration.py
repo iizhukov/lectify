@@ -91,6 +91,8 @@ def _get_display_name(prompt_id: str) -> str:
     """Convert prompt ID to display name"""
     name_map = {
         "text_to_md_system": "Создание Markdown конспекта",
+        "transcript_to_md_system": "Транскрипт → Markdown",
+        "transcript_to_latex_system": "Транскрипт → LaTeX",
         "latex_classifier_system": "Классификатор предмета LaTeX",
         "latex_repair_system": "Исправление ошибок LaTeX",
     }

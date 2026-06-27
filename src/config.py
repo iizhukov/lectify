@@ -260,6 +260,31 @@ class Config:
         return self._config.getint("Logging", "LOG_FILE_BACKUP_COUNT", fallback=5)
 
     # ========================================================================
+    # Plugins Configuration
+    # ========================================================================
+
+    @property
+    def plugins_build_on_startup(self) -> bool:
+        """Собирать Docker-образы плагинов при старте приложения"""
+        return self._config.getboolean("Plugins", "BUILD_ON_STARTUP", fallback=False)
+
+    @property
+    def plugins_registry(self) -> str:
+        """Container registry prefix (e.g. ghcr.io/owner/repo or docker.io/user).
+        Empty string = no registry push/pull (local images only)."""
+        return self._config.get("Plugins", "REGISTRY", fallback="")
+
+    @property
+    def plugins_registry_user(self) -> str:
+        """Registry username (for docker login). Uses GITHUB_ACTOR env var if empty."""
+        return self._config.get("Plugins", "REGISTRY_USER", fallback="")
+
+    @property
+    def plugins_registry_password(self) -> str:
+        """Registry password/token. Uses GITHUB_TOKEN env var if empty (CI)."""
+        return self._config.get("Plugins", "REGISTRY_PASSWORD", fallback="")
+
+    # ========================================================================
     # Orchestrator Configuration
     # ========================================================================
 

@@ -4,8 +4,7 @@ Text to LaTeX Plugin — convert text to LaTeX conspectus
 
 import os
 import pathlib
-import subprocess
-import sys
+import re
 import tempfile
 from typing import Any, Dict
 
@@ -96,8 +95,6 @@ class TextToLatexPlugin(Plugin):
         """Execute text-to-latex"""
         file_id = input_data.file_id
         txt_path_input = input_data.txt_path
-        prompt_id = input_data.prompt_id
-        segments = parameters.get("segments", 3)
         subject = parameters.get("subject", "auto")
 
         context.report_progress(10, "Читаем текст...")
@@ -112,52 +109,75 @@ class TextToLatexPlugin(Plugin):
             else:
                 txt_path = txt_path_input
 
-            txt_file = pathlib.Path(txt_path)
-            if not txt_file.exists():
-                raise FileNotFoundError(f"Text file not found: {txt_path}")
+            try:
+                txt_file = pathlib.Path(txt_path)
+                if not txt_file.exists():
+                    raise FileNotFoundError(f"Text file not found: {txt_path}")
+
+                with open(str(txt_file), "r", encoding="utf-8") as f:
+                    text = f.read()
+            finally:
+                # Cleanup temp file from MinIO download
+                if is_temp and os.path.exists(txt_path):
+                    try:
+                        os.remove(txt_path)
+                    except Exception:
+                        pass
 
             # Detect subject if auto
             if subject == "auto":
                 context.report_progress(20, "Определяем предмет...")
-                subject = self._detect_subject(str(txt_file), context)
+                subject = self._detect_subject(text, context)
 
             context.report_progress(30, f"Генерируем LaTeX ({subject})...")
 
-            # Resolve prompt: from DB/MinIO via prompt_id, or fall back to file
-            prompt_path = f"resources/prompts/{subject}.txt"
-            if prompt_id:
-                db_prompt = self._get_prompt(prompt_id)
-                if db_prompt:
-                    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-                    tmp.write(db_prompt)
-                    tmp.close()
-                    prompt_path = tmp.name
+            # Get prompt
+            prompt_id = input_data.prompt_id or f"text_to_latex_{subject}"
+            prompt = self._get_prompt(prompt_id)
 
-            # Build script path (in same directory as this plugin)
-            script_path = pathlib.Path(__file__).parent.parent.parent.parent / "text_to_latex.py"
+            if not prompt:
+                prompt = self._get_default_prompt(subject)
 
-            res = subprocess.run(
-                [
-                    sys.executable, str(script_path),
-                    "--file", str(txt_file),
-                    "--seg-num", str(segments),
-                    "--sys-prompt", prompt_path,
-                    "--language", "ru-RU"
-                ],
-                capture_output=True,
-                text=True
+            context.report_progress(40, "Отправляем в LLM...")
+
+            from src.llm.client import get_llm_client
+            client = get_llm_client()
+
+            latex_content = client.completion(
+                purpose="smart",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": text}
+                ]
             )
 
-            if res.returncode != 0:
-                raise Exception(f"Script failed: {res.stderr or res.stdout}")
+            # Clean markdown code blocks if present
+            latex_content = latex_content.strip()
+            if latex_content.startswith("```latex"):
+                latex_content = latex_content[8:]
+            if latex_content.startswith("```"):
+                latex_content = latex_content[3:]
+            if latex_content.endswith("```"):
+                latex_content = latex_content[:-3]
+            latex_content = latex_content.strip()
 
-            # Write output to /output/ for Docker, or next to input for local
-            if txt_path_input.startswith("minio://"):
-                latex_path = "/output/result.tex"
+            context.report_progress(80, "Проверяем LaTeX...")
+
+            # Validate LaTeX
+            if not self._validate_latex(latex_content):
+                context.log("warning", "LaTeX validation failed - document may have issues")
+
+            context.report_progress(90, "Сохраняем результат...")
+
+            # Determine output path
+            if txt_path_input.startswith("minio://") or txt_path.startswith("/input/"):
+                base_name = pathlib.Path(txt_path).stem if not txt_path_input.startswith("minio://") else "result"
+                latex_path = f"/output/{base_name}.tex"
             else:
-                latex_path = str(txt_file.with_suffix(".tex"))
-            if not pathlib.Path(latex_path).exists():
-                raise Exception("LaTeX file was not created")
+                latex_path = str(pathlib.Path(txt_path).with_suffix(".tex"))
+
+            with open(latex_path, "w", encoding="utf-8") as f:
+                f.write(latex_content)
 
             context.report_progress(100, "LaTeX-конспект готов!")
 
@@ -169,20 +189,27 @@ class TextToLatexPlugin(Plugin):
         except Exception as e:
             context.log("error", f"Text-to-LaTeX failed: {str(e)}")
             raise
-        finally:
-            # Cleanup temp file from MinIO download
-            if is_temp and os.path.exists(txt_path):
-                try:
-                    os.remove(txt_path)
-                except Exception:
-                    pass
 
-    def _detect_subject(self, txt_path: str, context: PluginContext) -> str:
+    def _validate_latex(self, latex_content: str) -> bool:
+        """Basic LaTeX validation"""
+        try:
+            # Check for required LaTeX structure
+            has_documentclass = r'\documentclass' in latex_content
+            has_begin_doc = r'\begin{document}' in latex_content
+            has_end_doc = r'\end{document}' in latex_content
+
+            # Check balanced braces
+            open_braces = latex_content.count('{')
+            close_braces = latex_content.count('}')
+            balanced = open_braces == close_braces
+
+            return has_documentclass and has_begin_doc and has_end_doc and balanced
+        except Exception:
+            return False
+
+    def _detect_subject(self, text: str, context: PluginContext) -> str:
         """Detect subject using LLM"""
         try:
-            txt_file = pathlib.Path(txt_path)
-            with open(str(txt_file), "r", encoding="utf-8") as f:
-                text = f.read()
             first_100 = " ".join(text.split()[:100])
 
             from src.llm.client import get_llm_client
@@ -220,9 +247,39 @@ class TextToLatexPlugin(Plugin):
             try:
                 prompt = session.query(DBPrompt).filter(DBPrompt.id == prompt_id).first()
                 if prompt:
-                    return prompt.system_prompt or ""
+                    return str(prompt.system_prompt or "")
             finally:
                 session.close()
         except:
             pass
         return ""
+
+    def _get_default_prompt(self, subject: str) -> str:
+        """Get default prompt for LaTeX generation"""
+        base_prompt = (
+            "Ты — эксперт по созданию учебных материалов в LaTeX. "
+            "Преобразуй следующий текст лекции в красиво оформленный LaTeX-документ.\n\n"
+            "Требования:\n"
+            "- Используй \\documentclass{article}\n"
+            "- Добавь необходимые пакеты (babel, fontenc, inputenc для русского языка)\n"
+            "- Структурируй текст с помощью \\section, \\subsection\n"
+            "- Выделяй важные термины (\\textbf, \\emph)\n"
+            "- Используй списки (itemize, enumerate) где уместно\n"
+            "- Для формул используй math mode\n"
+            "- Создай полный компилируемый документ\n\n"
+        )
+
+        subject_hints = {
+            "math": "Используй математические окружения (equation, align) для всех формул.",
+            "physics": "Используй физические обозначения и формулы (siunitx пакет).",
+            "chemistry": "Используй chemfig для химических формул.",
+            "history": "Фокусируйся на датах, событиях и исторических персонажах.",
+            "sociology": "Выделяй концепции, теории и авторов."
+        }
+
+        hint = subject_hints.get(subject, "")
+        if hint:
+            base_prompt += hint + "\n\n"
+
+        base_prompt += "Текст лекции для преобразования:\n"
+        return base_prompt

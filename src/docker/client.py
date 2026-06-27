@@ -27,6 +27,7 @@ class DockerClient:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+            cls._instance._plugin_registry = None
         return cls._instance
 
     def __init__(self):
@@ -69,7 +70,8 @@ class DockerClient:
         path: str,
         tag: str,
         dockerfile: str = "Dockerfile",
-        buildargs: dict = None
+        buildargs: dict = None,
+        nocache: bool = False
     ) -> Optional[str]:
         """Build Docker image from directory"""
         if not self._client:
@@ -82,7 +84,8 @@ class DockerClient:
                 tag=tag,
                 dockerfile=dockerfile,
                 buildargs=buildargs or {},
-                rm=True
+                rm=True,
+                nocache=nocache
             )
             for log in logs:
                 if "stream" in log:
@@ -96,30 +99,80 @@ class DockerClient:
         """Return the canonical image name for a plugin."""
         return f"lectify-plugin-{plugin_id}"
 
-    def _ensure_plugin_image(self, plugin_id: str) -> bool:
-        """
-        Check if plugin image exists locally. If not, build it.
+    def _get_registry_tag(self, plugin_id: str, registry: str) -> str:
+        """Return the fully-qualified registry tag for a plugin."""
+        return f"{registry}/lectify-plugin-{plugin_id}"
 
-        Returns True if the image is available (existed or was built), False otherwise.
+    def _pull_plugin_image(self, plugin_id: str, registry: str) -> bool:
+        """Pull a plugin image from a remote registry."""
+        full_tag = self._get_registry_tag(plugin_id, registry)
+        try:
+            logger.info(f"Pulling plugin image from registry: {full_tag}")
+            self._client.images.pull(registry, plugin_id)
+            # Tag as local name
+            local_tag = self._get_plugin_image_tag(plugin_id)
+            self._client.images.get(full_tag).tag(local_tag)
+            logger.info(f"Pulled and tagged as {local_tag}")
+            return True
+        except Exception as e:
+            logger.debug(f"Could not pull {full_tag}: {e}")
+            return False
+
+    def _push_plugin_image(self, plugin_id: str, registry: str) -> bool:
+        """Push a plugin image to a remote registry."""
+        local_tag = self._get_plugin_image_tag(plugin_id)
+        full_tag = self._get_registry_tag(plugin_id, registry)
+        try:
+            # Tag for registry
+            self._client.images.get(local_tag).tag(registry, plugin_id)
+            logger.info(f"Pushing {full_tag}")
+            for line in self._client.images.push(registry, plugin_id, stream=True, decode=True):
+                if "error" in line:
+                    raise Exception(line.get("error", str(line)))
+            logger.info(f"Pushed: {full_tag}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to push {full_tag}: {e}")
+            return False
+
+    def _ensure_plugin_image(self, plugin_id: str, push: bool = False) -> bool:
+        """
+        Check if plugin image exists locally. If not, pull from registry or build.
+
+        Args:
+            plugin_id: Plugin identifier.
+            push: If True and registry is configured, push after building.
+
+        Returns True if the image is available, False otherwise.
         """
         image_name = self._get_plugin_image_tag(plugin_id)
 
-        # Fast path: image already exists
+        # Fast path: image already exists locally
         if self._image_exists_locally(image_name):
             logger.debug(f"Plugin image already exists: {image_name}")
             return True
 
-        logger.info(f"Plugin image not found locally, building: {image_name}")
+        # Try registry pull first (fastest path if registry is configured)
+        try:
+            from src.config import config
+            registry = config.plugins_registry
+        except Exception:
+            registry = ""
+
+        if registry:
+            if self._pull_plugin_image(plugin_id, registry):
+                return True
+
+        # Build locally
+        logger.info(f"Building plugin image locally: {image_name}")
 
         plugin_dockerfile = (
             Path(__file__).parent.parent
-            / "plugins" / "docker" / "Dockerfile.plugin.omptimized"
+            / "plugins" / "docker" / "Dockerfile.plugin"
         )
         if not plugin_dockerfile.exists():
             logger.error(
-                "plugin_dockerfile_not_found",
-                plugin_id=plugin_id,
-                path=str(plugin_dockerfile),
+                f"Plugin dockerfile not found: plugin_id={plugin_id}, path={plugin_dockerfile}",
             )
             return False
 
@@ -129,9 +182,7 @@ class DockerClient:
         )
         if not plugin_src_dir.exists():
             logger.error(
-                "plugin_source_dir_not_found",
-                plugin_id=plugin_id,
-                path=str(plugin_src_dir),
+                f"Plugin source dir not found: plugin_id={plugin_id}, path={plugin_src_dir}",
             )
             return False
 
@@ -149,11 +200,14 @@ class DockerClient:
                 tag=image_name,
                 dockerfile="Dockerfile",
                 buildargs={"PLUGIN_ID": plugin_id},
+                nocache=False,
             )
             if success:
-                logger.info("plugin_image_built", plugin_id=plugin_id, image=image_name)
+                logger.info(f"Plugin image built: {image_name}")
+                if push and registry:
+                    self._push_plugin_image(plugin_id, registry)
             else:
-                logger.error("plugin_image_build_failed", plugin_id=plugin_id)
+                logger.error(f"Plugin image build failed: {plugin_id}")
             return bool(success)
 
         finally:
@@ -191,15 +245,95 @@ class DockerClient:
         plugin_dest = context_dir / "src" / "plugins" / "plugins" / plugin_id
         shutil.copytree(plugin_src_dir, plugin_dest, dirs_exist_ok=True)
 
-        # Copy Dockerfile
-        shutil.copy2(plugin_dockerfile, context_dir / "Dockerfile")
+        # Copy config.cfg (needed by storage/db/llm connections in container)
+        config_cfg = project_root / "config.cfg"
+        if config_cfg.exists():
+            shutil.copy2(config_cfg, context_dir / "config.cfg")
+
+        # Get system packages from plugin class
+        system_packages = self._get_plugin_system_packages(plugin_id)
+
+        # Generate Dockerfile with plugin-specific system packages
+        self._generate_plugin_dockerfile(
+            context_dir / "Dockerfile",
+            plugin_dockerfile,
+            plugin_id,
+            system_packages
+        )
 
         return context_dir
 
-    def build_plugin_image(self, plugin_id: str) -> bool:
+    def _get_plugin_system_packages(self, plugin_id: str) -> list:
+        """Load plugin class and extract system_packages"""
+        try:
+            from src.plugins.registry import PluginRegistry
+            if self._plugin_registry is None:
+                self._plugin_registry = PluginRegistry()
+                self._plugin_registry.scan_plugins_folder()
+            plugin_class = self._plugin_registry.get_plugin(plugin_id)
+            if plugin_class and hasattr(plugin_class, 'system_packages'):
+                return plugin_class.system_packages or []
+        except Exception as e:
+            logger.warning(f"Could not load system_packages for {plugin_id}: {e}")
+        return []
+
+    def _generate_plugin_dockerfile(
+        self,
+        output_path: Path,
+        base_dockerfile: Path,
+        plugin_id: str,
+        system_packages: list
+    ):
+        """Generate Dockerfile with plugin-specific system packages"""
+        with open(base_dockerfile, "r") as f:
+            base_content = f.read()
+
+        if not system_packages:
+            with open(output_path, "w") as f:
+                f.write(base_content)
+            return
+
+        lines = base_content.split("\n")
+        new_lines = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+
+            if "RUN apt-get update" in line and "apt-get install" in line:
+                apt_lines = [line]
+                j = i + 1
+                while j < len(lines) and (apt_lines[-1].rstrip().endswith("\\") or apt_lines[-1].rstrip().endswith("&&")):
+                    apt_lines.append(lines[j])
+                    j += 1
+
+                insert_idx = len(apt_lines) - 1
+                for idx, apt_line in enumerate(apt_lines):
+                    if "rm -rf" in apt_line:
+                        insert_idx = idx
+                        break
+
+                for pkg in system_packages:
+                    apt_lines.insert(insert_idx, f"    {pkg} \\")
+                    insert_idx += 1
+
+                new_lines.extend(apt_lines)
+                i = j
+            else:
+                new_lines.append(line)
+                i += 1
+
+        with open(output_path, "w") as f:
+            f.write("\n".join(new_lines))
+
+    def build_plugin_image(self, plugin_id: str, push: bool = False) -> bool:
         """
         Public API: build a plugin image, regardless of whether it already exists.
-        Use this to force-rebuild from external code (e.g. image_manager).
+        Optionally push to registry after building.
+
+        Args:
+            plugin_id: Plugin identifier.
+            push: If True and registry is configured, push after building.
         """
         image_name = self._get_plugin_image_tag(plugin_id)
         if self._image_exists_locally(image_name):
@@ -207,8 +341,8 @@ class DockerClient:
             try:
                 self._client.images.remove(image_name)
             except Exception as e:
-                logger.warning("failed_to_remove_old_image", image=image_name, error=str(e))
-        return self._ensure_plugin_image(plugin_id)
+                logger.warning(f"Failed to remove old image {image_name}: {e}")
+        return self._ensure_plugin_image(plugin_id, push=push)
 
     def _image_exists_locally(self, image_name: str) -> bool:
         """Check if an image exists in the local Docker daemon."""
@@ -274,6 +408,27 @@ class DockerClient:
             return container
         except Exception as e:
             logger.error(f"Failed to create container: {e}")
+            # Try to cleanup any partially created container
+            try:
+                # Extract container ID from error message if available
+                error_str = str(e)
+                if "container" in error_str.lower():
+                    # List recent containers that might have been created
+                    recent_containers = self._client.containers.list(
+                        all=True,
+                        filters={"ancestor": image},
+                        limit=5
+                    )
+                    for c in recent_containers:
+                        if c.status in ["created", "exited"]:
+                            # Remove containers that were created but failed to start
+                            try:
+                                c.remove(force=True)
+                                logger.info(f"Cleaned up failed container: {c.id[:12]}")
+                            except:
+                                pass
+            except:
+                pass
             return None
 
     def get_container(self, container_id: str) -> Optional[Container]:

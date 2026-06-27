@@ -65,6 +65,19 @@ UPLOAD_LOGS_TO_MINIO = True
 LOG_FILE_MAX_BYTES = 10485760  # 10MB
 LOG_FILE_BACKUP_COUNT = 5
 
+[Plugins]
+# Собирать Docker-образы плагинов при старте main.py
+BUILD_ON_STARTUP = false
+
+# Container registry для кеширования и шаринга образов
+# Пусто = только локальные образы (по умолчанию)
+# Пример для GitHub Container Registry:
+# REGISTRY = ghcr.io/your-github-username/lectify
+# REGISTRY_USER и REGISTRY_PASSWORD заполнятся автоматически из GITHUB_TOKEN в CI
+REGISTRY =
+# REGISTRY_USER = оставить пустым для автозаполнения из GITHUB_ACTOR
+# REGISTRY_PASSWORD = оставить пустым; в CI заполнится из GITHUB_TOKEN
+
 [Orchestrator]
 # Оркестратор выполняет воркфлоу в Docker-контейнерах
 ENABLED = True

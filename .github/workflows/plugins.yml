@@ -1,0 +1,65 @@
+name: Build Plugin Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/plugins/**"
+      - "src/docker/**"
+      - "src/utils/storage.py"
+      - "src/utils/logging.py"
+      - "src/utils/metrics.py"
+      - "src/db/**"
+      - "src/llm/**"
+      - "src/config.py"
+      - "Dockerfile*"
+      - "scripts/build_plugins.py"
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: "Specific plugin to build (leave empty for all)"
+        required: false
+        default: ""
+
+jobs:
+  build-and-push:
+    name: Build & Push Plugins
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build plugin images
+        run: |
+          python -m venv venv
+          venv/bin/pip install -r requirements.txt
+          venv/bin/pip install tqdm
+
+          if [ -n "${{ github.event.inputs.plugin }}" ]; then
+            PLUGIN="${{ github.event.inputs.plugin }}"
+            echo "Building single plugin: $PLUGIN"
+            venv/bin/python scripts/build_plugins.py --rebuild --push "$PLUGIN"
+          else
+            echo "Building all plugins"
+            venv/bin/python scripts/build_plugins.py --rebuild --push
+          fi
+        env:
+          PLUGINS_REGISTRY: ghcr.io/${{ github.repository_owner }}/lectify

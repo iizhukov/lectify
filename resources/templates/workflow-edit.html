@@ -1246,7 +1246,7 @@
       const updated = await api.workflows.update(wfId, {
         name: document.getElementById('wf-name-input').value.trim(),
         description: document.getElementById('wf-desc-input').value.trim(),
-        nodes, edges,
+        graph: { nodes, edges },
       });
       workflow = updated;
       showToast('success', 'Сценарий сохранён.');

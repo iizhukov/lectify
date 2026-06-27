@@ -240,6 +240,178 @@ def migrate_transcription_workflow() -> str | None:
     return workflow.id
 
 
+def migrate_transcription_to_pdf_workflow() -> str | None:
+    """
+    Create transcription-to-PDF workflow with LaTeX compilation.
+
+    Graph:
+      input_audio → media_converter → speech_to_text → text_to_latex → latex_to_pdf
+      prompt_selector_latex ──────────────────────────┘
+
+    Similar to transcription_to_markdown but produces PDF via LaTeX.
+    """
+    wf_repo = WorkflowTemplateRepository()
+
+    existing = wf_repo.get("transcription_to_pdf")
+    if existing:
+        logger.info("transcription_to_pdf already exists")
+        return existing.id
+
+    graph = {
+        "nodes": [
+            {
+                "id": "input_audio_pdf",
+                "plugin_id": "input",
+                "name": "Входной файл",
+                "parameters": {"input_type": "audio"},
+                "input_mapping": [
+                    {"target_field": "file_id", "source": "$__input.input_audio_pdf.file_id"},
+                    {"target_field": "filename", "source": "$__input.input_audio_pdf.filename"},
+                    {"target_field": "minio_path", "source": "$__input.input_audio_pdf.minio_path"},
+                    {"target_field": "file_path", "source": "$__input.input_audio_pdf.file_path"},
+                    {"target_field": "size", "source": "$__input.input_audio_pdf.size"},
+                    {"target_field": "content_type", "source": "$__input.input_audio_pdf.content_type"}
+                ]
+            },
+            {
+                "id": "media_converter_pdf",
+                "plugin_id": "media_converter",
+                "name": "Конвертация медиа",
+                "parameters": {"format": "m4a", "bitrate": "64k"},
+                "input_mapping": [
+                    {"target_field": "file_id", "source": "$input_audio_pdf.output.file_id"},
+                    {"target_field": "file_path", "source": "$input_audio_pdf.output.file_path"}
+                ]
+            },
+            {
+                "id": "speech_to_text_pdf",
+                "plugin_id": "speech_to_text",
+                "name": "Распознавание речи",
+                "parameters": {"language": "auto"},
+                "input_mapping": [
+                    {"target_field": "file_id", "source": "$media_converter_pdf.output.file_id"},
+                    {"target_field": "media_path", "source": "$media_converter_pdf.output.media_path"}
+                ]
+            },
+            {
+                "id": "prompt_selector_latex",
+                "plugin_id": "prompt_selector",
+                "name": "Промпт → LaTeX",
+                "parameters": {"prompt_id": "transcript_to_latex_system"},
+                "input_mapping": []
+            },
+            {
+                "id": "text_to_latex_pdf",
+                "plugin_id": "text_to_latex",
+                "name": "Создание LaTeX",
+                "parameters": {"subject": "auto"},
+                "input_mapping": [
+                    {"target_field": "txt_path", "source": "$speech_to_text_pdf.output.txt_path"},
+                    {"target_field": "prompt_id", "source": "$prompt_selector_latex.output.prompt_id"}
+                ]
+            },
+            {
+                "id": "latex_to_pdf_final",
+                "plugin_id": "latex_to_pdf",
+                "name": "Компиляция PDF",
+                "parameters": {"max_attempts": 3, "use_llm_repair": True},
+                "input_mapping": [
+                    {"target_field": "latex_path", "source": "$text_to_latex_pdf.output.latex_path"}
+                ]
+            },
+        ],
+        "edges": [
+            {"from_node_id": "input_audio_pdf", "to_node_id": "media_converter_pdf"},
+            {"from_node_id": "media_converter_pdf", "to_node_id": "speech_to_text_pdf"},
+            {"from_node_id": "speech_to_text_pdf", "to_node_id": "text_to_latex_pdf"},
+            {"from_node_id": "prompt_selector_latex", "to_node_id": "text_to_latex_pdf"},
+            {"from_node_id": "text_to_latex_pdf", "to_node_id": "latex_to_pdf_final"},
+        ]
+    }
+
+    workflow = wf_repo.create({
+        "id": "transcription_to_pdf",
+        "user_id": None,
+        "name": "Транскрибация → PDF",
+        "description": "Медиа → M4A → транскрибация → LaTeX → PDF-конспект",
+        "graph": graph,
+        "is_public": True
+    })
+
+    logger.info(f"Created transcription_to_pdf workflow: {workflow.id}")
+    return workflow.id
+
+
+def migrate_text_to_markdown_workflow() -> str | None:
+    """
+    Create simple text-to-markdown workflow.
+
+    Graph:
+      input_text → text_to_md
+      prompt_selector_md ─┘
+
+    Takes a text file and a prompt, produces Markdown.
+    """
+    wf_repo = WorkflowTemplateRepository()
+
+    existing = wf_repo.get("text_to_markdown")
+    if existing:
+        logger.info("text_to_markdown already exists")
+        return existing.id
+
+    graph = {
+        "nodes": [
+            {
+                "id": "input_text",
+                "plugin_id": "input",
+                "name": "Входной текстовый файл",
+                "parameters": {"input_type": "text"},
+                "input_mapping": [
+                    {"target_field": "file_id", "source": "$__input.input_text.file_id"},
+                    {"target_field": "filename", "source": "$__input.input_text.filename"},
+                    {"target_field": "minio_path", "source": "$__input.input_text.minio_path"},
+                    {"target_field": "file_path", "source": "$__input.input_text.file_path"},
+                    {"target_field": "size", "source": "$__input.input_text.size"},
+                    {"target_field": "content_type", "source": "$__input.input_text.content_type"}
+                ]
+            },
+            {
+                "id": "prompt_selector_txt_md",
+                "plugin_id": "prompt_selector",
+                "name": "Промпт → Markdown",
+                "parameters": {"prompt_id": "text_to_md_system"},
+                "input_mapping": []
+            },
+            {
+                "id": "text_to_md_txt",
+                "plugin_id": "text_to_md",
+                "name": "Создание Markdown",
+                "parameters": {"max_chars": 40000},
+                "input_mapping": [
+                    {"target_field": "txt_path", "source": "$input_text.output.file_path"},
+                    {"target_field": "prompt_id", "source": "$prompt_selector_txt_md.output.prompt_id"}
+                ]
+            },
+        ],
+        "edges": [
+            {"from_node_id": "input_text", "to_node_id": "text_to_md_txt"},
+            {"from_node_id": "prompt_selector_txt_md", "to_node_id": "text_to_md_txt"},
+        ]
+    }
+
+    workflow = wf_repo.create({
+        "id": "text_to_markdown",
+        "user_id": None,
+        "name": "Текст → Markdown",
+        "description": "Простое преобразование текстового файла в структурированный Markdown-конспект",
+        "graph": graph,
+        "is_public": True
+    })
+
+    logger.info(f"Created text_to_markdown workflow: {workflow.id}")
+    return workflow.id
+
+
 def sync_plugins_on_startup():
     """
     Sync plugins from filesystem to database on application startup.
@@ -310,6 +482,8 @@ def run_all_migrations():
 
     # 2. Migrate workflows
     migrate_transcription_workflow()
+    migrate_transcription_to_pdf_workflow()
+    migrate_text_to_markdown_workflow()
     logger.info("Workflows migrated")
 
     # 3. Seed initial data (idempotent)

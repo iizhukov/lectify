@@ -5,7 +5,6 @@ LaTeX to PDF Plugin — compile LaTeX to PDF
 import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 from typing import Any, Dict
 
@@ -66,6 +65,14 @@ class LatexToPDFPlugin(Plugin):
     color = "#ef4444"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>'
 
+    # LaTeX packages required for PDF compilation
+    system_packages = [
+        "texlive-latex-base",
+        "texlive-fonts-recommended",
+        "texlive-latex-extra",
+        "texlive-lang-cyrillic"
+    ]
+
     input_model = LatexToPDFInput
     output_model = LatexToPDFOutput
 
@@ -102,6 +109,7 @@ class LatexToPDFPlugin(Plugin):
 
         latex_path = ""
         is_temp = False
+        work_dir = None
         try:
             # Handle minio:// URLs — download to temp file inside Docker
             if latex_path_input.startswith("minio://"):
@@ -114,11 +122,22 @@ class LatexToPDFPlugin(Plugin):
             if not latex_file.exists():
                 raise FileNotFoundError(f"LaTeX file not found: {latex_path}")
 
-            # Build script path
-            script_path = pathlib.Path(__file__).parent.parent.parent.parent / "latex_to_pdf.py"
+            # Create working directory for compilation
+            work_dir = tempfile.mkdtemp()
+            work_latex = pathlib.Path(work_dir) / "document.tex"
+
+            # Copy LaTeX content to working directory
+            with open(str(latex_file), "r", encoding="utf-8") as f:
+                latex_content = f.read()
+
+            with open(str(work_latex), "w", encoding="utf-8") as f:
+                f.write(latex_content)
 
             attempts = 0
             success = False
+            last_error = ""
+            work_pdf = pathlib.Path(work_dir) / "document.pdf"
+
             while attempts < max_attempts:
                 attempts += 1
                 context.report_progress(
@@ -126,38 +145,43 @@ class LatexToPDFPlugin(Plugin):
                     f"Компиляция (попытка {attempts}/{max_attempts})..."
                 )
 
-                res = subprocess.run(
-                    [
-                        sys.executable, str(script_path),
-                        "--file", str(latex_file),
-                        "--clean"
-                    ],
+                # Run pdflatex
+                result = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", "-output-directory", work_dir, str(work_latex)],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    cwd=work_dir
                 )
 
-                if res.returncode == 0:
+                if work_pdf.exists():
                     success = True
                     break
+
+                last_error = result.stdout + result.stderr
 
                 # Compilation failed, try LLM repair
                 if use_llm_repair and attempts < max_attempts:
                     context.report_progress(
                         50,
-                        f"Компиляция не удалась. Исправляем через LLM ({attempts})..."
+                        f"Исправляем через LLM (попытка {attempts})..."
                     )
-                    self._repair_latex(latex_file, res.stderr or res.stdout, context)
+                    latex_content = self._repair_latex(latex_content, last_error, context)
+                    with open(str(work_latex), "w", encoding="utf-8") as f:
+                        f.write(latex_content)
 
             if not success:
-                raise Exception(f"PDF compilation failed after {attempts} attempts")
+                raise Exception(f"PDF compilation failed after {attempts} attempts: {last_error[:500]}")
 
-            # Write output to /output/ for Docker, or next to input for local
-            if latex_path_input.startswith("minio://"):
-                pdf_path = "/output/result.pdf"
+            # Determine output path
+            if latex_path_input.startswith("minio://") or latex_path.startswith("/input/"):
+                base_name = pathlib.Path(latex_path).stem if not latex_path_input.startswith("minio://") else "result"
+                pdf_path = f"/output/{base_name}.pdf"
             else:
                 pdf_path = str(latex_file.with_suffix(".pdf"))
-            if not pathlib.Path(pdf_path).exists():
-                raise Exception("PDF file was not created")
+
+            # Copy PDF to output location
+            import shutil
+            shutil.copy2(str(work_pdf), pdf_path)
 
             context.report_progress(100, "PDF готов!")
 
@@ -177,24 +201,29 @@ class LatexToPDFPlugin(Plugin):
                     os.remove(latex_path)
                 except Exception:
                     pass
+            # Cleanup working directory
+            if work_dir and os.path.exists(work_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(work_dir)
+                except Exception:
+                    pass
 
-    def _repair_latex(self, latex_file: pathlib.Path, error_log: str, context: PluginContext):
-        """Repair LaTeX using LLM"""
+    def _repair_latex(self, latex_code: str, error_log: str, context: PluginContext) -> str:
+        """Repair LaTeX using LLM and return fixed content"""
         try:
             from src.llm.client import get_llm_client
             client = get_llm_client()
 
-            with open(str(latex_file), "r", encoding="utf-8") as f:
-                latex_code = f.read()
-
             repair_prompt = (
                 "Ты — эксперт по верстке документов в LaTeX. "
-                "Проанализируй лог ошибок и исправь LaTeX-код. "
-                "Верни ТОЛЬКО исправленный код без комментариев."
+                "Проанализируй лог ошибок компиляции и исправь LaTeX-код. "
+                "Верни ТОЛЬКО исправленный код без комментариев и объяснений."
             )
 
             context_chunk = latex_code[:25000]
-            llm_prompt = f"Лог ошибок:\n{error_log}\n\nКод:\n{context_chunk}"
+            error_chunk = error_log[:2000]
+            llm_prompt = f"Лог ошибок:\n{error_chunk}\n\nКод:\n{context_chunk}"
 
             fixed_latex = client.completion(
                 purpose="smart",
@@ -214,8 +243,8 @@ class LatexToPDFPlugin(Plugin):
                 fixed_latex = fixed_latex[:-3]
             fixed_latex = fixed_latex.strip()
 
-            with open(str(latex_file), "w", encoding="utf-8") as f:
-                f.write(fixed_latex)
+            return fixed_latex
 
         except Exception as e:
             context.log("warning", f"LaTeX repair failed: {e}")
+            return latex_code
