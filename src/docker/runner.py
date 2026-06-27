@@ -413,6 +413,7 @@ class ContainerRunner:
             "EXECUTION_ID": execution_id,
             "PUSHGATEWAY_URL": getattr(config, 'pushgateway_url', "host.docker.internal:9091"),
             "MINIO_ENDPOINT": "host.docker.internal:9000",
+            "DATABASE_URL": "postgresql://lectify:lectify_password@host.docker.internal:5432/lectify",
             "OPENAI_API_KEY": config.openai_api_key,
             "OPENAI_API_URL": config.openai_api_url,
         }
@@ -529,13 +530,8 @@ class PollingContainerRunner(ContainerRunner):
 
             def build_cleanup(lp: str) -> Callable[[], None]:
                 def on_cleanup_inner() -> None:
-                    try:
-                        logs = self.docker.get_container_logs(self._active_container_id or "")
-                        if logs and lp:
-                            with open(lp, "a", encoding="utf-8") as f:
-                                f.write(logs)
-                    except Exception:
-                        pass
+                    # Logs are collected in the finally block, no need to duplicate here
+                    pass
                 return on_cleanup_inner
 
             effective_on_cleanup = build_cleanup(log_path)

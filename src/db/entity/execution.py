@@ -12,11 +12,12 @@ class DBExecution(Base):
 
     id = Column(String, primary_key=True)
     workflow_template_id = Column(String, ForeignKey("workflow_templates.id", ondelete="SET NULL"), nullable=True)
-    file_id = Column(String, nullable=False)
+    file_id = Column(String, nullable=True)  # deprecated, для single-file workflows
     user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     workflow_name = Column(String, nullable=True)  # human-readable execution name
     file_name = Column(String, nullable=True)  # input file name
     language = Column(String, nullable=True, default="ru")  # language for the execution
+    input_files = Column(JSON, nullable=True)  # {node_id: file_id} для множественных входов
     status = Column(String, nullable=False)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)

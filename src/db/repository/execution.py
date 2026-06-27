@@ -78,6 +78,7 @@ def _execution_to_model(exec: DBExecution) -> ExecutionModel:
         workflow_name=exec.workflow_name,
         file_name=exec.file_name,
         language=exec.language or "ru",
+        input_files=exec.input_files or {},
         status=exec.status,
         started_at=_dt(exec.started_at),
         ended_at=_dt(exec.ended_at),

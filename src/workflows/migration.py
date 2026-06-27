@@ -16,19 +16,12 @@ logger = logging.getLogger(__name__)
 
 def migrate_lecture_workflow() -> str | None:
     """
-    Migrate the existing lecture_workflow to new workflow_templates format.
+    DEPRECATED: This workflow is removed. Use transcription_to_markdown instead.
 
-    Returns workflow_template_id or None if already migrated.
+    Keeping function for backward compatibility but returns None.
     """
-    repo = DBRepository()
-    node_repo = NodeTemplateRepository()
-    wf_repo = WorkflowTemplateRepository()
-
-    # Check if already migrated
-    existing = wf_repo.get("lecture_workflow_v2")
-    if existing:
-        logger.info("lecture_workflow already migrated")
-        return existing.id
+    logger.info("lecture_workflow migration skipped (workflow removed)")
+    return None
 
     # Get or create default user
     default_user = repo.get_or_create_default()
@@ -161,12 +154,12 @@ def _get_input_mapping(node_id: str) -> list:
 
 def migrate_transcription_workflow() -> str | None:
     """
-    Create the simple transcription-to-markdown workflow.
+    Create the simple transcription-to-markdown workflow with input plugin.
 
     Graph:
-      media_converter_simple → speech_to_text_simple
-                                              ├→ text_to_md_simple
-      prompt_selector_md ──────────────────────┘
+      input_audio (source) → media_converter_simple → speech_to_text_simple
+                                                                    ├→ text_to_md_simple
+      prompt_selector_md ───────────────────────────────────────────┘
 
     text_to_md_simple has two parents: speech_to_text_simple (txt_path)
     and prompt_selector_md (prompt_id from transcript_to_md_system prompt).
@@ -181,11 +174,28 @@ def migrate_transcription_workflow() -> str | None:
     graph = {
         "nodes": [
             {
+                "id": "input_audio",
+                "plugin_id": "input",
+                "name": "Входной файл",
+                "parameters": {"input_type": "audio"},
+                "input_mapping": [
+                    {"target_field": "file_id", "source": "$__input.input_audio.file_id"},
+                    {"target_field": "filename", "source": "$__input.input_audio.filename"},
+                    {"target_field": "minio_path", "source": "$__input.input_audio.minio_path"},
+                    {"target_field": "file_path", "source": "$__input.input_audio.file_path"},
+                    {"target_field": "size", "source": "$__input.input_audio.size"},
+                    {"target_field": "content_type", "source": "$__input.input_audio.content_type"}
+                ]
+            },
+            {
                 "id": "media_converter_simple",
                 "plugin_id": "media_converter",
                 "name": "Конвертация медиа",
                 "parameters": {"format": "m4a", "bitrate": "64k"},
-                "input_mapping": []
+                "input_mapping": [
+                    {"target_field": "file_id", "source": "$input_audio.output.file_id"},
+                    {"target_field": "file_path", "source": "$input_audio.output.file_path"}
+                ]
             },
             {
                 "id": "speech_to_text_simple",
@@ -210,6 +220,7 @@ def migrate_transcription_workflow() -> str | None:
             },
         ],
         "edges": [
+            {"from_node_id": "input_audio", "to_node_id": "media_converter_simple"},
             {"from_node_id": "media_converter_simple", "to_node_id": "speech_to_text_simple"},
             {"from_node_id": "speech_to_text_simple", "to_node_id": "text_to_md_simple"},
             {"from_node_id": "prompt_selector_md", "to_node_id": "text_to_md_simple"},
@@ -297,9 +308,7 @@ def run_all_migrations():
     sync_plugins_on_startup()
     logger.info("Plugins synced")
 
-    # 2. Migrate lecture workflow
-    migrate_lecture_workflow()
-    # 2b. Migrate simple transcription workflow
+    # 2. Migrate workflows
     migrate_transcription_workflow()
     logger.info("Workflows migrated")
 

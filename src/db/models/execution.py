@@ -54,11 +54,12 @@ class ExecutionModel(BaseModelConfig):
     id: str
     workflow_id: Optional[str] = None  # DEPRECATED: use workflow_template_id
     workflow_template_id: Optional[str] = None
-    file_id: str
+    file_id: Optional[str] = None  # deprecated, для single-file workflows
     user_id: Optional[str] = None
     workflow_name: Optional[str] = None  # from mock: execution-level name
     file_name: Optional[str] = None  # from mock: file name for the execution
     language: str = "ru"  # from mock: language for the execution
+    input_files: Optional[dict] = {}  # {node_id: file_id} для множественных входов
     status: ExecutionStatus
     started_at: Optional[str] = None
     ended_at: Optional[str] = None

@@ -156,10 +156,34 @@
 
     let selectedWorkflow = null;
     let currentFilter = '';
-    let fileId = null;
-    let uploadPromise = null;
+    let uploadedFiles = {}; // {node_id: file_id}
+    let uploadPromises = {}; // {node_id: Promise}
 
-    const firstNode = (wf) => wf.graph.nodes.find(n => n.input_mapping && n.input_mapping.length === 0);
+    const getInputNodes = (wf) => wf.graph.nodes.filter(n => n.plugin_id === 'input');
+
+    function getAcceptTypes(inputType) {
+      const mapping = {
+        'audio': 'audio/*',
+        'video': 'video/*',
+        'pdf': 'application/pdf',
+        'text': 'text/*',
+        'image': 'image/*',
+        'any': '*/*'
+      };
+      return mapping[inputType] || '*/*';
+    }
+
+    function getInputTypeLabel(inputType) {
+      const labels = {
+        'audio': 'Аудио',
+        'video': 'Видео',
+        'pdf': 'PDF',
+        'text': 'Текст',
+        'image': 'Изображение',
+        'any': 'Любой файл'
+      };
+      return labels[inputType] || 'Файл';
+    }
 
     function renderWorkflowList(filter) {
       const q = filter.toLowerCase().trim();
@@ -170,20 +194,23 @@
         return `<p class="text-brand-muted text-sm py-6 text-center">Ничего не найдено.</p>`;
       }
       return filtered.map(wf => {
-        const node = firstNode(wf);
+        const inputNodes = getInputNodes(wf);
+        const inputHint = inputNodes.length > 0
+          ? `${inputNodes.length} ${inputNodes.length === 1 ? 'входной файл' : 'входных файла'}`
+          : 'Без входных файлов';
         return `<button class="w-full text-left card p-3 hover:border-brand transition-colors"
           data-wf-id="${wf.id}">
           <div class="font-medium text-brand-dark">${escapeHtml(wf.name)}</div>
           <div class="text-xs text-brand-muted mt-0.5">${escapeHtml(wf.description || '')}</div>
-          ${node ? `<div class="text-xs text-brand-muted mt-1">Первый узел: ${escapeHtml(node.name)}</div>` : ''}
+          <div class="text-xs text-brand-muted mt-1">${inputHint}</div>
         </button>`;
       }).join('');
     }
 
     function renderFormBody() {
-      const node = firstNode(selectedWorkflow);
-      const hasFileInput = node && node.plugin_id === 'media_converter';
-      if (!hasFileInput) {
+      const inputNodes = getInputNodes(selectedWorkflow);
+
+      if (inputNodes.length === 0) {
         return `<p class="text-brand-muted text-sm">Сценарий не требует входных данных.</p>
           <div class="flex gap-3 mt-5 pt-4 border-t border-brand-light">
             <button id="ce-submit-btn" type="button" class="btn-primary text-sm">Запустить</button>
@@ -191,31 +218,48 @@
           </div>
           <div id="ce-error" class="text-red-600 text-sm mt-2 hidden"></div>`;
       }
-      return `
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-brand-dark mb-1">Медиафайл</label>
-            <div id="ce-file-drop"
-              class="input-field flex flex-col items-center justify-center gap-1.5 py-6 cursor-pointer text-brand-muted hover:border-brand transition-colors"
-              style="border-style: dashed">
-              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-              </svg>
-              <span class="text-sm">Нажмите или перетащите файл</span>
-              <span class="text-xs opacity-70">MP4, MP3, WAV, M4A</span>
-            </div>
-            <input id="ce-file-input" type="file" accept="video/*,audio/*" class="hidden">
-            <div id="ce-file-preview" class="hidden mt-2 flex items-center gap-2 text-sm text-brand-dark bg-gray-50 rounded px-3 py-2">
+
+      const fileInputsHtml = inputNodes.map(node => {
+        const inputType = node.parameters?.input_type || 'any';
+        const acceptTypes = getAcceptTypes(inputType);
+        const typeLabel = getInputTypeLabel(inputType);
+        const nodeId = node.id;
+
+        return `
+          <div class="input-file-section" data-node-id="${nodeId}">
+            <label class="block text-sm font-medium text-brand-dark mb-2">
+              ${escapeHtml(node.name || 'Входной файл')}
+              <span class="text-xs text-brand-muted font-normal ml-1">(${typeLabel})</span>
+            </label>
+            <button type="button" class="ce-file-drop w-full flex items-center gap-3 px-4 py-3 bg-brand/10 hover:bg-brand/20 border border-brand-light rounded-lg transition-colors cursor-pointer"
+              data-node-id="${nodeId}">
+              <div class="w-10 h-10 rounded-full bg-brand flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+              </div>
+              <div class="text-left flex-1">
+                <div class="text-sm font-medium text-brand-dark">Выбрать файл</div>
+                <div class="text-xs text-brand-muted">${escapeHtml(typeLabel)}</div>
+              </div>
+            </button>
+            <input class="ce-file-input" type="file" accept="${acceptTypes}" data-node-id="${nodeId}" style="display: none;">
+            <div class="ce-file-preview hidden mt-2 flex items-center gap-2 text-sm text-brand-dark bg-green-50 border border-green-200 rounded-lg px-3 py-2" data-node-id="${nodeId}">
               <svg class="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
-              <span id="ce-file-name" class="truncate"></span>
-              <button id="ce-file-remove" class="ml-auto text-brand-muted hover:text-red-500 shrink-0">✕</button>
+              <span class="ce-file-name truncate flex-1"></span>
+              <button type="button" class="ce-file-remove text-brand-muted hover:text-red-500 shrink-0" data-node-id="${nodeId}">✕</button>
             </div>
           </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="space-y-4">
+          ${fileInputsHtml}
           <div class="flex gap-3 mt-5 pt-4 border-t border-brand-light">
-            <button id="ce-submit-btn" type="button" class="btn-primary text-sm">Запустить</button>
+            <button id="ce-submit-btn" type="button" class="btn-primary text-sm" disabled>Запустить</button>
             <button id="ce-cancel-btn" type="button" class="btn-secondary text-sm">Отмена</button>
           </div>
           <div id="ce-error" class="text-red-600 text-sm mt-2 hidden"></div>
@@ -254,84 +298,144 @@
       body: buildModalBody(),
       width: 'max-w-lg',
       onRender() {
-        // Attach all listeners once — event delegation handles all future clicks
-        const overlay = activeModal().overlay;
+        attachWorkflowListeners();
+
         const searchInput = document.getElementById('ce-search');
         if (searchInput) {
           searchInput.addEventListener('input', (e) => {
             currentFilter = e.target.value;
             const listEl = document.getElementById('ce-wf-list');
-            if (listEl) listEl.innerHTML = renderWorkflowList(currentFilter);
-            // re-attach wf click listeners after innerHTML change
-            listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
-              btn.addEventListener('click', () => {
-                selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
-                refreshBody();
-              });
-            });
+            if (listEl) {
+              listEl.innerHTML = renderWorkflowList(currentFilter);
+              attachWorkflowListeners();
+            }
           });
           searchInput.focus();
-        }
-        // workflow buttons on initial render
-        const listEl = document.getElementById('ce-wf-list');
-        if (listEl) {
-          listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
-            btn.addEventListener('click', () => {
-              selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
-              refreshBody();
-            });
-          });
         }
       },
     });
 
+    function checkAllFilesUploaded() {
+      if (!selectedWorkflow) return;
+      const inputNodes = getInputNodes(selectedWorkflow);
+      if (inputNodes.length === 0) return;
+
+      const allUploaded = inputNodes.every(node => uploadedFiles[node.id]);
+      const submitBtn = document.getElementById('ce-submit-btn');
+      if (submitBtn) {
+        submitBtn.disabled = !allUploaded;
+      }
+    }
+
     function refreshBody() {
       const top = activeModal();
       if (!top) return;
+
+      // Reset upload state when changing workflow
+      uploadedFiles = {};
+      uploadPromises = {};
+
       top.bodyDiv.innerHTML = buildModalBody();
+
       // re-attach listeners for new body
       const backBtn = document.getElementById('ce-back-btn');
-      if (backBtn) backBtn.addEventListener('click', () => { selectedWorkflow = null; refreshBody(); });
-      attachFileHandlers();
-    }
-
-    function attachFileHandlers() {
-      const dropZone = document.getElementById('ce-file-drop');
-      const fileInput = document.getElementById('ce-file-input');
-      const preview = document.getElementById('ce-file-preview');
-      const fileName = document.getElementById('ce-file-name');
-      const removeBtn = document.getElementById('ce-file-remove');
-      if (!dropZone || !fileInput) return;
-
-      dropZone.addEventListener('click', () => fileInput.click());
-      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-brand', 'bg-gray-50'); });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-brand', 'bg-gray-50'));
-      dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('border-brand', 'bg-gray-50');
-        const file = e.dataTransfer.files[0];
-        if (file) setFile(file);
-      });
-      fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
-      if (removeBtn) {
-        removeBtn.addEventListener('click', () => {
-          fileInput.value = '';
-          fileId = null;
-          uploadPromise = null;
-          if (preview) preview.classList.add('hidden');
-          if (dropZone) dropZone.classList.remove('hidden');
+      if (backBtn) {
+        backBtn.addEventListener('click', () => {
+          selectedWorkflow = null;
+          uploadedFiles = {};
+          uploadPromises = {};
+          refreshBody();
         });
       }
 
-      function setFile(file) {
-        if (preview) { preview.classList.remove('hidden'); if (fileName) fileName.textContent = file.name; }
+      // Re-attach workflow list and search listeners
+      const searchInput = document.getElementById('ce-search');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          currentFilter = e.target.value;
+          const listEl = document.getElementById('ce-wf-list');
+          if (listEl) {
+            listEl.innerHTML = renderWorkflowList(currentFilter);
+            attachWorkflowListeners();
+          }
+        });
+        searchInput.focus();
+      }
+
+      attachWorkflowListeners();
+      attachFileHandlers();
+    }
+
+    function attachWorkflowListeners() {
+      const listEl = document.getElementById('ce-wf-list');
+      if (listEl) {
+        listEl.querySelectorAll('[data-wf-id]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            selectedWorkflow = workflows.find(w => w.id === btn.dataset.wfId);
+            refreshBody();
+          });
+        });
+      }
+    }
+
+    function attachFileHandlers() {
+      const inputNodes = getInputNodes(selectedWorkflow);
+      if (inputNodes.length === 0) return;
+
+      inputNodes.forEach(node => {
+        const nodeId = node.id;
+        const dropZone = document.querySelector(`.ce-file-drop[data-node-id="${nodeId}"]`);
+        const fileInput = document.querySelector(`.ce-file-input[data-node-id="${nodeId}"]`);
+        const preview = document.querySelector(`.ce-file-preview[data-node-id="${nodeId}"]`);
+        const fileName = preview?.querySelector('.ce-file-name');
+        const removeBtn = document.querySelector(`.ce-file-remove[data-node-id="${nodeId}"]`);
+
+        if (!dropZone || !fileInput) return;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', () => {
+          if (fileInput.files[0]) setFile(nodeId, fileInput.files[0], dropZone, preview, fileName);
+        });
+
+        if (removeBtn) {
+          removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fileInput.value = '';
+            delete uploadedFiles[nodeId];
+            delete uploadPromises[nodeId];
+            if (preview) preview.classList.add('hidden');
+            if (dropZone) dropZone.classList.remove('hidden');
+            checkAllFilesUploaded();
+          });
+        }
+      });
+
+      function setFile(nodeId, file, dropZone, preview, fileName) {
+        if (preview) {
+          preview.classList.remove('hidden');
+          if (fileName) fileName.textContent = file.name;
+        }
         if (dropZone) dropZone.classList.add('hidden');
+
         const formData = new FormData();
         formData.append('file', file);
         formData.append('language', 'ru');
-        uploadPromise = api.files.upload(formData)
-          .then(result => { fileId = result.id; uploadPromise = null; })
-          .catch(err => { showToast('error', 'Ошибка загрузки файла: ' + err.message); fileId = null; uploadPromise = null; });
+
+        uploadPromises[nodeId] = api.files.upload(formData)
+          .then(result => {
+            uploadedFiles[nodeId] = result.id;
+            delete uploadPromises[nodeId];
+            checkAllFilesUploaded();
+          })
+          .catch(err => {
+            showToast('error', `Ошибка загрузки файла: ${err.message}`);
+            delete uploadedFiles[nodeId];
+            delete uploadPromises[nodeId];
+            if (preview) preview.classList.add('hidden');
+            if (dropZone) dropZone.classList.remove('hidden');
+            checkAllFilesUploaded();
+          });
       }
     }
 
@@ -346,19 +450,38 @@
       const errEl = document.getElementById('ce-error');
       if (errEl) errEl.classList.add('hidden');
 
-      const fileInput = document.getElementById('ce-file-input');
-      const filePath = fileInput && fileInput.files.length > 0 ? fileInput.files[0].name : '';
-
       try {
-        if (uploadPromise) {
-          await uploadPromise;
+        // Wait for all pending uploads
+        const pendingUploads = Object.values(uploadPromises);
+        if (pendingUploads.length > 0) {
+          await Promise.all(pendingUploads);
         }
-        if (selectedWorkflow && !fileId) {
-          showToast('error', 'Пожалуйста, загрузите файл');
-          submitBtn.disabled = false;
-          return;
+
+        const inputNodes = getInputNodes(selectedWorkflow);
+
+        // Check if workflow uses input nodes (new format)
+        if (inputNodes.length > 0) {
+          // Verify all files are uploaded
+          const missingFiles = inputNodes.filter(node => !uploadedFiles[node.id]);
+          if (missingFiles.length > 0) {
+            showToast('error', 'Пожалуйста, загрузите все файлы');
+            submitBtn.disabled = false;
+            return;
+          }
+
+          // New API format with input_files
+          await api.workflows.execute(selectedWorkflow.id, {
+            language: 'ru',
+            input_files: uploadedFiles
+          });
+        } else {
+          // Old format for backward compatibility (workflows without input nodes)
+          await api.workflows.execute(selectedWorkflow.id, {
+            language: 'ru',
+            parameters: {}
+          });
         }
-        await api.workflows.execute(selectedWorkflow.id, { file_id: fileId, file_path: filePath, parameters: {} });
+
         closeModal();
         showToast('success', 'Конспект запущен!');
         loadExecutions();

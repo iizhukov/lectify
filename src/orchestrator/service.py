@@ -154,8 +154,35 @@ class OrchestratorService:
             execution_nodes: Dict[str, Any] = {
                 cast(str, n["id"]): self._find_node(execution, cast(str, n["id"])) for n in graph_nodes
             }
-            execution_file_id = str(execution.file_id)
-            execution_file_path = self._get_file_path(execution_file_id)
+
+            # Подготовить __input для input_mapping
+            # Для новых workflow: input_files = {node_id: file_id}
+            # Для старых workflow: fallback к file_id
+            node_outputs["__input"] = {}
+            if hasattr(execution, "input_files") and execution.input_files:
+                # Новый формат: множественные входы
+                for node_id, file_id in execution.input_files.items():
+                    node_outputs["__input"][f"{node_id}.file_id"] = file_id
+                    file_metadata = self._get_file_metadata(file_id)
+                    if file_metadata:
+                        node_outputs["__input"][f"{node_id}.file_path"] = file_metadata["file_path"]
+                        node_outputs["__input"][f"{node_id}.filename"] = file_metadata["filename"]
+                        node_outputs["__input"][f"{node_id}.minio_path"] = file_metadata["minio_path"]
+                        node_outputs["__input"][f"{node_id}.size"] = file_metadata["size"]
+                        node_outputs["__input"][f"{node_id}.content_type"] = file_metadata["content_type"]
+            elif execution.file_id:
+                # Старый формат: один файл на весь workflow
+                node_outputs["__input"]["file_id"] = str(execution.file_id)
+                file_metadata = self._get_file_metadata(str(execution.file_id))
+                if file_metadata:
+                    node_outputs["__input"]["file_path"] = file_metadata["file_path"]
+                    node_outputs["__input"]["filename"] = file_metadata["filename"]
+                    node_outputs["__input"]["minio_path"] = file_metadata["minio_path"]
+                    node_outputs["__input"]["size"] = file_metadata["size"]
+                    node_outputs["__input"]["content_type"] = file_metadata["content_type"]
+
+            execution_file_id = str(execution.file_id) if execution.file_id else ""
+            execution_file_path = self._get_file_path(execution_file_id) if execution_file_id else None
 
             # Пропускаем уже завершённые ноды, восстанавливаем их outputs
             for node_def in sorted_nodes:
@@ -348,6 +375,21 @@ class OrchestratorService:
             )
             elapsed_ms = (time.monotonic() - node_start) * 1000
             self._metrics.node_execution_duration.labels(node_id=node_id).observe(elapsed_ms / 1000)
+
+            # Collect LLM metrics from Pushgateway after node completion
+            try:
+                from src.utils.pushgateway_collector import replay_llm_metrics
+                from src.config import config
+                pushgateway_url = getattr(config, 'pushgateway_url', 'localhost:9091')
+                replay_llm_metrics(plugin_id, execution_id, pushgateway_url)
+            except Exception as metrics_err:
+                logger.warning(
+                    "failed_to_collect_plugin_metrics",
+                    plugin_id=plugin_id,
+                    execution_id=execution_id,
+                    error=str(metrics_err)
+                )
+
             logger.info("node_completed", execution_id=execution_id, node_id=node_id)
             return output_data if output_data else None
 
@@ -416,6 +458,30 @@ class OrchestratorService:
             logger.warning("file_lookup_failed", file_id=file_id, error=str(e))
         return None
 
+    def _get_file_metadata(self, file_id: str) -> dict | None:
+        """Получить все метаданные файла по file_id для передачи в input плагин."""
+        try:
+            from src.db.entity import DBFile
+            from src.db.database import SessionLocal
+            session = SessionLocal()
+            try:
+                db_file = session.query(DBFile).filter(DBFile.id == file_id).first()
+                if db_file is None:
+                    return None
+                return {
+                    "file_id": file_id,
+                    "file_path": f"minio://{db_file.minio_path}",
+                    "filename": db_file.filename,
+                    "minio_path": db_file.minio_path,
+                    "size": db_file.size_bytes,
+                    "content_type": db_file.mime_type,
+                }
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning("file_metadata_lookup_failed", file_id=file_id, error=str(e))
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers (topological sort, input mapping) — no I/O, no state
@@ -468,14 +534,21 @@ def _map_inputs(
 ) -> Dict[str, Any]:
     """Применить input_mapping: $node_id.output.field или $__input.field → value."""
     input_mapping = node_def.get("input_mapping", [])
+    plugin_id = node_def.get("plugin_id", "")
+
+    # Input плагин — source node для динамических файлов.
+    # Не добавляем execution.file_id автоматически, file_id должен прийти через input_mapping.
+    is_input_plugin = plugin_id == "input"
 
     if not input_mapping:
         result = {}
         if dependencies:
             result = node_outputs.get(dependencies[0], {}).copy()
-        result["file_id"] = file_id
-        if file_path:
-            result["file_path"] = file_path
+        # Для input плагина НЕ добавляем execution.file_id автоматически
+        if not is_input_plugin:
+            result["file_id"] = file_id
+            if file_path:
+                result["file_path"] = file_path
         return result
 
     # Always pass file_id from the workflow execution root file
@@ -512,10 +585,10 @@ def _map_inputs(
             if dep_output.get("file_id"):
                 result["file_id"] = dep_output["file_id"]
                 break
-        # Last fallback: execution-level file_id
-        if "file_id" not in result:
+        # Last fallback: execution-level file_id (НЕ для input плагина)
+        if "file_id" not in result and not is_input_plugin:
             result["file_id"] = file_id
-    if file_path:
+    if file_path and not is_input_plugin:
         result["file_path"] = file_path
 
     logger.debug(

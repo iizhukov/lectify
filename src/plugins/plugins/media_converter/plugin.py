@@ -107,12 +107,24 @@ class MediaConverterPlugin(Plugin):
                 output_path = input_path.with_suffix(f".{format}")
 
             if input_path.suffix.lower() == f".{format}":
-                context.report_progress(100, "Конвертация не требуется")
+                context.report_progress(80, "Конвертация не требуется, копируем файл...")
+                # Copy file to /output/ even if no conversion needed
+                # so ContainerRunnerOrchestrator can upload it to MinIO
+                stem = input_path.stem
+                output_path = pathlib.Path("/output") / f"{stem}.{format}"
+                import shutil
+                shutil.copy2(str(input_path), str(output_path))
+
+                # Get duration for metadata
+                audio = AudioSegment.from_file(str(input_path))
+                duration_ms = len(audio)
+
+                context.report_progress(100, "Готово!")
                 result = MediaConverterOutput(
                     file_id=file_id,
-                    media_path=str(input_path),
+                    media_path=str(output_path),
                     format=format,
-                    duration_ms=0
+                    duration_ms=duration_ms
                 )
             else:
                 audio = AudioSegment.from_file(str(input_path))

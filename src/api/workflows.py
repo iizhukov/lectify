@@ -15,9 +15,10 @@ node_repo = ExecutionNodeRepository()
 
 
 class ExecuteWorkflowRequest(BaseModel):
-    file_id: str
-    file_path: str
+    file_id: Optional[str] = None  # deprecated, для single-file workflows
+    file_path: Optional[str] = None  # deprecated
     language: str = "ru"
+    input_files: Optional[dict] = {}  # {node_id: file_id} для множественных входов
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -98,18 +99,37 @@ async def get_execution_artifacts(execution_id: str):
     workflow_id = execution_id
     result = []
 
-    # Original user file first
+    input_file_ids = []
     if execution.file_id:
-        db_file = file_repo.get_file(execution.file_id)
+        input_file_ids.append(execution.file_id)
+    if hasattr(execution, 'input_files') and execution.input_files:
+        input_file_ids.extend(execution.input_files.values())
+
+    for file_id in input_file_ids:
+        db_file = file_repo.get_file(file_id)
         if db_file and db_file.minio_path:
             url = storage.get_artifact_url(db_file.minio_path, expires_hours=24)
+            artifact_type = "audio"
+            if db_file.mime_type:
+                if db_file.mime_type.startswith("audio/"):
+                    artifact_type = "audio"
+                elif db_file.mime_type.startswith("video/"):
+                    artifact_type = "video"
+                elif db_file.mime_type.startswith("image/"):
+                    artifact_type = "image"
+                elif "pdf" in db_file.mime_type:
+                    artifact_type = "pdf"
+                elif db_file.mime_type.startswith("text/"):
+                    artifact_type = "text"
+
             result.append({
                 "node_id": None,
                 "filename": db_file.filename,
-                "artifact_type": "original",
+                "artifact_type": artifact_type,
                 "url": url,
                 "size": db_file.size_bytes,
                 "minio_path": db_file.minio_path,
+                "is_original": True,
             })
 
     # Terminal nodes: those with no outgoing edges in the workflow graph.
@@ -145,6 +165,7 @@ async def get_execution_artifacts(execution_id: str):
                 "url": url,
                 "size": art.get("size"),
                 "minio_path": obj_name,
+                "is_original": False,
             })
 
             # If this is a terminal node, also promote to top level (node_id=None)
@@ -156,6 +177,7 @@ async def get_execution_artifacts(execution_id: str):
                     "url": url,
                     "size": art.get("size"),
                     "minio_path": obj_name,
+                    "is_original": False,
                 })
     return result
 
@@ -206,11 +228,26 @@ async def get_node_logs(execution_id: str, node_id: str):
     from src.utils.storage import get_storage
     storage = get_storage()
 
-    attempt = 1
-    object_name = f"executions/{execution_id}/{attempt}/{node.plugin_id}/node.log"
-    url = storage.get_log_url(object_name, expires_hours=24)
+    from src.config import config
+    max_attempts = config.orchestrator_max_node_retries + 1
 
-    return {"attempt": attempt, "url": url}
+    logs = []
+    for attempt in range(1, max_attempts + 1):
+        object_name = f"executions/{execution_id}/{attempt}/{node.plugin_id}/node.log"
+
+        if storage.log_exists(object_name):
+            url = storage.get_log_url(object_name, expires_hours=24)
+            if url:
+                logs.append({
+                    "attempt": attempt,
+                    "url": url,
+                    "node_name": node.node_name or node.node_id
+                })
+
+    if not logs:
+        raise HTTPException(status_code=404, detail="No logs found for this node")
+
+    return logs
 
 
 @router.post("/executions/{execution_id}/restart")
@@ -218,9 +255,13 @@ async def restart_execution(execution_id: str):
     execution = exec_repo.get(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="Execution not found")
+
     exec_repo.update_status(execution_id, "pending", error_message="")
+
     for node in node_repo.get_by_execution(execution_id):
-        node_repo.update(str(node.id), status="pending", error_message=None)
+        if node.status in ["failed", "cancelled"]:
+            node_repo.update(str(node.id), status="pending", error_message=None)
+
     return {"execution_id": execution_id, "status": "pending"}
 
 
@@ -270,20 +311,30 @@ async def execute_workflow(
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow template not found")
 
-    # Look up workflow name and input file name
     workflow_name = wf.name or ""
-    file_name = request.file_path.split("/")[-1] if request.file_path else request.file_id
+
+    file_name = None
+    if request.file_path:
+        file_name = request.file_path.split("/")[-1]
+    elif request.file_id:
+        file_name = request.file_id
+    elif request.input_files:
+        first_file_id = next(iter(request.input_files.values()), None)
+
+        if first_file_id:
+            file_name = first_file_id
 
     node_defs = wf.graph.nodes if hasattr(wf.graph, "nodes") else []
 
     exec_repo.create({
         "id": execution_id,
         "workflow_template_id": workflow_id,
-        "file_id": request.file_id,
+        "file_id": request.file_id,  # deprecated, может быть None
         "user_id": user_id,
         "workflow_name": workflow_name,
         "file_name": file_name,
         "language": request.language,
+        "input_files": request.input_files or {},  # {node_id: file_id}
         "status": ExecutionStatus.PENDING,
         "created_at": datetime.now(timezone.utc),
     })

@@ -329,6 +329,14 @@ class MinIOStorage:
             logger.error("presigned_log_url_failed", object_name=object_name, error=str(e))
             return None
 
+    def log_exists(self, object_name: str) -> bool:
+        """Проверить существование лога в MinIO."""
+        try:
+            self.client.stat_object(self.logs_bucket, object_name)
+            return True
+        except S3Error:
+            return False
+
     def list_workflow_artifacts(self, workflow_id: str) -> list:
         """
         Получить список всех артефактов воркфлоу

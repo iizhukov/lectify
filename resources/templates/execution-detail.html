@@ -51,7 +51,7 @@
 {% block scripts %}
 <script type="module">
   import { api } from '/static/js/api.js';
-  import { showModal } from '/static/js/components/modal.js';
+  import { showModal, activeModal } from '/static/js/components/modal.js';
   import { showToast } from '/static/js/components/toast.js';
   import { renderNetworkGraph } from '/static/js/components/network-graph.js';
 
@@ -288,12 +288,103 @@
   async function showNodeLogs(nodeId) {
     if (!_alive) return;
     try {
-      const { attempt, url } = await api.nodes.logs(execId, nodeId);
-      const text = await fetch(url).then(r => { if (!r.ok) throw new Error('Failed to fetch logs'); return r.text(); });
+      const logs = await api.nodes.logs(execId, nodeId);
+
+      if (!logs || logs.length === 0) {
+        showToast('error', 'Логи не найдены');
+        return;
+      }
+
+      const nodeName = logs[0].node_name || nodeId;
+      let selectedAttempt = logs[logs.length - 1].attempt; // Default to last attempt
+      let logTexts = {}; // Cache loaded logs
+
+      function buildTabsHtml() {
+        return logs.map(log => `
+          <button class="log-tab px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+            log.attempt === selectedAttempt
+              ? 'bg-brand text-white'
+              : 'bg-gray-100 text-brand-dark hover:bg-gray-200'
+          }" data-attempt="${log.attempt}">
+            Попытка ${log.attempt}
+          </button>
+        `).join('');
+      }
+
+      async function loadLogText(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch logs');
+        return response.text();
+      }
+
+      async function showAttempt(attempt) {
+        selectedAttempt = attempt;
+        const logEntry = logs.find(l => l.attempt === attempt);
+        if (!logEntry) return;
+
+        // Update tabs - use timeout to ensure DOM is ready
+        setTimeout(() => {
+          const modal = activeModal();
+          if (!modal || !modal.bodyDiv) return;
+
+          modal.bodyDiv.querySelectorAll('.log-tab').forEach(tab => {
+            const tabAttempt = parseInt(tab.dataset.attempt);
+            if (tabAttempt === attempt) {
+              tab.classList.remove('bg-gray-100', 'text-brand-dark', 'hover:bg-gray-200');
+              tab.classList.add('bg-brand', 'text-white');
+            } else {
+              tab.classList.remove('bg-brand', 'text-white');
+              tab.classList.add('bg-gray-100', 'text-brand-dark', 'hover:bg-gray-200');
+            }
+          });
+
+          // Load and display log text
+          const logContainer = modal.bodyDiv.querySelector('.log-content');
+          if (!logContainer) return;
+
+          logContainer.innerHTML = '<div class="text-center py-4 text-brand-muted">Загрузка...</div>';
+
+          (async () => {
+            try {
+              if (!logTexts[attempt]) {
+                logTexts[attempt] = await loadLogText(logEntry.url);
+              }
+              logContainer.innerHTML = `<pre class="bg-gray-900 text-green-400 p-4 rounded text-xs font-mono overflow-auto max-h-[60vh]">${escapeHtml(logTexts[attempt])}</pre>`;
+            } catch (e) {
+              logContainer.innerHTML = `<div class="text-center py-4 text-red-600">Ошибка загрузки логов: ${e.message}</div>`;
+            }
+          })();
+        }, 100);
+      }
+
+      const modalBody = `
+        <div class="flex gap-2 mb-4 border-b border-brand-light pb-2">
+          ${buildTabsHtml()}
+        </div>
+        <div class="log-content">
+          <div class="text-center py-4 text-brand-muted">Загрузка...</div>
+        </div>
+      `;
+
       showModal({
-        title: `Логи узла — Попытка ${attempt}`,
-        body: `<pre class="bg-gray-900 text-green-400 p-4 rounded text-xs font-mono overflow-auto max-h-[60vh]">${escapeHtml(text)}</pre>`,
+        title: `Логи узла "${nodeName}"`,
+        body: modalBody,
         width: 'max-w-3xl',
+        onRender: () => {
+          const modal = activeModal();
+          if (!modal || !modal.bodyDiv) return;
+
+          // Attach click handlers to tabs
+          modal.bodyDiv.querySelectorAll('.log-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+              const attempt = parseInt(tab.dataset.attempt);
+              showAttempt(attempt);
+            });
+          });
+
+          // Load the default attempt
+          showAttempt(selectedAttempt);
+        }
       });
     } catch (e) {
       showToast('error', 'Ошибка загрузки логов: ' + e.message);
@@ -301,11 +392,11 @@
   }
 
   function groupArtifacts(artifacts, nodeNameMap, startedAtMap) {
-    const original = artifacts.filter(art => art.artifact_type === 'original');
-    const outputFile = artifacts.filter(art => art.artifact_type !== 'original' && art.node_id == null);
+    const original = artifacts.filter(art => art.is_original === true);
+    const outputFile = artifacts.filter(art => art.is_original !== true && art.node_id == null);
     const byNode = {};
     artifacts.forEach(art => {
-      if (art.artifact_type !== 'original' && art.node_id != null) {
+      if (art.is_original !== true && art.node_id != null) {
         const name = nodeNameMap[art.node_id] || art.node_id || 'Неизвестный узел';
         if (!byNode[name]) byNode[name] = [];
         byNode[name].push(art);
@@ -481,11 +572,19 @@
     }
   });
 
-  document.addEventListener('click', (e) => {
+  function logViewHandler(e) {
     if (!_alive) return;
     const btn = e.target.closest('.view-logs-btn');
-    if (btn) showNodeLogs(btn.dataset.nodeId);
-  });
+    if (!btn) return;
+
+    // Check that we're still on the same execution page
+    const currentExecId = window.location.pathname.split('/').pop();
+    if (currentExecId !== execId) return;
+
+    showNodeLogs(btn.dataset.nodeId);
+  }
+
+  document.addEventListener('click', logViewHandler);
 
   _alive = true;
   loadExecution();
@@ -497,6 +596,20 @@
     loadExecution();
   }, 5000);
 
-  window.addEventListener('beforeunload', () => { _alive = false; });
+  function cleanup() {
+    _alive = false;
+    document.removeEventListener('click', logViewHandler);
+  }
+
+  window.addEventListener('beforeunload', cleanup);
+
+  // Also cleanup on SPA navigation
+  const checkInterval = setInterval(() => {
+    const currentExecId = window.location.pathname.split('/').pop();
+    if (currentExecId !== execId || !document.getElementById('exec-id')) {
+      cleanup();
+      clearInterval(checkInterval);
+    }
+  }, 100);
 </script>
 {% endblock %}
