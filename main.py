@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     if config.orchestrator_enabled:
         orch_config = OrchestratorConfig(
             enabled=True,
-            max_concurrent_workflows=config.orchestrator_max_concurrent_workflows,
+            max_concurrent_nodes=config.orchestrator_max_concurrent_nodes,
             poll_interval_seconds=config.orchestrator_poll_interval_seconds,
             node_timeout_seconds=config.orchestrator_node_timeout_seconds,
             auto_retry_failed_nodes=config.orchestrator_auto_retry_failed_nodes,
@@ -97,12 +97,7 @@ try:
     logger.info("plugins_scanned")
     print("OK: Plugins scanned", file=sys.stderr)
 
-    # Only rebuild on first run (worker process). With uvicorn reload=True the
-    # watcher process also imports this module — it should NOT delete/rebuild images.
-    # Detect watcher by the WORKER_PID env var set only in the watcher process.
-    is_reloader = os.environ.get("WORKER_PID") is None
-    build_missing_plugin_images(rebuild=is_reloader)
-    logger.info("plugin_images_built", is_reloader=is_reloader)
+    build_missing_plugin_images(rebuild=True)
     print("OK: Plugin images ready", file=sys.stderr)
 
     run_all_migrations()
@@ -135,4 +130,11 @@ print("OK: Application ready at http://0.0.0.0:5001", file=sys.stderr)
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=5001, reload=True)
+    from src.utils.logging import ACCESS_LOG_CONFIG
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=5001,
+        reload=True,
+        log_config=ACCESS_LOG_CONFIG,
+    )

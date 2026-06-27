@@ -5,15 +5,13 @@ REASONING = True
 STREAM = False
 
 [Database]
-# PostgreSQL connection settings
-# Format: postgresql://username:password@host:port/database
 DRIVER = postgresql
 USERNAME = lectify
 PASSWORD = lectify_password
 HOST = localhost
 PORT = 5432
 DATABASE = lectify
-# Опционально: полная connection string для override
+# Опционально:
 CONNECTION_URL = postgresql://lectify:lectify_password@localhost:5432/lectify
 
 [Database.Test]
@@ -71,7 +69,9 @@ LOG_FILE_BACKUP_COUNT = 5
 # Оркестратор выполняет воркфлоу в Docker-контейнерах
 ENABLED = True
 # Максимальное число одновременно выполняемых воркфлоу
-MAX_CONCURRENT_WORKFLOWS = 3
+MAX_CONCURRENT_WORKFLOWS = 100
+# Максимальное число одновременно выполняемых нод
+MAX_CONCURRENT_NODES = 5
 # Интервал опроса БД на новые задачи (секунды)
 POLL_INTERVAL_SECONDS = 5
 # Таймаут выполнения одной ноды (секунды)
