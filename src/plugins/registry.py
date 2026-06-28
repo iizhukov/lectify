@@ -9,19 +9,12 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Type
 
-from src.plugins.base import Plugin, PluginContext
+from src.plugins.base import Plugin
 
 logger = logging.getLogger(__name__)
 
 
 class PluginRegistry:
-    """
-    Registry for all available plugins.
-
-    Scans the plugins directory at startup and registers
-    all classes that inherit from Plugin.
-    """
-
     _instance: Optional["PluginRegistry"] = None
     _plugins: Dict[str, Type[Plugin]] = {}
     _plugins_metadata: Dict[str, dict] = {}
@@ -30,27 +23,27 @@ class PluginRegistry:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+
         return cls._instance
 
     def __init__(self):
         if self._initialized:
             return
+        
         self._plugins = {}
         self._plugins_metadata = {}
         self._initialized = True
 
     def register(self, plugin_class: Type[Plugin]):
-        """Register a plugin class"""
         plugin_id = plugin_class.id
         if not plugin_id:
             raise ValueError(f"Plugin {plugin_class.__name__} has no id")
 
         if plugin_id in self._plugins:
-            logger.warning(f"Plugin {plugin_id} already registered, overwriting")
+            logger.debug(f"Plugin {plugin_id} already registered, overwriting")
 
         self._plugins[plugin_id] = plugin_class
 
-        # Build parameters schema - handle both list and FieldInfo cases
         params = plugin_class.parameters_schema
         if params is None:
             params_schema = []
@@ -78,20 +71,7 @@ class PluginRegistry:
         }
         logger.info(f"Registered plugin: {plugin_id}")
 
-    def scan_plugins_folder(self, plugins_dir: str = None):
-        """
-        Scan plugins folder and register all plugins.
-
-        Expected structure:
-            plugins/
-                __init__.py
-                media_converter/
-                    __init__.py  (or plugin.py)
-                    models.py
-                llm_request/
-                    __init__.py
-                    models.py
-        """
+    def scan_plugins_folder(self, plugins_dir: str | None = None):
         if plugins_dir is None:
             plugins_dir = Path(__file__).parent / "plugins"
 
@@ -102,11 +82,9 @@ class PluginRegistry:
 
         logger.info(f"Scanning plugins folder: {plugins_dir}")
 
-        # Add plugins directory to path
         if str(plugins_dir.parent) not in sys.path:
             sys.path.insert(0, str(plugins_dir.parent))
 
-        # Scan each plugin subdirectory
         for item in plugins_dir.iterdir():
             if not item.is_dir():
                 continue
@@ -115,18 +93,16 @@ class PluginRegistry:
 
             plugin_path = item.name
 
-            # Try to import plugin module
             try:
                 module_name = f"plugins.{plugin_path}"
                 module = importlib.import_module(module_name)
 
-                # Find all Plugin subclasses in the module
                 for name, obj in inspect.getmembers(module):
                     if (
                         inspect.isclass(obj)
                         and issubclass(obj, Plugin)
                         and obj != Plugin
-                        and obj.id  # Must have an ID
+                        and obj.id
                     ):
                         self.register(obj)
 
@@ -160,7 +136,6 @@ class PluginRegistry:
         return self._plugins_metadata.get(plugin_id)
 
 
-# Global registry instance
 registry = PluginRegistry()
 
 

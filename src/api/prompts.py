@@ -1,4 +1,5 @@
 import uuid
+
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 
 from src.db.models import PromptModel
 from src.db.repository import PromptRepository
+
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
@@ -26,10 +28,6 @@ class UpdatePromptRequest(BaseModel):
 
 @router.get("", response_model=List[PromptModel])
 async def list_prompts(user_id: Optional[str] = None):
-    """
-    List all prompts (global + user's).
-    Returns prompts filtered by user_id if provided.
-    """
     repo = PromptRepository()
 
     if user_id:
@@ -44,7 +42,6 @@ async def list_prompts(user_id: Optional[str] = None):
 
 @router.get("/{prompt_id}", response_model=PromptModel)
 async def get_prompt(prompt_id: str):
-    """Get prompt by ID"""
     repo = PromptRepository()
     prompt = repo.get(prompt_id)
 
@@ -59,7 +56,6 @@ async def create_prompt(
     request: CreatePromptRequest,
     user_id: Optional[str] = None
 ):
-    """Create a new prompt"""
     repo = PromptRepository()
 
     prompt = repo.create({
@@ -79,16 +75,18 @@ async def update_prompt(
     prompt_id: str,
     request: UpdatePromptRequest
 ):
-    """Update a prompt"""
     repo = PromptRepository()
 
     update_data = {}
     if request.name is not None:
         update_data["name"] = request.name
+
     if request.system_prompt is not None:
         update_data["system_prompt"] = request.system_prompt
+
     if request.user_prompt_template is not None:
         update_data["user_prompt_template"] = request.user_prompt_template
+
     if request.variables is not None:
         update_data["variables"] = request.variables
 
@@ -102,7 +100,6 @@ async def update_prompt(
 
 @router.delete("/{prompt_id}")
 async def delete_prompt(prompt_id: str):
-    """Delete a prompt"""
     repo = PromptRepository()
     success = repo.delete(prompt_id)
 
@@ -118,7 +115,6 @@ async def render_prompt(
     name: Optional[str] = None,
     value: Optional[str] = None
 ):
-    """Render prompt with variables substituted"""
     repo = PromptRepository()
     prompt = repo.get(prompt_id)
 

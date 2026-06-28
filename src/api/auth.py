@@ -20,8 +20,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 def _extract_token(authorization: str = Header(None)) -> str | None:
     if not authorization:
         return None
+    
     if authorization.startswith("Bearer "):
         return authorization[7:]
+
     return authorization
 
 
@@ -61,11 +63,13 @@ def login(req: LoginRequest):
 
 @router.post("/logout", response_model=MessageResponse)
 def logout(authorization: str = Header(None)):
-    token = _extract_token(authorization)
+    token = _extract_token(authorization)    
     if not token:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
     repo = Repository()
     repo.delete_session(token)
+
     return MessageResponse(message="Logged out successfully")
 
 
@@ -98,6 +102,9 @@ def reset_password(req: ResetPasswordRequest):
 def refresh(authorization: str = Header(None)):
     token = _extract_token(authorization)
     repo = Repository()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     user = repo.verify_session(token)
     if not user:

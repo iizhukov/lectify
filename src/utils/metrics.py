@@ -1,12 +1,7 @@
-"""
-Prometheus метрики для мониторинга приложения
-"""
 from prometheus_client import Counter, Gauge, Histogram, Summary
 
 
 class LectifyMetrics:
-    """Класс для управления метриками Prometheus"""
-
     def __init__(self):
         # Счётчики воркфлоу
         self.workflows_total = Counter(
@@ -122,12 +117,10 @@ class LectifyMetrics:
         )
 
 
-# Глобальный экземпляр метрик (singleton)
 _metrics_instance = None
 
 
 def get_metrics() -> LectifyMetrics:
-    """Получить глобальный экземпляр метрик (singleton)"""
     global _metrics_instance
 
     if _metrics_instance is None:

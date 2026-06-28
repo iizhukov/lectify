@@ -3,14 +3,13 @@ Pytest fixtures для интеграционных тестов
 """
 import sys
 import os
-import subprocess
 import pytest
 import tempfile
 import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 mock_pydub = MagicMock()
@@ -21,7 +20,7 @@ os.environ["TESTING"] = "true"
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from minio import Minio
 
 ROOT_DIR = Path(__file__).parent.parent
@@ -412,6 +411,13 @@ def workflow_data():
         "language": "ru",
         "filename": "test_lecture.mp3"
     }
+
+
+@pytest.fixture(autouse=True)
+def scan_plugins():
+    """Scan and register all plugins before each test"""
+    from src.plugins.registry import scan_and_register_plugins
+    scan_and_register_plugins()
 
 
 @pytest.fixture(autouse=True)

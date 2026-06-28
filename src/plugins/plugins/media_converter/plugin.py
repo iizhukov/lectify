@@ -2,29 +2,24 @@
 Media Converter Plugin — converts video/audio to M4A
 """
 
-import os
-import pathlib
-import tempfile
+from pathlib import Path
 from typing import Any, Dict
 
-from pydantic import Field
+from pydub import AudioSegment
 
 from src.plugins.base import (
     Plugin,
     PluginContext,
-    PluginInput,
-    PluginOutput,
-    PluginParameter
+    PluginParameter,
 )
+from src.plugins.datasource import DataSource, OutputSource
 from src.plugins.plugins.media_converter.models import (
     MediaConverterInput,
-    MediaConverterOutput
+    MediaConverterOutput,
 )
 
 
 class MediaConverterPlugin(Plugin):
-    """Convert video/audio files to M4A format"""
-
     id = "media_converter"
     name = "Конвертация медиа"
     description = "Конвертирует видео или аудио файл в формат M4A"
@@ -33,11 +28,21 @@ class MediaConverterPlugin(Plugin):
     color = "#FF00FF"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8.5A1.5 1.5 0 014.5 7h11A1.5 1.5 0 0117 8.5v1H3V8.5z"/></svg>'
 
-    # FFmpeg required for media conversion
     system_packages = ["ffmpeg"]
 
     input_model = MediaConverterInput
     output_model = MediaConverterOutput
+
+    data_sources = {
+        "file": DataSource(
+            type="file",
+            required=True,
+        ),
+    }
+
+    output_artifacts = {
+        "output": OutputSource(type="file", filename="output.m4a"),
+    }
 
     parameters_schema = [
         PluginParameter(
@@ -68,113 +73,54 @@ class MediaConverterPlugin(Plugin):
 
     async def execute(
         self,
-        input_data: MediaConverterInput,
         context: PluginContext,
-        parameters: Dict[str, Any]
+        parameters: Dict[str, Any],
     ) -> MediaConverterOutput:
-        """
-        Execute media conversion.
-
-        For Docker execution, this runs inside a container.
-        For local development, it runs directly.
-        """
-        file_id = input_data.file_id
-        file_path = input_data.file_path
-        format = parameters.get("format", "m4a")
+        output_format = parameters.get("format", "m4a")
         bitrate = parameters.get("bitrate", "64k")
+
+        source = context.manifest.get("file")
+        if source is None:
+            raise ValueError("data_source 'file' не найден.")
+
+        input_path = Path(source.path)
+        input_suffix = input_path.suffix.lower().lstrip(".")
+        output_suffix = output_format.lower().lstrip(".")
 
         context.report_progress(10, "Начинаем конвертацию...")
 
-        try:
-            # Check if MinIO path
-            if file_path.startswith("minio://"):
-                context.report_progress(20, "Скачиваем файл из MinIO...")
-                local_path = self._download_from_minio(file_path, file_id, context)
-                should_cleanup = True
-            else:
-                local_path = file_path
-                should_cleanup = False
+        output_artifact = context.output.declare("output", type="file")
+        output_path_str = str(output_artifact.path)
 
-            context.report_progress(40, "Конвертируем файл...")
+        if input_suffix == output_suffix:
+            context.report_progress(80, "Конвертация не требуется, копируем файл...")
+            with Path(source.path).open("rb") as src, output_artifact as dst:
+                dst.write(src.read())
 
-            # Convert using pydub
-            from pydub import AudioSegment
-
-            input_path = pathlib.Path(local_path)
-
-            # When running in Docker, /input/ is read-only — write output to /output/
-            if str(input_path).startswith("/input/"):
-                stem = input_path.stem
-                output_path = pathlib.Path("/output") / f"{stem}.{format}"
-            else:
-                output_path = input_path.with_suffix(f".{format}")
-
-            if input_path.suffix.lower() == f".{format}":
-                context.report_progress(80, "Конвертация не требуется, копируем файл...")
-                # Copy file to /output/ even if no conversion needed
-                # so ContainerRunnerOrchestrator can upload it to MinIO
-                stem = input_path.stem
-                output_path = pathlib.Path("/output") / f"{stem}.{format}"
-                import shutil
-                shutil.copy2(str(input_path), str(output_path))
-
-                # Get duration for metadata
-                audio = AudioSegment.from_file(str(input_path))
-                duration_ms = len(audio)
-
-                context.report_progress(100, "Готово!")
-                result = MediaConverterOutput(
-                    file_id=file_id,
-                    media_path=str(output_path),
-                    format=format,
-                    duration_ms=duration_ms
-                )
-            else:
-                audio = AudioSegment.from_file(str(input_path))
-                duration_ms = len(audio)
-
-                context.report_progress(70, "Экспортируем...")
-
-                audio.export(
-                    str(output_path),
-                    format="ipod" if format == "m4a" else format.replace(".", ""),
-                    bitrate=bitrate
-                )
-
-                context.report_progress(100, f"Готово! Файл: {output_path.name}")
-
-                result = MediaConverterOutput(
-                    file_id=file_id,
-                    media_path=str(output_path),
-                    format=format,
-                    duration_ms=duration_ms
-                )
-
-            # Cleanup temp file
-            if should_cleanup and os.path.exists(local_path):
-                os.remove(local_path)
-
-            return result
-
-        except Exception as e:
-            context.log("error", f"Ошибка конвертации: {str(e)}")
-            raise
-
-    def _download_from_minio(self, minio_path: str, file_id: str, context: PluginContext) -> str:
-        """Download file from MinIO"""
-        object_name = minio_path.replace("minio://", "")
-        temp_dir = tempfile.gettempdir()
-        local_path = os.path.join(temp_dir, f"{file_id}_{os.path.basename(object_name)}")
-
-        if context.minio_client:
-            context.minio_client.fget_object(
-                Bucket="lectify",
-                Key=object_name,
-                Filename=local_path
+            context.report_progress(100, "Готово!")
+            return MediaConverterOutput(
+                file_id="",
+                format=output_format,
+                duration_ms=0,
             )
 
-        return local_path
+        context.report_progress(40, "Конвертируем файл...")
+
+        audio = AudioSegment.from_file(str(input_path))
+        duration_ms = len(audio)
+
+        context.report_progress(70, "Экспортируем...")
+
+        export_format = "ipod" if output_format == "m4a" else output_suffix
+        audio.export(output_path_str, format=export_format, bitrate=bitrate)
+
+        context.report_progress(100, f"Готово! Файл: {output_artifact.name}")
+
+        return MediaConverterOutput(
+            file_id="",
+            format=output_format,
+            duration_ms=duration_ms,
+        )
 
 
-# Export for registry
 plugin = MediaConverterPlugin

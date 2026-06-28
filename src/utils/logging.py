@@ -1,19 +1,17 @@
-"""
-Структурированное логирование с использованием structlog
-"""
 import sys
 import logging
 import json
 import structlog
+
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
 
 
 def get_access_log_config():
-    """Build uvicorn log config with JSON-formatted access logs to file."""
     try:
         from src.config import config
+
         log_file = config.log_file
         max_bytes = config.log_file_max_bytes
         backup_count = config.log_file_backup_count
@@ -78,24 +76,14 @@ ACCESS_LOG_CONFIG = get_access_log_config()
 
 
 class AccessLogFormatter(logging.Formatter):
-    """Formatter that outputs access log lines as structured JSON.
-
-    uvicorn.access emits a single string via LogRecord.getMessage().
-    We parse that string to extract: method, path, status, duration, client IP.
-    """
-
     def format(self, record: logging.LogRecord) -> str:
         msg = record.getMessage()
-        # uvicorn access log format:
-        # '{client} - "{method} {path} HTTP/{proto}" {status} {size} "{ua}" {duration}'
-        # Example: '127.0.0.1:12345 - "GET /api/workflows HTTP/1.1" 200 1234 "-" 0.001'
         parts = {}
+        
         try:
-            # Extract client IP:port
             client = msg.split(" - ")[0] if " - " in msg else ""
             parts["client_ip"] = client
 
-            # Extract request line: "GET /api/workflows HTTP/1.1"
             after_client = msg.split('"', 1)[1] if '"' in msg else ""
             req_parts = after_client.split('"')[0].split(" ")
             if len(req_parts) >= 3:
@@ -103,13 +91,11 @@ class AccessLogFormatter(logging.Formatter):
                 parts["path"] = req_parts[1]
                 parts["http_version"] = req_parts[2]
 
-            # Extract status code (first integer after closing quote)
             import re
             status_match = re.search(r'" (\d{3}) ', msg)
             if status_match:
                 parts["status"] = int(status_match.group(1))
 
-            # Extract duration
             duration_match = re.search(r'" ([\d.]+)$', msg)
             if duration_match:
                 parts["duration_s"] = float(duration_match.group(1))
@@ -125,13 +111,6 @@ class AccessLogFormatter(logging.Formatter):
 
 
 def setup_logging(log_level: str = "INFO", log_file: str = "logs/lectify.log"):
-    """
-    Настройка структурированного логирования с выводом в консоль, файл и MinIO
-    
-    Args:
-        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Путь к файлу логов
-    """
     try:
         from src.config import config
         log_level = config.log_level
@@ -179,7 +158,6 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/lectify.log"):
     file_handler.setFormatter(file_formatter)
     logging.root.addHandler(file_handler)
     
-    # Устанавливаем уровень корневого логгера
     logging.root.setLevel(log_level_obj)
     
     structlog.configure(
@@ -200,51 +178,4 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/lectify.log"):
 
 
 def get_logger(name: str) -> structlog.BoundLogger:
-    """
-    Получить логгер с заданным именем
-    
-    Args:
-        name: Имя логгера (обычно __name__)
-    
-    Returns:
-        Настроенный structlog логгер
-    """
     return structlog.get_logger(name)
-
-
-def upload_logs_to_minio(log_file: str = None) -> Optional[str]:
-    """
-    Загрузить логи в MinIO
-    
-    Args:
-        log_file: Путь к файлу логов (если не указан, используется из конфига)
-    
-    Returns:
-        Путь к объекту в MinIO или None при ошибке
-    """
-    try:
-        from src.utils.storage import MinIOStorage
-        from src.config import config
-        
-        if log_file is None:
-            log_file = config.log_file
-        
-        storage = MinIOStorage()
-        storage.ensure_buckets()
-        
-        logger = get_logger(__name__)
-        
-        result = storage.upload_log(log_file, log_type="application")
-        
-        if result:
-            logger.info("logs_uploaded_to_minio", object_name=result)
-        else:
-            logger.warning("logs_upload_to_minio_failed")
-        
-        return result
-        
-    except Exception as e:
-        print(f"ERROR:  Error uploading logs to MinIO: {str(e)}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return None

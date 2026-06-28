@@ -16,6 +16,8 @@ from src.docker.runner import PollingContainerRunner, ContainerMetrics, cleanup_
 from src.db.repository import ExecutionRepository, ExecutionNodeRepository
 from src.utils.storage import MinIOStorage, get_storage
 from src.orchestrator.logs import NodeLogManager
+from src.orchestrator.input_resolver import InputResolver
+from src.plugins.registry import PluginRegistry
 from src.utils.logging import get_logger
 from src.utils.metrics import get_metrics
 
@@ -92,6 +94,16 @@ class ContainerRunnerOrchestrator:
         temp_dir = Path(tempfile.gettempdir()) / "lectify" / execution_id / node_id
         temp_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve DataSource declarations → write /input/ files + manifest
+        plugin_cls = PluginRegistry().get_plugin(plugin_id)
+        if plugin_cls:
+            resolver = InputResolver(self.storage)
+            manifest, extra_input = resolver.resolve(plugin_cls(), input_data, temp_dir, parameters)
+            manifest_path = temp_dir / "input" / ".manifest.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+            input_data = {**input_data, **extra_input}
+
         output_file = temp_dir / "output" / "output.json"
 
         # Логируем в файл, чтобы потом сохранить в MinIO
@@ -126,9 +138,10 @@ class ContainerRunnerOrchestrator:
                 log_path=str(log_path),
             )
 
-            # Upload output files (excluding output.json) to MinIO and update output_data
+            # Upload output files based on plugin output_artifacts declarations to MinIO
+            output_artifacts = getattr(plugin_cls, "output_artifacts", {}) if plugin_cls else {}
             output_data = self._upload_output_files(
-                output_data, temp_dir, execution_id, node_id
+                output_data, temp_dir, execution_id, node_id, output_artifacts
             )
             logger.info(
                 f"_upload_output_files_result "
@@ -228,11 +241,11 @@ class ContainerRunnerOrchestrator:
         temp_dir: Path,
         execution_id: str,
         node_id: str,
+        output_artifacts: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """
-        Scan /output/ directory for files created by the plugin (excluding output.json),
-        upload each to MinIO, create a DBFile record with the minio_path,
-        and update output_data with the new file_id and minio:// URL.
+        Upload output files to MinIO based on plugin's output_artifacts declarations.
+        Creates DBFile records and updates output_data with minio:// URLs and file_ids.
         """
         if output_data is None:
             return output_data
@@ -247,44 +260,43 @@ class ContainerRunnerOrchestrator:
             )
             return output_data
 
-        all_files = list(output_dir.iterdir())
-        logger.info(
-            "output_dir_scan",
-            execution_id=execution_id,
-            node_id=node_id,
-            output_dir=str(output_dir),
-            files=[f.name for f in all_files],
-        )
+        output_artifacts = output_artifacts or {}
 
         uploaded = {}  # filename -> (new_file_id, full_minio_url)
-        field_file_ids = {}  # output key -> new_file_id (for file_id proxying)
-        for f in output_dir.iterdir():
-            if f.name == "output.json":
+        for name, source in output_artifacts.items():
+            filename = source.get("filename") if isinstance(source, dict) else getattr(source, "filename", None)
+            if not filename:
                 continue
-            artifact_type = _parameters_for_artifact_type(f.suffix.lstrip("."))
+            file_path = output_dir / filename
+            if not file_path.exists():
+                logger.warning(
+                    "output_artifact_missing",
+                    execution_id=execution_id,
+                    node_id=node_id,
+                    artifact_name=name,
+                    filename=filename,
+                )
+                continue
+            ext = file_path.suffix.lstrip(".")
+            artifact_type = _parameters_for_artifact_type(ext)
             minio_path = self.storage.upload_artifact(
-                str(f),
+                str(file_path),
                 workflow_id=execution_id,
                 node_id=node_id,
                 artifact_type=artifact_type,
             )
             if minio_path:
-                # Create DBFile record for this artifact (links MinIO to DB)
                 new_file_id = self._create_db_file(
-                    file_path=str(f),
+                    file_path=str(file_path),
                     minio_path=minio_path,
                 )
                 full_minio_url = f"minio://{self.storage.artifacts_bucket}/{minio_path}"
-                uploaded[f.name] = (new_file_id, full_minio_url)
-                # Map output keys to file_id so _update_output_data_fields
-                # can proxy file_id alongside minio:// URL (critical for downstream nodes)
-                for key in ["txt_path", "media_path", "latex_path", "pdf_path", "file_path"]:
-                    field_file_ids[key] = new_file_id
+                uploaded[filename] = (new_file_id, full_minio_url)
                 logger.info(
                     "node_output_file_uploaded",
                     execution_id=execution_id,
                     node_id=node_id,
-                    filename=f.name,
+                    filename=filename,
                     minio_path=full_minio_url,
                     new_file_id=new_file_id,
                 )
@@ -294,11 +306,9 @@ class ContainerRunnerOrchestrator:
 
         # Update output_data fields that point to container output paths
         result = self._update_output_data_fields(
-            output_data, uploaded, temp_dir, field_file_ids
+            output_data, uploaded, temp_dir
         )
 
-        # Also update the on-disk output.json so the MinIO artifact upload below
-        # picks up the correct paths
         with open(temp_dir / "output" / "output.json", "w", encoding="utf-8") as of:
             json.dump(result, of)
 
@@ -309,14 +319,12 @@ class ContainerRunnerOrchestrator:
         output_data: Dict[str, Any],
         uploaded: Dict[str, tuple[str, str]],
         temp_dir: Path,
-        field_file_ids: Dict[str, str] | None = None,
     ) -> Dict[str, Any]:
         """
         Update output_data fields that reference container output files.
 
         For each key in output_data that contains a container path (e.g. "/output/foo.m4a"),
         look up the corresponding uploaded file and replace with (new_file_id, minio_url).
-        Also looks at the output directory for files that were created by the plugin.
         """
         import os
         output_dir = temp_dir / "output"
@@ -337,16 +345,8 @@ class ContainerRunnerOrchestrator:
                     matched = True
             if not matched:
                 result[key] = value
-        # Preserve file_id from original output_data if no upload match set it
         if "file_id" not in result and "file_id" in output_data:
             result["file_id"] = output_data["file_id"]
-
-        # Proxy file_id alongside minio:// URL fields so downstream nodes
-        # can download correctly (fixes: FileNotFoundError for txt_path/media_path/etc.)
-        if field_file_ids:
-            for key, new_file_id in field_file_ids.items():
-                if result.get(key, "").startswith("minio://"):
-                    result["file_id"] = new_file_id
 
         return result
 

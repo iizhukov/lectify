@@ -2,27 +2,20 @@
 Prompt Selector Plugin — picks a prompt from library and passes it forward
 
 Acts as a prompt provider node. Takes a prompt_id as a parameter,
-resolves it from the database, and outputs the rendered prompt text
-for downstream nodes that need a prompt (e.g. LLM request).
+resolves it from the database (via orchestrator's InputResolver), and
+outputs the rendered prompt text for downstream nodes.
+
+For Docker: InputResolver pre-fetches the prompt content to /input/ and
+writes metadata to .manifest.json before container starts.
+For local execution: reads directly via DB (same as before).
 """
 
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel
-
-from src.plugins.base import (
-    Plugin,
-    PluginContext,
-    PluginParameter,
-)
+from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
 
 
-class PromptSelectorInput(BaseModel):
-    """Input is empty — this node doesn't consume upstream output."""
-    pass
-
-
-class PromptSelectorOutput(BaseModel):
+class PromptSelectorOutput(PluginOutput):
     """Output: resolved prompt text + metadata."""
     prompt_id: str = ""
     prompt_name: str = ""
@@ -32,15 +25,6 @@ class PromptSelectorOutput(BaseModel):
 
 
 class PromptSelectorPlugin(Plugin):
-    """
-    Select a prompt from the library and forward it downstream.
-
-    Downstream nodes (e.g. llm_request) can reference the output fields:
-      - $prompt_provider.output.system_prompt
-      - $prompt_provider.output.user_prompt_template
-    via input_mapping.
-    """
-
     id = "prompt_selector"
     name = "Выбор промпта"
     description = "Выбирает промпт из библиотеки и передаёт его дальше по графу"
@@ -53,8 +37,10 @@ class PromptSelectorPlugin(Plugin):
         '</svg>'
     )
 
-    input_model = PromptSelectorInput
+    input_model = None
     output_model = PromptSelectorOutput
+
+    data_sources = {}
 
     parameters_schema = [
         PluginParameter(
@@ -63,17 +49,15 @@ class PromptSelectorPlugin(Plugin):
             description="ID промпта из библиотеки",
             required=True,
             default="",
-            options=[]  # Frontend fetches options from /api/prompts
+            options=[]
         ),
     ]
 
     async def execute(
         self,
-        input_data: PromptSelectorInput,
         context: PluginContext,
         parameters: Dict[str, Any],
     ) -> PromptSelectorOutput:
-        """Resolve prompt from database and pass forward."""
         prompt_id = parameters.get("prompt_id", "")
 
         context.report_progress(20, f"Загрузка промпта: {prompt_id}")
@@ -83,11 +67,17 @@ class PromptSelectorPlugin(Plugin):
         user_prompt_template = ""
 
         if prompt_id:
-            prompt = self._load_prompt_from_db(prompt_id)
-            if prompt:
-                prompt_name = prompt.get("name", "")
-                system_prompt = prompt.get("system_prompt", "")
-                user_prompt_template = prompt.get("user_prompt_template", "")
+            extra = context.manifest.extra("prompt")
+            prompt_name = extra.get("prompt_prompt_title", "")
+            system_prompt = extra.get("prompt_system_prompt", "")
+            user_prompt_template = extra.get("prompt_user_prompt_template", "")
+
+            if not prompt_name:
+                db_data = self._load_prompt_from_db(prompt_id)
+                if db_data:
+                    prompt_name = db_data.get("name", "")
+                    system_prompt = db_data.get("system_prompt", "")
+                    user_prompt_template = db_data.get("user_prompt_template", "")
 
         context.report_progress(100, f"Промпт «{prompt_name}» загружен")
 
@@ -100,7 +90,7 @@ class PromptSelectorPlugin(Plugin):
         )
 
     def _load_prompt_from_db(self, prompt_id: str) -> Optional[dict]:
-        """Load a prompt by ID from the database."""
+        """Load a prompt by ID from the database (local execution fallback)."""
         try:
             from src.db.database import SessionLocal
             from src.db.entity import DBPrompt
@@ -116,6 +106,9 @@ class PromptSelectorPlugin(Plugin):
                     }
             finally:
                 session.close()
-        except Exception as e:
+        except Exception:
             pass
         return None
+
+
+plugin = PromptSelectorPlugin

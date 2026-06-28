@@ -110,7 +110,7 @@ MODELS = {
 - `llm_api_duration_seconds{purpose}`
 - `llm_api_errors_total{purpose, error_type}`
 
-## 🚀 Установка
+## Установка
 
 ### Требования
 
@@ -147,7 +147,7 @@ python main.py
 **Grafana:** http://localhost:3000 (admin/admin)  
 **MinIO Console:** http://localhost:9001 (minioadmin/minioadmin)
 
-## 📊 Мониторинг
+## Мониторинг
 
 ### Метрики (Prometheus)
 

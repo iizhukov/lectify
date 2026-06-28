@@ -1,4 +1,5 @@
 import uuid
+
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from src.db.models import NodeTemplateModel
 from src.db.repository import NodeTemplateRepository
 from src.plugins.registry import get_plugin_registry
+
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 repo = NodeTemplateRepository()
@@ -32,24 +34,26 @@ class UpdateNodeRequest(BaseModel):
 @router.get("/plugins")
 async def list_plugins():
     registry = get_plugin_registry()
+
     return registry.get_plugins_metadata()
 
 
 @router.get("/plugins/{plugin_id}")
 async def get_plugin(plugin_id: str):
     registry = get_plugin_registry()
+    
     metadata = registry.get_plugin_metadata(plugin_id)
     if not metadata:
         raise HTTPException(status_code=404, detail="Plugin not found")
+    
     plugin_class = registry.get_plugin(plugin_id)
     if plugin_class:
         schema = plugin_class().get_schema()
         metadata = dict(metadata)
         metadata["schema"] = schema.model_dump()
+
     return metadata
 
-
-# ---- Node template CRUD ----
 
 @router.get("", response_model=List[NodeTemplateModel])
 async def list_nodes(user_id: Optional[str] = None):
@@ -63,8 +67,10 @@ async def list_nodes(user_id: Optional[str] = None):
 @router.post("", response_model=NodeTemplateModel)
 async def create_node(request: CreateNodeRequest, user_id: Optional[str] = None):
     registry = get_plugin_registry()
+    
     if not registry.get_plugin(request.plugin_id):
         raise HTTPException(status_code=400, detail=f"Plugin not found: {request.plugin_id}")
+    
     return repo.create({
         "id": str(uuid.uuid4()),
         "user_id": user_id,
@@ -80,8 +86,10 @@ async def create_node(request: CreateNodeRequest, user_id: Optional[str] = None)
 @router.get("/{node_id}", response_model=NodeTemplateModel)
 async def get_node(node_id: str):
     node = repo.get(node_id)
+
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
+
     return node
 
 
@@ -89,17 +97,22 @@ async def get_node(node_id: str):
 async def update_node(node_id: str, request: UpdateNodeRequest):
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     node = repo.update(node_id, **update_data)
+
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
+
     return node
 
 
 @router.delete("/{node_id}")
 async def delete_node(node_id: str):
     node = repo.get(node_id)
+    
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
+
     if node.user_id is None:
         raise HTTPException(status_code=400, detail="Cannot delete global node templates")
+
     repo.delete(node_id)
     return {"ok": True}

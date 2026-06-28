@@ -24,6 +24,17 @@ PROMPTS = [
         "variables": ["transcript"],
     },
     {
+        "id": "text_to_latex_system",
+        "name": "Создание Latex конспекта",
+        "system_prompt": (
+            "Ты — опытный методист и эксперт по конспектированию. "
+            "Преобразуй транскрипт лекции в структурированный Latex-конспект: "
+            "заголовки, списки, выделение ключевых понятий."
+        ),
+        "user_prompt_template": "{{transcript}}",
+        "variables": ["transcript"],
+    },
+    {
         "id": "latex_classifier_system",
         "name": "Классификатор предмета LaTeX",
         "system_prompt": (
@@ -60,10 +71,13 @@ PROMPTS = [
 
 def seed_prompts(session: Session):
     count = 0
+
     for data in PROMPTS:
         existing = session.query(DBPrompt).filter(DBPrompt.id == data["id"]).first()
+
         if existing:
             continue
+
         session.add(DBPrompt(
             id=data["id"],
             user_id=None,
@@ -72,7 +86,9 @@ def seed_prompts(session: Session):
             user_prompt_template=data["user_prompt_template"],
             variables=data["variables"],
         ))
+
         count += 1
+
     session.commit()
     print(f"Seeded {count} prompt(s) (skipped {len(PROMPTS) - count} existing)")
 
@@ -83,7 +99,6 @@ def run():
 
 
 if __name__ == "__main__":
-    # Allow running from project root: python -m src.db.seed
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     run()
     print("Done.")

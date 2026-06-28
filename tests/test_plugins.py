@@ -46,10 +46,14 @@ class TestPluginBase:
     def test_plugin_context_initialization(self):
         """PluginContext should initialize correctly"""
         from src.plugins.base import PluginContext
+        from src.plugins.datasource import DataSourceManifest
+
+        manifest = DataSourceManifest(sources={})
 
         context = PluginContext(
             execution_id="exec-123",
-            node_id="node-456"
+            node_id="node-456",
+            manifest=manifest,
         )
 
         assert context.execution_id == "exec-123"
@@ -60,13 +64,14 @@ class TestPluginBase:
     def test_plugin_context_progress_callback(self):
         """PluginContext should call progress callback"""
         from src.plugins.base import PluginContext
+        from src.plugins.datasource import DataSourceManifest
 
         callback_calls = []
 
         def progress_callback(percent, message):
             callback_calls.append((percent, message))
 
-        context = PluginContext(execution_id="exec-1", node_id="node-1")
+        context = PluginContext(execution_id="exec-1", node_id="node-1", manifest=DataSourceManifest(sources={}))
         context.set_progress_callback(progress_callback)
         context.report_progress(50, "Halfway done")
 
@@ -76,8 +81,9 @@ class TestPluginBase:
     def test_plugin_context_logging(self):
         """PluginContext should log messages"""
         from src.plugins.base import PluginContext
+        from src.plugins.datasource import DataSourceManifest
 
-        context = PluginContext(execution_id="exec-1", node_id="node-1")
+        context = PluginContext(execution_id="exec-1", node_id="node-1", manifest=DataSourceManifest(sources={}))
         context.log("info", "Test message")
 
         logs = context.get_logs()
@@ -88,8 +94,9 @@ class TestPluginBase:
     def test_plugin_context_logging_with_extra_kwargs(self):
         """PluginContext should log with extra kwargs"""
         from src.plugins.base import PluginContext
+        from src.plugins.datasource import DataSourceManifest
 
-        context = PluginContext(execution_id="exec-1", node_id="node-1")
+        context = PluginContext(execution_id="exec-1", node_id="node-1", manifest=DataSourceManifest(sources={}))
         context.log("error", "Something failed", file_id="file-123", error_code=500)
 
         logs = context.get_logs()
@@ -125,7 +132,7 @@ class TestPluginRegistry:
             input_model = PluginInput
             output_model = PluginOutput
 
-            async def execute(self, input_data, context, parameters):
+            async def execute(self, context, parameters):
                 return PluginOutput()
 
         registry = PluginRegistry()
@@ -144,7 +151,6 @@ class TestPluginRegistry:
         registry = get_plugin_registry()
         plugin_class = registry.get_plugin("media_converter")
 
-        # media_converter should be registered
         assert plugin_class is not None
 
     def test_registry_get_plugins_by_category(self):
@@ -249,30 +255,6 @@ class TestLLMRequestPlugin:
         assert "max_tokens" in param_names
 
 
-class TestTransformPlugin:
-    """Tests for Transform Plugin"""
-
-    def test_plugin_initialization(self):
-        """TransformPlugin should initialize correctly"""
-        from src.plugins.plugins.transform_node.plugin import TransformPlugin
-
-        plugin = TransformPlugin()
-
-        assert plugin.id == "transform_node"
-        assert plugin.name == "Трансформация данных"
-        assert plugin.category == "transform"
-
-    def test_plugin_transform_types(self):
-        """TransformPlugin should support all transform types"""
-        from src.plugins.plugins.transform_node.plugin import TransformPlugin
-
-        plugin = TransformPlugin()
-        param = next(p for p in plugin.parameters_schema if p.name == "transform_type")
-
-        expected_types = ["passthrough", "string", "int", "float", "path_replace", "json_parse", "json_dump", "regex_extract"]
-        assert param.options == expected_types
-
-
 class TestPluginModels:
     """Tests for Plugin models"""
 
@@ -280,13 +262,9 @@ class TestPluginModels:
         """MediaConverterInput should accept required fields"""
         from src.plugins.plugins.media_converter.models import MediaConverterInput
 
-        inp = MediaConverterInput(
-            file_id="file-123",
-            file_path="/path/to/file.mp4"
-        )
+        inp = MediaConverterInput(file_id="file-123")
 
         assert inp.file_id == "file-123"
-        assert inp.file_path == "/path/to/file.mp4"
 
     def test_media_converter_output(self):
         """MediaConverterOutput should accept required fields"""
@@ -294,40 +272,10 @@ class TestPluginModels:
 
         out = MediaConverterOutput(
             file_id="file-123",
-            media_path="/path/to/file.m4a",
             format="m4a",
             duration_ms=60000
         )
 
         assert out.file_id == "file-123"
-        assert out.media_path == "/path/to/file.m4a"
         assert out.format == "m4a"
         assert out.duration_ms == 60000
-
-    def test_llm_request_input(self):
-        """LLMRequestInput should accept all fields"""
-        from src.plugins.plugins.llm_request.plugin import LLMRequestInput
-
-        inp = LLMRequestInput(
-            file_id="file-123",
-            prompt_id="prompt-456",
-            system_prompt="You are a helpful assistant.",
-            user_prompt_template="Summarize: {{text}}",
-            variables={"text": "Hello world"}
-        )
-
-        assert inp.file_id == "file-123"
-        assert inp.prompt_id == "prompt-456"
-        assert inp.system_prompt == "You are a helpful assistant."
-        assert inp.variables == {"text": "Hello world"}
-
-    def test_transform_input_output(self):
-        """TransformInput/Output should work correctly"""
-        from src.plugins.plugins.transform_node.plugin import TransformInput, TransformOutput
-
-        inp = TransformInput(file_id="file-123", data="some data")
-        out = TransformOutput(file_id="file-123", result="transformed data", transform_type="string")
-
-        assert inp.file_id == "file-123"
-        assert out.result == "transformed data"
-        assert out.transform_type == "string"

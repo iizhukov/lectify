@@ -1,11 +1,12 @@
 import os
 import uuid
 
-from typing import List
+from typing import List, Dict
 
 from fastapi import APIRouter, HTTPException, UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse, Response
 
+from src.utils.telegram import TelegramClient
 from src.db.models import FileModel, WorkflowStateModel, ArtifactModel
 from src.db.repository import DBRepository
 from src.utils.storage import MinIOStorage
@@ -42,7 +43,7 @@ async def upload_file(
         original_path=minio_path or "",
         language=language,
         size_bytes=size_bytes,
-        mime_type=file.content_type or "application/octet-stream",  # type: ignore[arg-type]
+        mime_type=file.content_type or "application/octet-stream",
         minio_path=minio_path,
     )
 
@@ -68,7 +69,6 @@ async def get_files():
 async def get_file_details(
     file_id: str
 ):
-
     file = repository.get_file_details(file_id)
 
     if not file:
@@ -82,9 +82,6 @@ async def get_file_details(
 
 @api_router.get("/download/files/{file_id}")
 async def download_file(file_id: str):
-    """
-    Скачивает файл из MinIO по file_id.
-    """
     file = repository.get_file_details(file_id)
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -119,7 +116,6 @@ async def get_workflows_history():
 async def get_workflow_details(
     workflow_id: str
 ):
-
     workflow = repository.get_workflow_details(
         workflow_id
     )
@@ -140,7 +136,6 @@ async def get_workflow_details(
 async def get_artifact(
     artifact_id: str
 ):
-
     artifact = repository.get_artifact(
         artifact_id
     )
@@ -160,7 +155,6 @@ async def get_artifact(
 async def download_artifact(
     artifact_id: str
 ):
-
     artifact = repository.get_artifact(
         artifact_id
     )
@@ -185,23 +179,15 @@ async def download_artifact(
 
 
 @api_router.post("/api/alerts/webhook")
-async def receive_alert(alert_data: dict):
-    """
-    Webhook для получения алертов от Alertmanager.
-    Отправляет уведомления в Telegram при настроенном боте.
-    """
+async def receive_alert(alert_data: Dict):
     from src.config import config
-    import httpx
 
-    logger = get_logger(__name__)
+    alerts: List[Dict] = alert_data.get("alerts", [])
 
-    alerts = alert_data.get("alerts", [])
-
-    # Логируем полученные алерты
     for alert in alerts:
         status = alert.get("status")
-        labels = alert.get("labels", {})
-        annotations = alert.get("annotations", {})
+        labels: Dict[str, str] = alert.get("labels", {})
+        annotations: Dict[str, str] = alert.get("annotations", {})
 
         logger.warning(
             "alert_received",
@@ -213,37 +199,14 @@ async def receive_alert(alert_data: dict):
             description=annotations.get("description")
         )
 
-    # Отправка в Telegram если настроено
     if config.telegram_enabled and config.telegram_bot_token and config.telegram_chat_id:
         try:
-            for alert in alerts:
-                labels = alert.get("labels", {})
-                annotations = alert.get("annotations", {})
-                status = alert.get("status", "firing")
-                severity = labels.get("severity", "warning")
+            client = TelegramClient(
+                bot_token=config.telegram_bot_token,
+                chat_id=config.telegram_chat_id,
+            )
 
-                emoji = "🚨" if severity == "critical" else "⚠️"
-                status_emoji = "🔴" if status == "firing" else "🟢"
-
-                message = f"""{emoji} *Alert: {labels.get('alertname', 'Unknown')}*
-{status_emoji} Status: {status.upper()}
-📋 Severity: {severity}
-📝 {annotations.get('summary', 'No description')}
-
-```
-{annotations.get('description', 'No details')}
-```"""
-
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"https://api.telegram.org/bot{config.telegram_bot_token}/sendMessage",
-                        json={
-                            "chat_id": config.telegram_chat_id,
-                            "text": message,
-                            "parse_mode": "Markdown"
-                        },
-                        timeout=10
-                    )
+            await client.send_alerts(alerts)
         except Exception as e:
             logger.error("telegram_notification_failed", error=str(e))
 

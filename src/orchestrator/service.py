@@ -5,7 +5,7 @@ OrchestratorService — главный сервис оркестратора.
 import asyncio
 import time
 from collections import defaultdict, deque
-from typing import TYPE_CHECKING, Any, Dict, List, Set, cast
+from typing import Any, Dict, List, Set, cast
 
 from src.db.entity import ExecutionStatus, NodeExecutionStatus
 from src.db.repository import (
@@ -19,9 +19,11 @@ from src.orchestrator.models import OrchestratorConfig
 from src.orchestrator.container_runner import ContainerRunnerOrchestrator
 from src.utils.logging import get_logger
 from src.utils.metrics import get_metrics
+from src.db.entity import DBFile
+from src.db.database import SessionLocal
+from src.utils.pushgateway_collector import replay_llm_metrics
+from src.config import config
 
-if TYPE_CHECKING:
-    from src.db.entity import DBExecution
 
 logger = get_logger(__name__)
 
@@ -53,7 +55,6 @@ class OrchestratorService:
         self._metrics = get_metrics()
 
     async def start(self):
-        """Главный цикл: запускается при старте приложения и работает до shutdown."""
         if not self.config.enabled:
             logger.info("orchestrator_disabled")
             return
@@ -65,7 +66,6 @@ class OrchestratorService:
             max_concurrent_nodes=self.config.max_concurrent_nodes,
         )
 
-        # Восстановление прерванных воркфлоу
         await self._resume_interrupted()
 
         while self._running:
@@ -78,15 +78,9 @@ class OrchestratorService:
         logger.info("orchestrator_stopped")
 
     async def stop(self):
-        """Остановить оркестратор."""
         self._running = False
 
-    # ------------------------------------------------------------------
-    # Polling
-    # ------------------------------------------------------------------
-
     async def _poll_and_launch(self):
-        """Опросить БД и запустить новые/прерванные воркфлоу."""
         pending = self.exec_repo.get_pending_executions()
         self._metrics.workflow_queue_size.set(len(pending))
 
@@ -95,39 +89,30 @@ class OrchestratorService:
 
         for execution in pending[: self.config.max_concurrent_workflows - len(self._active_executions)]:
             execution_id = str(execution.id)
-            # Guard against: this execution was picked up by _resume_interrupted()
-            # in the same event-loop iteration. Tasks are scheduled but haven't run yet
-            # (status not changed to RUNNING), so we must also filter by status.
             if execution_id in self._active_executions:
                 continue
-            # Re-read status to handle the race where _resume_interrupted() already
-            # changed this execution to RUNNING (its task is scheduled but not yet executing).
+            
             exec_record = self.exec_repo.get(execution_id)
             if exec_record and exec_record.status != ExecutionStatus.PENDING:
                 continue
-            # Mark RUNNING immediately — before the task is scheduled — so the next poll
-            # iteration (5 seconds later) won't pick up this execution again.
+
             self.exec_repo.update_status(execution_id, ExecutionStatus.RUNNING)
             asyncio.create_task(self._run_execution(execution_id))
             self._active_executions.add(execution_id)
             self._metrics.workflows_total.inc()
 
     async def _resume_interrupted(self):
-        """Восстановить воркфлоу со статусом RUNNING (были прерваны при рестарте)."""
         executions = self.exec_repo.get_running_executions()
         logger.info("resuming_interrupted_executions", count=len(executions))
+
         for execution in executions:
             execution_id = str(execution.id)
+
             if execution_id not in self._active_executions:
                 asyncio.create_task(self._run_execution(execution_id))
                 self._active_executions.add(execution_id)
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
-
     async def _run_execution(self, execution_id: str):
-        """Выполнить воркфлоу: топологическая сортировка → параллельное выполнение нод."""
         logger.info("execution_started", execution_id=execution_id)
         self._metrics.workflow_active_count.inc()
         start_time = time.monotonic()
@@ -155,15 +140,12 @@ class OrchestratorService:
                 cast(str, n["id"]): self._find_node(execution, cast(str, n["id"])) for n in graph_nodes
             }
 
-            # Подготовить __input для input_mapping
-            # Для новых workflow: input_files = {node_id: file_id}
-            # Для старых workflow: fallback к file_id
             node_outputs["__input"] = {}
             if hasattr(execution, "input_files") and execution.input_files:
-                # Новый формат: множественные входы
                 for node_id, file_id in execution.input_files.items():
                     node_outputs["__input"][f"{node_id}.file_id"] = file_id
                     file_metadata = self._get_file_metadata(file_id)
+
                     if file_metadata:
                         node_outputs["__input"][f"{node_id}.file_path"] = file_metadata["file_path"]
                         node_outputs["__input"][f"{node_id}.filename"] = file_metadata["filename"]
@@ -171,9 +153,9 @@ class OrchestratorService:
                         node_outputs["__input"][f"{node_id}.size"] = file_metadata["size"]
                         node_outputs["__input"][f"{node_id}.content_type"] = file_metadata["content_type"]
             elif execution.file_id:
-                # Старый формат: один файл на весь workflow
                 node_outputs["__input"]["file_id"] = str(execution.file_id)
                 file_metadata = self._get_file_metadata(str(execution.file_id))
+
                 if file_metadata:
                     node_outputs["__input"]["file_path"] = file_metadata["file_path"]
                     node_outputs["__input"]["filename"] = file_metadata["filename"]
@@ -184,16 +166,15 @@ class OrchestratorService:
             execution_file_id = str(execution.file_id) if execution.file_id else ""
             execution_file_path = self._get_file_path(execution_file_id) if execution_file_id else None
 
-            # Пропускаем уже завершённые ноды, восстанавливаем их outputs
             for node_def in sorted_nodes:
                 node_id = node_def["id"]
                 node_exec = execution_nodes.get(node_id)
+
                 if node_exec and node_exec.status == NodeExecutionStatus.COMPLETED:
                     logger.info("node_already_completed_skipping", node_id=node_id)
                     completed.add(node_id)
                     node_outputs[node_id] = node_exec.output_data or {}
 
-            # Параллельное выполнение нод с глобальным лимитом
             semaphore = asyncio.Semaphore(self.config.max_concurrent_nodes)
             tasks: Dict[str, asyncio.Task] = {}
             pending_ids = {n["id"] for n in sorted_nodes} - completed
@@ -205,7 +186,6 @@ class OrchestratorService:
                 node_id = node_def["id"]
                 await semaphore.acquire()
                 try:
-                    # Ждём готовности зависимостей
                     while not all(dep in completed for dep in deps[node_id]):
                         await asyncio.sleep(0.2)
                         try:
@@ -232,7 +212,7 @@ class OrchestratorService:
                             completed.add(node_id)
                             node_outputs[node_id] = node_output
                             del tasks[node_id]
-                            # Запускаем newly ready ноды
+
                             for nid in list(pending_ids - completed):
                                 if all(dep in completed for dep in deps[nid]) and nid not in tasks:
                                     node_def_ready = next(n for n in sorted_nodes if n["id"] == nid)
@@ -318,10 +298,6 @@ class OrchestratorService:
         input_data: Dict[str, Any],
         attempt: int = 0,
     ) -> Dict[str, Any] | None:
-        """
-        Выполнить одну ноду с retry-логикой.
-        Возвращает output_data при успехе, None при неудаче.
-        """
         node_id = node_def["id"]
         plugin_id = node_def["plugin_id"]
         parameters = node_def.get("parameters", {})
@@ -376,10 +352,7 @@ class OrchestratorService:
             elapsed_ms = (time.monotonic() - node_start) * 1000
             self._metrics.node_execution_duration.labels(node_id=node_id).observe(elapsed_ms / 1000)
 
-            # Collect LLM metrics from Pushgateway after node completion
             try:
-                from src.utils.pushgateway_collector import replay_llm_metrics
-                from src.config import config
                 pushgateway_url = getattr(config, 'pushgateway_url', 'localhost:9091')
                 replay_llm_metrics(plugin_id, execution_id, pushgateway_url)
             except Exception as metrics_err:
@@ -413,7 +386,8 @@ class OrchestratorService:
 
             if should_retry:
                 logger.info("node_will_retry", node_id=node_id, next_attempt=attempt + 2)
-                await asyncio.sleep(2 ** attempt)  # exponential backoff
+                await asyncio.sleep(2 ** attempt)
+
                 return await self._run_node(
                     execution_id=execution_id,
                     node_exec=node_exec,
@@ -432,42 +406,41 @@ class OrchestratorService:
             return None
 
     def _find_node(self, execution, node_id: str):
-        """Найти DBExecutionNode по node_id внутри execution."""
         for node in execution.nodes:
             if str(node.node_id) == node_id:
                 return node
         return None
 
     def _get_file_path(self, file_id: str) -> str | None:
-        """Получить путь к файлу по file_id для передачи в плагин."""
         try:
-            from src.db.entity import DBFile
-            from src.db.database import SessionLocal
             session = SessionLocal()
+
             try:
                 db_file = session.query(DBFile).filter(DBFile.id == file_id).first()
                 if db_file is None:
                     return None
+                
                 original_path = getattr(db_file, "original_path", None)
                 if original_path is None:
                     return None
+                
                 return str(original_path)
             finally:
                 session.close()
         except Exception as e:
             logger.warning("file_lookup_failed", file_id=file_id, error=str(e))
+
         return None
 
     def _get_file_metadata(self, file_id: str) -> dict | None:
-        """Получить все метаданные файла по file_id для передачи в input плагин."""
         try:
-            from src.db.entity import DBFile
-            from src.db.database import SessionLocal
             session = SessionLocal()
+
             try:
                 db_file = session.query(DBFile).filter(DBFile.id == file_id).first()
                 if db_file is None:
                     return None
+
                 return {
                     "file_id": file_id,
                     "file_path": f"minio://{db_file.minio_path}",
@@ -480,18 +453,14 @@ class OrchestratorService:
                 session.close()
         except Exception as e:
             logger.warning("file_metadata_lookup_failed", file_id=file_id, error=str(e))
+
         return None
 
-
-# ---------------------------------------------------------------------------
-# Pure helpers (topological sort, input mapping) — no I/O, no state
-# ---------------------------------------------------------------------------
 
 def _topological_sort(
     nodes: List[Dict],
     edges: List[Dict]
 ) -> List[Dict]:
-    """Топологическая сортировка нод (Kahn's algorithm)."""
     adj = defaultdict(list)
     in_degree = {n["id"]: 0 for n in nodes}
     for edge in edges:
@@ -505,6 +474,7 @@ def _topological_sort(
     while queue:
         node_id = queue.popleft()
         sorted_ids.append(node_id)
+
         for neighbor in adj[node_id]:
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
@@ -517,11 +487,12 @@ def _build_dependency_map(
     nodes: List[Dict],
     edges: List[Dict]
 ) -> Dict[str, List[str]]:
-    """Построить карту зависимостей: node_id → [dependency_node_ids]."""
     deps = {n["id"]: [] for n in nodes}
+
     for edge in edges:
         if edge["to_node_id"] in deps:
             deps[edge["to_node_id"]].append(edge["from_node_id"])
+
     return deps
 
 
@@ -532,39 +503,21 @@ def _map_inputs(
     file_id: str,
     file_path: str | None = None,
 ) -> Dict[str, Any]:
-    """Применить input_mapping: $node_id.output.field или $__input.field → value."""
     input_mapping = node_def.get("input_mapping", [])
     plugin_id = node_def.get("plugin_id", "")
 
-    # Input плагин — source node для динамических файлов.
-    # Не добавляем execution.file_id автоматически, file_id должен прийти через input_mapping.
     is_input_plugin = plugin_id == "input"
 
     if not input_mapping:
         result = {}
         if dependencies:
             result = node_outputs.get(dependencies[0], {}).copy()
-        if is_input_plugin:
-            node_id = node_def.get("id")
-
-            if node_id and "__input" in node_outputs:
-                for field in ["file_id", "filename", "minio_path", "file_path", "size", "content_type"]:
-                    key = f"{node_id}.{field}"
-
-                    if key in node_outputs["__input"]:
-                        result[field] = node_outputs["__input"][key]
-            
-            return result
-
         if not is_input_plugin:
             result["file_id"] = file_id
-
             if file_path:
                 result["file_path"] = file_path
-
         return result
 
-    # Always pass file_id from the workflow execution root file
     result = {}
     for rule in input_mapping:
         target = rule["target_field"]
@@ -588,17 +541,14 @@ def _map_inputs(
         else:
             result[target] = source
 
-    # Preserve file_id from upstream if it was set via input_mapping.
-    # Only fall back to execution-level file_id if the mapping didn't already set one.
     if "file_id" not in result:
-        # Check if any dependency already has file_id in its output
-        # (e.g. speech_to_text returns file_id for its txt artifact)
         for dep in dependencies:
             dep_output = node_outputs.get(dep, {})
+
             if dep_output.get("file_id"):
                 result["file_id"] = dep_output["file_id"]
                 break
-        # Last fallback: execution-level file_id (НЕ для input плагина)
+
         if "file_id" not in result and not is_input_plugin:
             result["file_id"] = file_id
     if file_path and not is_input_plugin:
@@ -626,7 +576,6 @@ def _map_inputs(
 
 
 def _apply_transform(value: Any, transform: str) -> Any:
-    """Применить transform к value."""
     if transform == "passthrough":
         return value
     elif transform == "string":
@@ -637,15 +586,16 @@ def _apply_transform(value: Any, transform: str) -> Any:
         return float(value) if value is not None else 0.0
     elif transform == "bool":
         return bool(value)
+
     return value
 
 
 def _is_non_retryable_error(error_msg: str) -> bool:
-    """Ошибки, которые не стоит перезапускать."""
     non_retryable = [
         "plugin not found",
         "image not found",
         "template not found",
         "input file not found",
     ]
+
     return any(phrase in error_msg.lower() for phrase in non_retryable)

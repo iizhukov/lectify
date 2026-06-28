@@ -1,5 +1,4 @@
 import asyncio
-import os
 import uvicorn
 import sys
 import pathlib
@@ -90,13 +89,10 @@ except Exception as e:
 
 try:
     from src.plugins.registry import scan_and_register_plugins
-    from src.workflows.migration import run_all_migrations
-
     scan_and_register_plugins()
     logger.info("plugins_scanned")
     print("OK: Plugins scanned", file=sys.stderr)
 
-    # Build plugin Docker images if configured
     if config.plugins_build_on_startup:
         print("Building plugin Docker images...", file=sys.stderr)
         try:
@@ -117,10 +113,6 @@ try:
             print(f"WARNING: Plugin build failed: {str(e)}", file=sys.stderr)
             import traceback
             traceback.print_exc()
-
-    run_all_migrations()
-    logger.info("migrations_completed")
-    print("OK: Migrations completed", file=sys.stderr)
 
 except Exception as e:
     logger.error("plugin_system_init_failed", error=str(e), exc_info=True)
