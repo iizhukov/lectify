@@ -6,6 +6,7 @@ from src.plugins.datasource import DataSource, DataSourceManifest
 from src.utils.storage import MinIOStorage, get_storage
 from src.db.database import SessionLocal
 from src.db.entity import DBPrompt
+from src.db.entity.file import DBFile
 
 if TYPE_CHECKING:
     from src.plugins.base import Plugin
@@ -25,6 +26,9 @@ class InputResolver:
         {target_field: "prompt_id", source: "$prompt_selector.output.prompt_id"}
 
     Then input_data["prompt_id"] = "prompt-uuid-string" before resolve() is called.
+
+    The DataSource.source field tells us which key in input_data holds the value:
+        data_source name "txt_file" → source="file_id" → read input_data["file_id"]
     """
 
     def __init__(self, storage: MinIOStorage | None = None):
@@ -37,22 +41,8 @@ class InputResolver:
         temp_dir: Path,
         parameters: dict[str, Any] | None = None,
     ) -> tuple[DataSourceManifest, dict[str, Any]]:
-        """
-        Resolve all data_sources for a plugin.
-
-        Args:
-            plugin: Plugin instance with data_sources attribute
-            input_data: Already-mapped input dict from _map_inputs().
-                        Keys match data_source names: {"prompt_id": "...", "audio_file": "..."}
-            temp_dir: Temp directory for /input/ files
-            parameters: Node parameters dict (for prompt_selector's own prompt_id)
-
-        Returns:
-            (DataSourceManifest, extra_input) — manifest to write to .manifest.json,
-            plus extra metadata (prompt metadata, minio URLs, etc.)
-        """
         data_sources = getattr(plugin, "data_sources", {})
-        if not data_sources:
+        if not isinstance(data_sources, dict) or not data_sources:
             return DataSourceManifest(), {}
 
         manifest_sources: dict[str, str] = {}
@@ -103,7 +93,7 @@ class InputResolver:
             elif source.type == "prompt":
                 return self._resolve_prompt(source, name, input_data, temp_dir, parameters)
             elif source.type == "text":
-                return self._resolve_text(source, name, temp_dir)
+                return self._resolve_text(source, name, input_data, temp_dir)
             else:
                 return {"path": None, "error": f"unknown type: {source.type}"}
         except Exception as e:
@@ -122,31 +112,70 @@ class InputResolver:
         input_data: dict[str, Any],
         temp_dir: Path,
     ) -> dict[str, Any]:
-        """
-        Resolve a file data source.
-
-        input_data[name] contains the pre-mapped value from the upstream node output,
-        after _map_inputs() has resolved the input_mapping. The value is typically
-        a minio:// URL or a local path.
-        """
-        value = input_data.get(name)
+        key = source.source or name
+        value = input_data.get(key)
         if not value or not isinstance(value, (str, Path)):
-            return {"path": None, "error": f"input_data has no value for '{name}'"}
+            return {"path": None, "error": f"input_data has no value for '{key}'"}
 
         value = str(value)
 
         if not value.startswith("minio://"):
-            return {"path": value, "extra": {f"{name}_minio_url": value}}
+            session = SessionLocal()
+            try:
+                db_file = session.query(DBFile).filter(DBFile.id == value).first()
+            finally:
+                session.close()
+
+            if db_file:
+                minio_path = str(db_file.minio_path)
+                db_filename = str(db_file.filename)
+                ext = Path(minio_path).suffix or (db_filename and Path(db_filename).suffix) or ""
+                filename = source.filename or f"{name}{ext}"
+                local_path = temp_dir / "input" / filename
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+
+                logger.info(
+                    "Downloading file for data source '%s' by file_id: %s -> %s",
+                    name,
+                    minio_path,
+                    local_path,
+                )
+
+                bytes_data = self.storage.get_file_bytes(minio_path)
+                if bytes_data is None:
+                    return {"path": None, "error": f"file not found in MinIO: {minio_path}"}
+
+                mime = str(db_file.mime_type) if db_file else ""
+                is_text = (
+                    ext.lower() in [".txt", ".md", ".tex", ".json", ".yaml", ".yml"]
+                    or mime.startswith("text/")
+                )
+                mode = "w" if is_text else "wb"
+                content = bytes_data.decode("utf-8") if is_text else bytes_data
+                with open(local_path, mode) as f:
+                    f.write(content)
+
+                container_path = f"/input/{filename}"
+                return {
+                    "path": container_path,
+                    "extra": {
+                        f"{key}_minio_url": f"minio://{minio_path}",
+                        f"{key}_filename": filename,
+                        f"{key}_mime_type": mime,
+                    },
+                }
+
+            return {"path": value, "extra": {f"{key}_minio_url": value}}
 
         object_name = value.replace("minio://", "")
         ext = Path(object_name).suffix
 
-        filename = source.filename or f"{name}{ext}"
+        filename = source.filename or f"{key}{ext}"
         local_path = temp_dir / "input" / filename
 
         logger.info(
             "Downloading file for data source '%s': %s -> %s",
-            name,
+            key,
             object_name,
             local_path,
         )
@@ -156,15 +185,19 @@ class InputResolver:
             return {"path": None, "error": f"file not found in MinIO: {object_name}"}
 
         mode = "w" if ext.lower() in [".txt", ".md", ".tex", ".json", ".yaml", ".yml"] else "wb"
+        if ext.lower() in [".txt", ".md", ".tex", ".json", ".yaml", ".yml"]:
+            content = bytes_data.decode("utf-8")
+        else:
+            content = bytes_data
         with open(local_path, mode) as f:
-            f.write(bytes_data)
+            f.write(content)
 
         container_path = f"/input/{filename}"
         return {
             "path": container_path,
             "extra": {
-                f"{name}_minio_url": value,
-                f"{name}_filename": filename,
+                f"{key}_minio_url": value,
+                f"{key}_filename": filename,
             },
         }
 
@@ -176,20 +209,13 @@ class InputResolver:
         temp_dir: Path,
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Resolve a prompt data source.
-
-        For prompt_selector: reads from parameters["prompt_id"] directly.
-        For downstream plugins (llm_request, text_to_md, etc.):
-        input_data[name] contains the prompt_id string, after input_mapping
-        routed $prompt_selector.output.prompt_id → input_data["prompt_id"].
-        """
+        key = source.source or name
         prompt_id: str | None = None
 
         if parameters and "prompt_id" in parameters:
             prompt_id = parameters.get("prompt_id")
-        elif name in input_data and input_data[name]:
-            prompt_id = input_data[name]
+        elif key in input_data and input_data[key]:
+            prompt_id = input_data[key]
         else:
             return {
                 "path": None,
@@ -235,15 +261,31 @@ class InputResolver:
         self,
         source: DataSource,
         name: str,
+        input_data: dict[str, Any],
         temp_dir: Path,
     ) -> dict[str, Any]:
-        if source.value is None:
-            return {"path": None, "error": "text source requires 'value' field"}
+        value = source.value
+        if value is None:
+            value = input_data.get(name)
+        if value is None:
+            return {"path": None, "error": f"text source '{name}' has no value (source.value is None and not in input_data)"}
+
+        extra = {}
+
+        if isinstance(value, str) and len(value) == 36 and value.count("-") == 4:
+            session = SessionLocal()
+            try:
+                db_file = session.query(DBFile).filter(DBFile.id == value).first()
+                if db_file and db_file.mime_type:
+                    extra[f"{name}_mime_type"] = str(db_file.mime_type)
+            finally:
+                session.close()
 
         filename = source.filename or f"{name}.txt"
         local_path = temp_dir / "input" / filename
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, "w", encoding="utf-8") as f:
-            f.write(source.value)
+            f.write(value)
 
         container_path = f"/input/{filename}"
-        return {"path": container_path}
+        return {"path": container_path, "extra": extra}

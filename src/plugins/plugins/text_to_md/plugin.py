@@ -1,17 +1,9 @@
-"""
-Text to Markdown Plugin — convert text to Markdown conspectus
-"""
-
 from typing import Any, Dict
 
-from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
+from src.llm.client import get_llm_client
+from src.plugins.base import Plugin, PluginContext, PluginParameter
 from src.plugins.datasource import DataSource, OutputSource
-
-
-class TextToMDOutput(PluginOutput):
-    file_id: str
-    md_path: str
-    char_count: int = 0
+from src.plugins.plugins.text_to_md.models import TextToMDInput, TextToMDOutput
 
 
 class TextToMDPlugin(Plugin):
@@ -23,24 +15,26 @@ class TextToMDPlugin(Plugin):
     color = "#800080"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>'
 
-    input_model = None
+    input_model = TextToMDInput
     output_model = TextToMDOutput
 
     data_sources = {
         "txt_file": DataSource(
             type="file",
+            source="file_id",
             filename="input.txt",
             required=True,
         ),
         "prompt": DataSource(
             type="prompt",
+            source="prompt_id",
             filename="prompt.txt",
             required=False,
         ),
     }
 
     output_artifacts = {
-        "output": OutputSource(type="file", filename="output.md"),
+        "output": OutputSource(type="file", filename="output.md", target_field="file_id"),
     }
 
     parameters_schema = [
@@ -86,7 +80,6 @@ class TextToMDPlugin(Plugin):
 
         context.report_progress(30, "Отправляем в LLM...")
 
-        from src.llm.client import get_llm_client
         client = get_llm_client()
 
         content = client.completion(
@@ -107,7 +100,6 @@ class TextToMDPlugin(Plugin):
 
         return TextToMDOutput(
             file_id="",
-            md_path=str(output_artifact.path),
             char_count=len(content),
         )
 

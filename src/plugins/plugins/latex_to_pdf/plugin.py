@@ -9,15 +9,10 @@ import shutil
 
 from typing import Any, Dict
 
-from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
+from src.plugins.base import Plugin, PluginContext, PluginParameter
 from src.plugins.datasource import DataSource, OutputSource
 from src.llm.client import get_llm_client
-
-
-class LatexToPDFOutput(PluginOutput):
-    file_id: str
-    pdf_path: str
-    attempts: int = 1
+from src.plugins.plugins.latex_to_pdf.models import LatexToPDFInput, LatexToPDFOutput
 
 
 class LatexToPDFPlugin(Plugin):
@@ -36,19 +31,20 @@ class LatexToPDFPlugin(Plugin):
         "texlive-lang-cyrillic"
     ]
 
-    input_model = None
+    input_model = LatexToPDFInput
     output_model = LatexToPDFOutput
 
     data_sources = {
         "latex_file": DataSource(
             type="file",
+            source="file_id",
             filename="document.tex",
             required=True,
         ),
     }
 
     output_artifacts = {
-        "output": OutputSource(type="file", filename="document.pdf"),
+        "output": OutputSource(type="file", filename="document.pdf", target_field="file_id"),
     }
 
     parameters_schema = [

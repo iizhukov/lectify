@@ -20,6 +20,7 @@ class NodeExecutionStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"
 
 
 class ExecutionNodeModel(BaseModelConfig):
@@ -48,6 +49,7 @@ class ExecutionNodeModel(BaseModelConfig):
 
     node_template: Optional[NodeTemplateModel] = None
     artifacts: Optional[list] = None
+    parameters: Optional[dict] = None
 
 
 class ExecutionModel(BaseModelConfig):

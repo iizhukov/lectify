@@ -208,6 +208,15 @@ async def receive_alert(alert_data: Dict):
 
             await client.send_alerts(alerts)
         except Exception as e:
-            logger.error("telegram_notification_failed", error=str(e))
+            import httpx
+            err_detail = str(e)
+            if isinstance(e, httpx.HTTPStatusError):
+                err_detail = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+            logger.error("telegram_notification_failed",
+                error=err_detail,
+                error_type=type(e).__name__,
+                bot_configured=bool(config.telegram_bot_token),
+                chat_configured=bool(config.telegram_chat_id),
+            )
 
     return {"status": "ok", "received": len(alerts)}

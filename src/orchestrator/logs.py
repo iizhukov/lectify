@@ -1,6 +1,3 @@
-"""
-Чтение и сохранение логов нод.
-"""
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -12,21 +9,18 @@ logger = get_logger(__name__)
 
 
 class NodeLogManager:
-    """Управляет логами ноды: чтение, сохранение, буферизация."""
-
     def __init__(self, storage: MinIOStorage | None = None):
         self.storage = storage or get_storage()
 
     def create_temp_log_file(self, execution_id: str, node_id: str) -> Path:
-        """Создаёт временный файл для накопления логов ноды."""
         log_dir = Path(tempfile.gettempdir()) / "lectify" / "logs" / execution_id / node_id
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "node.log"
         log_path.touch()
+
         return log_path
 
     def append_logs(self, log_path: Path, new_logs: str) -> None:
-        """Добавляет новые логи в конец файла."""
         if not new_logs:
             return
         try:
@@ -43,13 +37,6 @@ class NodeLogManager:
         log_type: str = "node",
         attempt: int = 1,
     ) -> Optional[str]:
-        """
-        Сохраняет логи ноды в MinIO.
-
-        Returns:
-            Путь к объекту в MinIO (logs/executions/{execution_id}/{attempt}/{log_type}/node.log)
-            или None при ошибке.
-        """
         if not log_path.exists() or log_path.stat().st_size == 0:
             logger.debug("no_logs_to_upload", execution_id=execution_id, node_id=node_id)
             return None
@@ -60,6 +47,7 @@ class NodeLogManager:
             attempt=attempt,
             log_type=log_type,
         )
+
         if object_name:
             logger.info(
                 "node_logs_saved_to_minio",
@@ -69,26 +57,14 @@ class NodeLogManager:
                 object_name=object_name,
                 size_bytes=log_path.stat().st_size
             )
+
         return object_name
 
     def get_logs(self, execution_id: str, node_id: str, log_type: str = "node", attempt: int = 1) -> Optional[str]:
-        """
-        Читает логи ноды из MinIO.
-
-        Args:
-            execution_id: ID исполнения
-            node_id: ID ноды
-            log_type: Тип ноды (default: "node")
-            attempt: Номер попытки (default: 1)
-
-        Returns:
-            Содержимое лога как строка, или None если не найдено.
-        """
         object_name = f"executions/{execution_id}/{attempt}/{log_type}/node.log"
         return self.storage.read_log(object_name)
 
     def cleanup_local(self, log_path: Path) -> None:
-        """Удаляет локальный лог-файл после сохранения в MinIO."""
         try:
             if log_path.exists():
                 log_path.unlink()

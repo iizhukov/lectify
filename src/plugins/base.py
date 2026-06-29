@@ -23,13 +23,14 @@ class PluginContext:
         execution_id: str,
         node_id: str,
         manifest: DataSourceManifest,
+        output_artifacts: Optional[dict] = None,
         minio_client: Any = None,
         db_session: Any = None,
     ):
         self.execution_id = execution_id
         self.node_id = node_id
         self.manifest = manifest
-        self.output = OutputManifest()
+        self.output = OutputManifest(output_artifacts=output_artifacts)
         self.minio_client = minio_client
         self.db_session = db_session
         self._progress_callback: Optional[Callable] = None

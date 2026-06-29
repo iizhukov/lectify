@@ -1,8 +1,4 @@
-from src.plugins.base import PluginInput, PluginOutput
-
-
-class InputPluginInput(PluginInput):
-    file_id: str
+from src.plugins.base import PluginOutput
 
 
 class InputPluginOutput(PluginOutput):

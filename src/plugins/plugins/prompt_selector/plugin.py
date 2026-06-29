@@ -1,27 +1,7 @@
-"""
-Prompt Selector Plugin — picks a prompt from library and passes it forward
-
-Acts as a prompt provider node. Takes a prompt_id as a parameter,
-resolves it from the database (via orchestrator's InputResolver), and
-outputs the rendered prompt text for downstream nodes.
-
-For Docker: InputResolver pre-fetches the prompt content to /input/ and
-writes metadata to .manifest.json before container starts.
-For local execution: reads directly via DB (same as before).
-"""
-
 from typing import Any, Dict, Optional
 
-from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
-
-
-class PromptSelectorOutput(PluginOutput):
-    """Output: resolved prompt text + metadata."""
-    prompt_id: str = ""
-    prompt_name: str = ""
-    system_prompt: str = ""
-    user_prompt_template: str = ""
-    resolved_variables: Dict[str, Any] = {}
+from src.plugins.base import Plugin, PluginContext, PluginParameter
+from src.plugins.plugins.prompt_selector.models import PromptSelectorOutput
 
 
 class PromptSelectorPlugin(Plugin):

@@ -3,6 +3,20 @@ from prometheus_client import Counter, Gauge, Histogram, Summary
 
 class LectifyMetrics:
     def __init__(self):
+        # HTTP-метрики
+        self.http_requests_total = Counter(
+            'lectify_http_requests_total',
+            'HTTP requests total',
+            ['method', 'path', 'status']
+        )
+
+        self.http_request_duration = Histogram(
+            'lectify_http_request_duration_seconds',
+            'HTTP request duration',
+            ['method', 'path'],
+            buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
+        )
+
         # Счётчики воркфлоу
         self.workflows_total = Counter(
             'lectify_workflows_total',
@@ -95,25 +109,17 @@ class LectifyMetrics:
             'Размер загруженных файлов в байтах'
         )
 
-        # Общие метрики ошибок
-        self.errors_total = Counter(
-            'lectify_errors_total',
-            'Общее количество ошибок',
-            ['component', 'error_type']
-        )
-
         # Метрики базы данных
         self.db_operations = Counter(
             'lectify_db_operations_total',
             'Количество операций с БД',
-            ['operation', 'table']
+            ['operation']
         )
 
         self.db_operation_duration = Histogram(
             'lectify_db_operation_duration_seconds',
             'Длительность операций с БД',
-            ['operation'],
-            buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0)
+            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5)
         )
 
 

@@ -1,16 +1,21 @@
 import json
 import mimetypes
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, cast
 
 from pydantic import BaseModel, Field
 
 
 class DataSource(BaseModel):
     type: Literal["file", "prompt", "config", "text"]
-    filename: Optional[str] = Field(default=None, description="Имя файла в /input/. Если не задано — name + ext.")
+    filename: Optional[str] = Field(default=None, description="Имя файла в /input/. Если не задано — выводится из source field + ext.")
     required: bool = Field(default=True, description="Если True и файл не найден — ошибка запуска.")
     value: Optional[str] = Field(default=None, description="Статическое значение (для type=text).")
+    source: Optional[str] = Field(
+        default=None,
+        description="Имя поля в input_model плагина, откуда брать значение (file_id, prompt_id, ...). "
+                    "Для type=file — UUID файла из БД. Для type=prompt — UUID промпта из БД.",
+    )
 
 
 class SourceFile:
@@ -135,12 +140,14 @@ class DataSourceManifest:
         return self._manifest
 
 
-# ─── Output side ──────────────────────────────────────────────────────────────
-
 class OutputSource(BaseModel):
     type: Literal["file", "text", "prompt", "config"]
-    filename: Optional[str] = Field(default=None, description="Имя файла в /output/. Если не задано — выводизодит из output_model field.")
+    filename: Optional[str] = Field(default=None, description="Имя файла в /output/. Если не задано — выводится из target_field.")
     content: Optional[str] = Field(default=None, description="Статический контент (для type=text).")
+    target_field: Optional[str] = Field(
+        default=None,
+        description="Имя поля в output_model плагина, в которое записать file_id после загрузки в MinIO.",
+    )
 
 
 class OutputManifest:
@@ -155,14 +162,23 @@ class OutputManifest:
 
         сontxt.output.declare_text("summary", "some text content")
     """
-    __slots__ = ("_artifacts", "_output_dir")
+    __slots__ = ("_artifacts", "_output_dir", "_output_artifacts")
 
-    def __init__(self, output_dir: Path | str = "/output"):
+    def __init__(self, output_dir: Path | str = "/output", output_artifacts: Optional[dict] = None):
         self._output_dir = Path(output_dir)
         self._artifacts: dict[str, _Artifact] = {}
+        self._output_artifacts: dict = output_artifacts or {}
 
     def declare(self, name: str, type: Literal["file", "text", "prompt", "config"] = "file") -> "_Artifact":
-        artifact = _Artifact(name=name, type=type, output_dir=self._output_dir)
+        src = self._output_artifacts.get(name)
+        filename: Optional[str] = None
+
+        if isinstance(src, OutputSource):
+            filename = src.filename
+        elif isinstance(src, dict):
+            filename = cast(dict, src).get("filename")
+
+        artifact = _Artifact(name=name, type=type, output_dir=self._output_dir, filename=filename)
         self._artifacts[name] = artifact
         return artifact
 
@@ -186,10 +202,10 @@ class OutputManifest:
 class _Artifact:
     __slots__ = ("name", "type", "_path", "_content", "metadata", "_closed")
 
-    def __init__(self, name: str, type: str, output_dir: Path):
+    def __init__(self, name: str, type: str, output_dir: Path, filename: Optional[str] = None):
         self.name = name
         self.type = type
-        self._path = output_dir / name
+        self._path = output_dir / (filename or name)
         self._content: Optional[bytes | str] = None
         self.metadata: dict = {}
         self._closed = False
@@ -206,10 +222,12 @@ class _Artifact:
     def finalize(self) -> None:
         if self._closed:
             return
+
         self._closed = True
+
         if self._content is None:
             return
-        mode = "w" if isinstance(self._content, str) else "wb"
+
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_bytes(self._content) if isinstance(self._content, bytes) \
             else self._path.write_text(str(self._content), encoding="utf-8")

@@ -6,10 +6,13 @@ import importlib
 import inspect
 import logging
 import sys
+import traceback
+
 from pathlib import Path
 from typing import Dict, List, Optional, Type
 
 from src.plugins.base import Plugin
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,18 @@ class PluginRegistry:
         self._plugins_metadata = {}
         self._initialized = True
 
+    def _get_model_fields(self, model_cls):
+        if model_cls is None:
+            return []
+        try:
+            if hasattr(model_cls, "model_fields"):
+                return set(model_cls.model_fields.keys())
+            elif hasattr(model_cls, "__fields__"):
+                return set(model_cls.__fields__.keys())
+        except Exception:
+            pass
+        return set()
+
     def register(self, plugin_class: Type[Plugin]):
         plugin_id = plugin_class.id
         if not plugin_id:
@@ -41,6 +56,20 @@ class PluginRegistry:
 
         if plugin_id in self._plugins:
             logger.debug(f"Plugin {plugin_id} already registered, overwriting")
+
+        input_fields = self._get_model_fields(getattr(plugin_class, "input_model", None))
+        data_sources = getattr(plugin_class, "data_sources", {})
+
+        if isinstance(data_sources, dict):
+            for ds_name, ds in data_sources.items():
+                if hasattr(ds, "source") and ds.source is not None:
+                    if input_fields and ds.source not in input_fields:
+                        raise ValueError(
+                            f"Plugin '{plugin_id}' data_source '{ds_name}' has source='{ds.source}', "
+                            f"but field '{ds.source}' does not exist in input_model "
+                            f"(fields: {sorted(input_fields)}). "
+                            f"Either remove source or add '{ds.source}' to input_model."
+                        )
 
         self._plugins[plugin_id] = plugin_class
 
@@ -52,7 +81,10 @@ class PluginRegistry:
         else:
             params_schema = []
 
-        inputs = [f for f in plugin_class.input_model.model_fields if f != "file_id"]
+        inputs = (
+            list(plugin_class.input_model.model_fields)
+            if plugin_class.input_model else []
+        )
         outputs = list(plugin_class.output_model.model_fields.keys())
 
         self._plugins_metadata[plugin_id] = {
@@ -63,8 +95,8 @@ class PluginRegistry:
             "category": getattr(plugin_class, "category", "general"),
             "color": getattr(plugin_class, "color", "#9ca3af"),
             "icon_svg": getattr(plugin_class, "icon_svg", ""),
-            "input_model": plugin_class.input_model.__name__,
-            "output_model": plugin_class.output_model.__name__,
+            "input_model": plugin_class.input_model.__name__ if plugin_class.input_model else None,
+            "output_model": plugin_class.output_model.__name__ if plugin_class.output_model else None,
             "parameters_schema": params_schema,
             "inputs": inputs,
             "outputs": outputs,
@@ -108,19 +140,15 @@ class PluginRegistry:
 
             except Exception as e:
                 logger.error(f"Failed to load plugin {plugin_path}: {e}")
-                import traceback
                 traceback.print_exc()
 
     def get_plugin(self, plugin_id: str) -> Optional[Type[Plugin]]:
-        """Get plugin class by ID"""
         return self._plugins.get(plugin_id)
 
     def get_all_plugins(self) -> Dict[str, Type[Plugin]]:
-        """Get all registered plugins"""
         return self._plugins.copy()
 
     def get_plugins_by_category(self, category: str) -> Dict[str, Type[Plugin]]:
-        """Get plugins filtered by category"""
         return {
             pid: pclass
             for pid, pclass in self._plugins.items()
@@ -128,11 +156,9 @@ class PluginRegistry:
         }
 
     def get_plugins_metadata(self) -> List[dict]:
-        """Get metadata for all plugins (for UI)"""
         return list(self._plugins_metadata.values())
 
     def get_plugin_metadata(self, plugin_id: str) -> Optional[dict]:
-        """Get metadata for a specific plugin"""
         return self._plugins_metadata.get(plugin_id)
 
 
@@ -140,10 +166,8 @@ registry = PluginRegistry()
 
 
 def get_plugin_registry() -> PluginRegistry:
-    """Get the global plugin registry"""
     return registry
 
 
 def scan_and_register_plugins(plugins_dir: str = None):
-    """Scan plugins folder and register all plugins"""
     registry.scan_plugins_folder(plugins_dir)

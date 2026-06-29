@@ -19,6 +19,7 @@ class NodeExecutionStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"
 
 
 # File status values (mirrors models/status.py FileStatus)

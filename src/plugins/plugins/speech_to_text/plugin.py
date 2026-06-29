@@ -1,25 +1,20 @@
-"""
-Speech to Text Plugin — transcribe audio to text
-"""
-
 import os
 import pathlib
 import tempfile
+
 from typing import Any, Dict
 
-from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
+import tempfile as tf
+from pydub import AudioSegment
+
+from src.llm.client import get_llm_client
+from src.plugins.base import Plugin, PluginContext, PluginParameter
 from src.plugins.datasource import DataSource, OutputSource
+from src.plugins.plugins.speech_to_text.models import SpeechToTextInput, SpeechToTextOutput
 
 
 MAX_CHUNK_SIZE_BYTES = 20 * 1024 * 1024
 _SIZE_SUB_CHUNK_MS = 5 * 60 * 1000
-
-
-class SpeechToTextOutput(PluginOutput):
-    file_id: str
-    txt_path: str
-    duration_ms: int = 0
-    language: str = "ru"
 
 
 class SpeechToTextPlugin(Plugin):
@@ -31,19 +26,22 @@ class SpeechToTextPlugin(Plugin):
     color = "#8b5cf6"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>'
 
-    input_model = None
+    system_packages = ["ffmpeg"]
+
+    input_model = SpeechToTextInput
     output_model = SpeechToTextOutput
 
     data_sources = {
         "audio_file": DataSource(
             type="file",
+            source="file_id",
             filename="audio.m4a",
             required=True,
         ),
     }
 
     output_artifacts = {
-        "output": OutputSource(type="file", filename="transcript.txt"),
+        "output": OutputSource(type="file", filename="transcript.txt", target_field="file_id"),
     }
 
     parameters_schema = [
@@ -76,8 +74,6 @@ class SpeechToTextPlugin(Plugin):
         context: PluginContext,
         parameters: Dict[str, Any],
     ) -> SpeechToTextOutput:
-        from pydub import AudioSegment
-
         source = context.manifest.get("audio_file")
         if source is None:
             raise ValueError("data_source 'audio_file' не найден.")
@@ -151,8 +147,6 @@ class SpeechToTextPlugin(Plugin):
         parameters: Dict,
         context: PluginContext,
     ) -> str:
-        from pydub import AudioSegment
-
         audio = AudioSegment.from_file(file_path)
         base_path = pathlib.Path(file_path)
         parts = []
@@ -162,6 +156,7 @@ class SpeechToTextPlugin(Plugin):
             chunk = audio[start_ms:start_ms + _SIZE_SUB_CHUNK_MS]
             chunk_path = pathlib.Path(tempfile.gettempdir()) / f"size_chunk_{base_path.stem}_{idx}.mp3"
             chunk.export(str(chunk_path), format="mp3", bitrate="64k")
+
             try:
                 if chunk_path.stat().st_size > MAX_CHUNK_SIZE_BYTES:
                     parts.append(
@@ -172,15 +167,12 @@ class SpeechToTextPlugin(Plugin):
             finally:
                 if chunk_path.exists():
                     chunk_path.unlink()
+
             idx += 1
 
         return " ".join(parts)
 
     def _transcribe_chunk(self, file_path: str, language: str, parameters: Dict, context: PluginContext) -> str:
-        import tempfile as tf
-        from pydub import AudioSegment
-        from src.llm.client import get_llm_client
-
         llm = get_llm_client()
         stt_model = llm.get_model_name("stt")
         openai_client = llm.get_client()

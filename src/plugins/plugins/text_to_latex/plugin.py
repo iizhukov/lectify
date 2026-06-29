@@ -1,16 +1,8 @@
-"""
-Text to LaTeX Plugin — convert text to LaTeX conspectus
-"""
-
 from typing import Any, Dict
 
-from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
+from src.plugins.base import Plugin, PluginContext, PluginParameter
 from src.plugins.datasource import DataSource, OutputSource
-
-
-class TextToLatexOutput(PluginOutput):
-    file_id: str
-    latex_path: str
+from src.plugins.plugins.text_to_latex.models import TextToLatexInput, TextToLatexOutput
 
 
 class TextToLatexPlugin(Plugin):
@@ -22,24 +14,26 @@ class TextToLatexPlugin(Plugin):
     color = "#f59e0b"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>'
 
-    input_model = None
+    input_model = TextToLatexInput
     output_model = TextToLatexOutput
 
     data_sources = {
         "txt_file": DataSource(
             type="file",
+            source="file_id",
             filename="input.txt",
             required=True,
         ),
         "prompt": DataSource(
             type="prompt",
+            source="prompt_id",
             filename="prompt.txt",
             required=False,
         ),
     }
 
     output_artifacts = {
-        "output": OutputSource(type="file", filename="output.tex"),
+        "output": OutputSource(type="file", filename="output.tex", target_field="file_id"),
     }
 
     parameters_schema = [
@@ -99,12 +93,16 @@ class TextToLatexPlugin(Plugin):
         )
 
         latex_content = latex_content.strip()
+
         if latex_content.startswith("```latex"):
             latex_content = latex_content[8:]
+
         if latex_content.startswith("```"):
             latex_content = latex_content[3:]
+
         if latex_content.endswith("```"):
             latex_content = latex_content[:-3]
+
         latex_content = latex_content.strip()
 
         context.report_progress(80, "Проверяем LaTeX...")

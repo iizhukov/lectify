@@ -1,12 +1,8 @@
-"""
-Конфигурация оркестратора.
-"""
 from dataclasses import dataclass
 
 
 @dataclass
 class OrchestratorConfig:
-    """Параметры оркестратора из config.cfg"""
     enabled: bool = True
     max_concurrent_workflows: int = 100
     max_concurrent_nodes: int = 5

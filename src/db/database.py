@@ -1,6 +1,7 @@
 import os
+import time
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from src.config import config
@@ -49,8 +50,48 @@ def get_engine():
             pool_size=config.database_pool_size,
             max_overflow=config.database_max_overflow
         )
+        _register_db_metrics(_engine)
 
     return _engine
+
+
+def _register_db_metrics(engine):
+    """Регистрирует SQLAlchemy events для метрик БД"""
+    from src.utils.metrics import get_metrics
+
+    m = get_metrics()
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        conn.info.setdefault("query_start_time", []).append(time.perf_counter())
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        start_time = conn.info["query_start_time"].pop()
+        duration = time.perf_counter() - start_time
+
+        op = _classify_operation(statement)
+        m.db_operations.labels(operation=op).inc()
+        m.db_operation_duration.observe(duration)
+
+
+def _classify_operation(statement: str) -> str:
+    stmt = statement.strip().upper()
+    if stmt.startswith("SELECT"):
+        return "select"
+    if stmt.startswith("INSERT"):
+        return "insert"
+    if stmt.startswith("UPDATE"):
+        return "update"
+    if stmt.startswith("DELETE"):
+        return "delete"
+    if stmt.startswith("CREATE"):
+        return "create"
+    if stmt.startswith("ALTER"):
+        return "alter"
+    if stmt.startswith("DROP"):
+        return "drop"
+    return "other"
 
 
 def get_session_local():

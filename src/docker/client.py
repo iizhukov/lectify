@@ -93,22 +93,21 @@ class DockerClient:
     def _get_registry_tag(self, plugin_id: str, registry: str) -> str:
         return f"{registry}/lectify-plugin-{plugin_id}"
 
-    def _pull_plugin_image(self, plugin_id: str, registry: str) -> bool:
+    def _pull_plugin_image(self, plugin_id: str, registry: str, fat: bool = False) -> bool:
         full_tag = self._get_registry_tag(plugin_id, registry)
-        try:
-            logger.info(f"Pulling plugin image from registry: {full_tag}")
-            
-            self._client.images.pull(registry, plugin_id)
-            local_tag = self._get_plugin_image_tag(plugin_id)
+        fat_tag = f"{full_tag}-fat"
+        for tag_to_try in ([fat_tag, full_tag] if fat else [full_tag]):
+            try:
+                logger.info(f"Pulling plugin image from registry: {tag_to_try}")
+                self._client.images.pull(registry, f"lectify-plugin-{plugin_id}", tag="latest")
+                local_tag = self._get_plugin_image_tag(plugin_id)
+                self._client.images.get(tag_to_try).tag(local_tag)
+                logger.info(f"Pulled and tagged as {local_tag}")
+                return True
+            except Exception as e:
+                logger.debug(f"Could not pull {tag_to_try}: {e}")
 
-            self._client.images.get(full_tag).tag(local_tag)
-            logger.info(f"Pulled and tagged as {local_tag}")
-
-            return True
-        except Exception as e:
-            logger.debug(f"Could not pull {full_tag}: {e}")
-
-            return False
+        return False
 
     def _push_plugin_image(self, plugin_id: str, registry: str) -> bool:
         local_tag = self._get_plugin_image_tag(plugin_id)
@@ -129,7 +128,7 @@ class DockerClient:
 
             return False
 
-    def _ensure_plugin_image(self, plugin_id: str, push: bool = False) -> bool:
+    def _ensure_plugin_image(self, plugin_id: str, push: bool = False, fat: bool = False) -> bool:
         image_name = self._get_plugin_image_tag(plugin_id)
 
         if self._image_exists_locally(image_name):
@@ -150,7 +149,8 @@ class DockerClient:
 
         plugin_dockerfile = (
             Path(__file__).parent.parent
-            / "plugins" / "docker" / "Dockerfile.plugin"
+            / "plugins" / "docker"
+            / ("Dockerfile.plugin-fat" if fat else "Dockerfile.plugin")
         )
         if not plugin_dockerfile.exists():
             logger.error(
@@ -302,18 +302,21 @@ class DockerClient:
         with open(output_path, "w") as f:
             f.write("\n".join(new_lines))
 
-    def build_plugin_image(self, plugin_id: str, push: bool = False) -> bool:
+    def build_plugin_image(self, plugin_id: str, push: bool = False, fat: bool = False) -> bool:
         image_name = self._get_plugin_image_tag(plugin_id)
+        if fat:
+            image_name = f"{image_name}-fat"
 
-        if self._image_exists_locally(image_name):
-            logger.info(f"Removing existing image before rebuild: {image_name}")
-
+        for tag in ([f"{image_name}-fat", image_name] if fat else [image_name]):
             try:
-                self._client.images.remove(image_name)
-            except Exception as e:
-                logger.warning(f"Failed to remove old image {image_name}: {e}")
+                self._client.images.get(tag)
+                logger.info(f"Removing existing image before rebuild: {tag}")
+                self._client.images.remove(tag)
+                break
+            except docker.errors.ImageNotFound:
+                pass
 
-        return self._ensure_plugin_image(plugin_id, push=push)
+        return self._ensure_plugin_image(plugin_id, push=push, fat=fat)
 
     def _image_exists_locally(self, image_name: str) -> bool:
         try:
@@ -333,15 +336,18 @@ class DockerClient:
         network: str = None,
         mem_limit: str = "512m",
         cpu_period: int = 100000,
-        cpu_quota: int = 50000
+        cpu_quota: int = 50000,
+        fat: bool = False,
     ) -> Optional[Container]:
         if not self._client:
             return None
 
         if image.startswith("lectify-plugin-"):
             plugin_id = image.replace("lectify-plugin-", "")
+            if fat:
+                image = f"lectify-plugin-{plugin_id}-fat"
 
-            if not self._ensure_plugin_image(plugin_id):
+            if not self._ensure_plugin_image(plugin_id, fat=fat):
                 logger.error(f"Plugin image unavailable: {image}")
                 return None
 

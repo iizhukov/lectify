@@ -5,15 +5,9 @@ LLM Request Plugin — makes requests to LLM API
 import time
 from typing import Any, Dict
 
-from src.plugins.base import Plugin, PluginContext, PluginParameter, PluginOutput
-
-
-class LLMRequestOutput(PluginOutput):
-    file_id: str
-    response: str
-    model: str = ""
-    tokens_used: int = 0
-    execution_time_ms: int = 0
+from src.plugins.base import Plugin, PluginContext, PluginParameter
+from src.plugins.plugins.llm_request.models import LLMRequestInput, LLMRequestOutput
+from src.llm.client import get_llm_client
 
 
 class LLMRequestPlugin(Plugin):
@@ -25,7 +19,7 @@ class LLMRequestPlugin(Plugin):
     color = "#06b6d4"
     icon_svg = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>'
 
-    input_model = None
+    input_model = LLMRequestInput
     output_model = LLMRequestOutput
 
     data_sources = {}
@@ -85,7 +79,6 @@ class LLMRequestPlugin(Plugin):
 
         context.report_progress(20, f"Отправка запроса к {model}...")
 
-        from src.llm.client import get_llm_client
         client = get_llm_client()
 
         context.report_progress(50, "Ожидание ответа...")

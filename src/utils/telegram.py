@@ -75,7 +75,7 @@ class TelegramClient:
             return
 
         async with httpx.AsyncClient() as client:
-            await client.post(
+            response = await client.post(
                 TELEGRAM_API_URL.format(token=self.bot_token),
                 json={
                     "chat_id": self.chat_id,
@@ -84,6 +84,12 @@ class TelegramClient:
                 },
                 timeout=self.timeout,
             )
+            if not response.is_success:
+                raise httpx.HTTPStatusError(
+                    f"Telegram API error: {response.status_code}",
+                    response=response,
+                    request=response.request,
+                )
 
     async def send_alerts(self, alerts: list[dict]) -> None:
         for alert in alerts:

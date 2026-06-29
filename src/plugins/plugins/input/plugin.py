@@ -11,6 +11,7 @@ from src.plugins.base import (
     PluginContext,
     PluginParameter,
 )
+from src.plugins.datasource import DataSource
 from src.plugins.plugins.input.models import InputPluginOutput
 
 
@@ -38,6 +39,14 @@ class InputPlugin(Plugin):
 
     input_model: Any = None
     output_model = InputPluginOutput
+
+    data_sources = {
+        "file_id": DataSource(
+            type="text",
+            filename="file_id.txt",
+            required=True,
+        ),
+    }
 
     parameters_schema = [
         PluginParameter(
@@ -67,12 +76,12 @@ class InputPlugin(Plugin):
         file_id = source.read_text().strip()
 
         if input_type != "any" and input_type in _INPUT_TYPE_MIME:
-            mime = source.mime_type
+            mime = context.manifest.extra("file_id").get("mime_type", "application/octet-stream")
             allowed = _INPUT_TYPE_MIME[input_type]
             if not any(mime.startswith(p) for p in allowed):
                 raise ValueError(
                     f"Несовместимый тип файла: ожидался '{input_type}' (MIME: {allowed}), "
-                    f"получен '{mime}' для файла '{source.name}'."
+                    f"получен '{mime}'."
                 )
 
         context.report_progress(100, f"Файл загружен: {file_id}")

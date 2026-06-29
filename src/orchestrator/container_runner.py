@@ -6,6 +6,7 @@ Container Runner для оркестратора.
 - Сохранение логов в MinIO
 - Обновление метрик ноды в БД
 """
+import os
 import json
 import tempfile
 import uuid
@@ -14,6 +15,8 @@ from typing import Any, Callable, Dict, Optional
 
 from src.docker.runner import PollingContainerRunner, ContainerMetrics, cleanup_temp_files
 from src.db.repository import ExecutionRepository, ExecutionNodeRepository
+from src.db.database import SessionLocal
+from src.db.entity import DBFile
 from src.utils.storage import MinIOStorage, get_storage
 from src.orchestrator.logs import NodeLogManager
 from src.orchestrator.input_resolver import InputResolver
@@ -21,11 +24,40 @@ from src.plugins.registry import PluginRegistry
 from src.utils.logging import get_logger
 from src.utils.metrics import get_metrics
 
+
 logger = get_logger(__name__)
 
 
+def _parse_prometheus_text(text: str) -> Dict[str, list[Dict]]:
+    metrics: Dict[str, list[Dict]] = {}
+    for line in text.split("\n"):
+        line = line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+        try:
+            if "{" in line:
+                metric_part, value_part = line.rsplit(" ", 1)
+                metric_name, labels_str = metric_part.split("{", 1)
+                labels_str = labels_str.rstrip("}")
+                labels = {}
+
+                for label_pair in labels_str.split(","):
+                    if "=" in label_pair:
+                        key, val = label_pair.split("=", 1)
+                        labels[key.strip()] = val.strip('"')
+
+                if metric_name not in metrics:
+                    metrics[metric_name] = []
+
+                metrics[metric_name].append({"labels": labels, "value": float(value_part)})
+        except Exception:
+            continue
+
+    return metrics
+
+
 def _parameters_for_artifact_type(ext: str) -> str:
-    """Map file extension to artifact_type for MinIO upload."""
     mapping = {
         "m4a": "audio", "mp3": "audio", "wav": "audio", "ogg": "audio",
         "mp4": "video", "mkv": "video", "avi": "video", "mov": "video",
@@ -36,10 +68,6 @@ def _parameters_for_artifact_type(ext: str) -> str:
 
 
 def _replace_paths_in_dict(data: Any, uploaded: Dict[str, str]) -> Any:
-    """
-    Recursively replace container paths in data with MinIO object names.
-    If a string value contains a filename key from `uploaded`, replace it.
-    """
     if isinstance(data, dict):
         return {k: _replace_paths_in_dict(v, uploaded) for k, v in data.items()}
     elif isinstance(data, list):
@@ -48,7 +76,9 @@ def _replace_paths_in_dict(data: Any, uploaded: Dict[str, str]) -> Any:
         for filename, minio_path in uploaded.items():
             if filename in data:
                 return minio_path
+
         return data
+
     return data
 
 
@@ -94,23 +124,22 @@ class ContainerRunnerOrchestrator:
         temp_dir = Path(tempfile.gettempdir()) / "lectify" / execution_id / node_id
         temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # Resolve DataSource declarations → write /input/ files + manifest
         plugin_cls = PluginRegistry().get_plugin(plugin_id)
         if plugin_cls:
             resolver = InputResolver(self.storage)
             manifest, extra_input = resolver.resolve(plugin_cls(), input_data, temp_dir, parameters)
+
             manifest_path = temp_dir / "input" / ".manifest.json"
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+            manifest_path.write_text(json.dumps(manifest._to_manifest_dict()), encoding="utf-8")
+
             input_data = {**input_data, **extra_input}
 
         output_file = temp_dir / "output" / "output.json"
 
-        # Логируем в файл, чтобы потом сохранить в MinIO
         effective_log_type = log_type or plugin_id
         log_path = self.log_manager.create_temp_log_file(execution_id, node_id)
 
-        # Собираем последние метрики из polling thread
         latest_metrics: Optional[ContainerMetrics] = None
 
         def metrics_callback(metrics: ContainerMetrics):
@@ -138,11 +167,17 @@ class ContainerRunnerOrchestrator:
                 log_path=str(log_path),
             )
 
-            # Upload output files based on plugin output_artifacts declarations to MinIO
+            self._forward_plugin_metrics(temp_dir, plugin_id, execution_id)
+
             output_artifacts = getattr(plugin_cls, "output_artifacts", {}) if plugin_cls else {}
+
+            if not isinstance(output_artifacts, dict):
+                output_artifacts = {}
+
             output_data = self._upload_output_files(
                 output_data, temp_dir, execution_id, node_id, output_artifacts
             )
+
             logger.info(
                 f"_upload_output_files_result "
                 f"execution_id={execution_id} node_id={node_id} "
@@ -151,22 +186,20 @@ class ContainerRunnerOrchestrator:
                 f"file_id={output_data.get('file_id') if output_data else None}"
             )
 
-            # Сохраняем output.json из результата контейнера, чтобы он не был удалён
-            # при очистке временных файлов в docker_runner
             if output_data and not output_file.exists():
-                import json
                 with open(output_file, "w", encoding="utf-8") as f:
                     json.dump(output_data, f)
 
-            # Копируем output.json в MinIO
             if output_file.exists():
                 artifact_type = parameters.get("output_type", "data")
+                
                 minio_path = self.storage.upload_artifact(
                     str(output_file),
                     workflow_id=execution_id,
                     node_id=node_id,
                     artifact_type=artifact_type,
                 )
+
                 logger.info(
                     "node_artifact_saved",
                     execution_id=execution_id,
@@ -177,14 +210,13 @@ class ContainerRunnerOrchestrator:
             return output_data
 
         finally:
-            # Сбрасываем gauges после завершения ноды
             self._metrics.node_cpu_percent.labels(node_id=node_id).set(0)
             self._metrics.node_memory_mb.labels(node_id=node_id).set(0)
-            # Сохраняем логи в MinIO
+
             minio_logs_path = self._upload_node_logs(log_path, execution_id, node_id, attempt=attempt, log_type=effective_log_type)
             if minio_logs_path:
                 self.node_repo.update(node_id=node_exec_id, logs_path=minio_logs_path)
-            # Удаляем временные файлы после загрузки в MinIO
+
             cleanup_temp_files(execution_id, node_id)
 
     def _create_db_file(
@@ -192,13 +224,7 @@ class ContainerRunnerOrchestrator:
         file_path: str,
         minio_path: str,
     ) -> str:
-        """
-        Create a DBFile record for an uploaded artifact.
-        Returns the new file_id.
-        """
-        import os
-        from src.db.database import SessionLocal
-        from src.db.entity import DBFile
+        
 
         new_file_id = str(uuid.uuid4())
         filename = Path(file_path).name
@@ -243,12 +269,8 @@ class ContainerRunnerOrchestrator:
         node_id: str,
         output_artifacts: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        """
-        Upload output files to MinIO based on plugin's output_artifacts declarations.
-        Creates DBFile records and updates output_data with minio:// URLs and file_ids.
-        """
         if output_data is None:
-            return output_data
+            return {}
 
         output_dir = temp_dir / "output"
         if not output_dir.exists():
@@ -262,11 +284,20 @@ class ContainerRunnerOrchestrator:
 
         output_artifacts = output_artifacts or {}
 
-        uploaded = {}  # filename -> (new_file_id, full_minio_url)
+        uploaded: dict[str, tuple[str, str]] = {}
+        target_fields: dict[str, str] = {}
+
         for name, source in output_artifacts.items():
-            filename = source.get("filename") if isinstance(source, dict) else getattr(source, "filename", None)
+            if isinstance(source, dict):
+                filename = source.get("filename")
+                target_field = source.get("target_field")
+            else:
+                filename = getattr(source, "filename", None)
+                target_field = getattr(source, "target_field", None)
+
             if not filename:
                 continue
+
             file_path = output_dir / filename
             if not file_path.exists():
                 logger.warning(
@@ -276,7 +307,9 @@ class ContainerRunnerOrchestrator:
                     artifact_name=name,
                     filename=filename,
                 )
+
                 continue
+
             ext = file_path.suffix.lstrip(".")
             artifact_type = _parameters_for_artifact_type(ext)
             minio_path = self.storage.upload_artifact(
@@ -285,13 +318,19 @@ class ContainerRunnerOrchestrator:
                 node_id=node_id,
                 artifact_type=artifact_type,
             )
+
             if minio_path:
                 new_file_id = self._create_db_file(
                     file_path=str(file_path),
                     minio_path=minio_path,
                 )
+
                 full_minio_url = f"minio://{self.storage.artifacts_bucket}/{minio_path}"
                 uploaded[filename] = (new_file_id, full_minio_url)
+
+                if target_field:
+                    target_fields[name] = target_field
+
                 logger.info(
                     "node_output_file_uploaded",
                     execution_id=execution_id,
@@ -304,10 +343,27 @@ class ContainerRunnerOrchestrator:
         if not uploaded:
             return output_data
 
-        # Update output_data fields that point to container output paths
         result = self._update_output_data_fields(
             output_data, uploaded, temp_dir
         )
+
+        for artifact_name, field_name in target_fields.items():
+            if not result.get(field_name):
+                for filename, (new_file_id, _) in uploaded.items():
+                    src = output_artifacts.get(artifact_name)
+                    artifact_filename = src.get("filename") if isinstance(src, dict) else getattr(src, "filename", None) if src else None
+
+                    if artifact_filename == filename:
+                        result[field_name] = new_file_id
+                        logger.info(
+                            "output_field_injected",
+                            execution_id=execution_id,
+                            node_id=node_id,
+                            field=field_name,
+                            file_id=new_file_id,
+                            filename=filename,
+                        )
+                        break
 
         with open(temp_dir / "output" / "output.json", "w", encoding="utf-8") as of:
             json.dump(result, of)
@@ -320,35 +376,76 @@ class ContainerRunnerOrchestrator:
         uploaded: Dict[str, tuple[str, str]],
         temp_dir: Path,
     ) -> Dict[str, Any]:
-        """
-        Update output_data fields that reference container output files.
-
-        For each key in output_data that contains a container path (e.g. "/output/foo.m4a"),
-        look up the corresponding uploaded file and replace with (new_file_id, minio_url).
-        """
-        import os
         output_dir = temp_dir / "output"
         result = {}
         for key, value in output_data.items():
             if value is None:
                 result[key] = value
                 continue
+
             value_str = str(value)
             matched = False
             if value_str.startswith(str(output_dir)) or value_str.startswith("/output/"):
                 filename = os.path.basename(value_str)
+
                 if filename in uploaded:
                     new_file_id, minio_url = uploaded[filename]
                     result[key] = minio_url
-                    if key == "file_id" or "file_id" not in result:
+
+                    if "file_id" not in result:
                         result["file_id"] = new_file_id
+
                     matched = True
+
             if not matched:
                 result[key] = value
-        if "file_id" not in result and "file_id" in output_data:
-            result["file_id"] = output_data["file_id"]
+
+        if "file_id" not in result:
+            result["file_id"] = output_data.get("file_id", "")
 
         return result
+
+    def _forward_plugin_metrics(
+        self,
+        temp_dir: Path,
+        plugin_id: str,
+        execution_id: str,
+    ):
+        metrics_file = temp_dir / "output" / "metrics.json"
+        if not metrics_file.exists():
+            return
+
+        try:
+            text = metrics_file.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning("failed_to_read_plugin_metrics_file", error=str(e))
+            return
+
+        parsed = _parse_prometheus_text(text)
+        if not parsed:
+            return
+
+        m = get_metrics()
+        for entry in parsed.get("lectify_llm_api_requests_total", []):
+            purpose = entry["labels"].get("purpose", "unknown")
+            status = entry["labels"].get("status", "unknown")
+            m.llm_api_requests.labels(purpose=purpose, status=status).inc(int(entry["value"]))
+
+        for entry in parsed.get("lectify_llm_api_duration_seconds", []):
+            purpose = entry["labels"].get("purpose", "unknown")
+            m.llm_api_duration.labels(purpose=purpose).observe(entry["value"])
+
+        for entry in parsed.get("lectify_llm_api_errors_total", []):
+            purpose = entry["labels"].get("purpose", "unknown")
+            error_type = entry["labels"].get("error_type", "unknown")
+            m.llm_api_errors.labels(purpose=purpose, error_type=error_type).inc(int(entry["value"]))
+
+        logger.info(
+            "plugin_metrics_forwarded",
+            plugin_id=plugin_id,
+            execution_id=execution_id,
+            metric_names=list(parsed.keys()),
+        )
 
     def _upload_node_logs(
         self,
@@ -358,10 +455,11 @@ class ContainerRunnerOrchestrator:
         attempt: int = 1,
         log_type: str = "node",
     ) -> Optional[str]:
-        """Сохраняет логи ноды в MinIO и удаляет локальную копию."""
         object_name = self.log_manager.save_logs_to_minio(
             log_path, execution_id, node_id, log_type=log_type, attempt=attempt
         )
+
         if object_name:
             self.log_manager.cleanup_local(log_path)
+        
         return object_name

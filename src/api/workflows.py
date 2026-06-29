@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from fastapi import APIRouter, HTTPException, Header, Query
 from pydantic import BaseModel, Field
@@ -226,7 +226,87 @@ async def get_execution_node(execution_id: str, node_id: str):
             "minio_path": obj_name,
         })
 
-    result = node.model_copy(update={"artifacts": node_artifacts})
+    resolved_parameters: Optional[dict] = None
+    filtered_input_data: dict[str, Any] = {}
+    filtered_output_data: dict[str, Any] = {}
+
+    if execution and execution.workflow_template:
+        graph_nodes = execution.workflow_template.graph.nodes
+        node_def = next((n for n in graph_nodes if n.id == node.node_id), None)
+        if node_def and node_def.parameters:
+            resolved_parameters = node_def.parameters
+
+            if node.plugin_id:
+                try:
+                    from src.plugins.base import PluginParameter
+                    from src.plugins.registry import get_plugin_registry
+                    registry = get_plugin_registry()
+                    plugin_cls = registry.get_plugin(node.plugin_id)
+                    if plugin_cls:
+                        plugin = plugin_cls()
+                        schema_params = getattr(plugin, "parameters_schema", [])
+                        if isinstance(schema_params, list):
+                            resolved_parameters = _resolve_parameters_from_schema(
+                                node_def.parameters, schema_params
+                            )
+
+                        def _get_model_fields(model_cls):
+                            if model_cls is None:
+                                return []
+                            try:
+                                if hasattr(model_cls, "model_fields"):
+                                    return list(model_cls.model_fields.keys())
+                                elif hasattr(model_cls, "__fields__"):
+                                    return list(model_cls.__fields__.keys())
+                            except Exception:
+                                pass
+                            return []
+
+                        input_fields = _get_model_fields(getattr(plugin, "input_model", None))
+                        output_fields = _get_model_fields(getattr(plugin, "output_model", None))
+
+                        raw_input_data = getattr(node, "input_data", None) or {}
+                        filtered_input_data = {k: v for k, v in raw_input_data.items() if k in input_fields} if input_fields else raw_input_data
+
+                        raw_output_data = getattr(node, "output_data", None) or {}
+                        filtered_output_data = {k: v for k, v in raw_output_data.items() if k in output_fields} if output_fields else raw_output_data
+                except Exception:
+                    pass
+
+    result = node.model_copy(update={
+        "artifacts": node_artifacts,
+        "parameters": resolved_parameters,
+        "input_data": filtered_input_data,
+        "output_data": filtered_output_data if filtered_output_data else None,
+    })
+    return result
+
+
+def _resolve_parameters_from_schema(
+    parameter_values: dict[str, Any],
+    parameters_schema: list,
+) -> dict[str, Any]:
+    """
+    Merge parameter values with their schema definitions.
+
+    parameter_values: {"temperature": 0.7, "max_tokens": 1000}
+    parameters_schema: [Parameter(...), ...] from plugin.parameters_schema
+    Returns: {"temperature": {"value": 0.7, "label": "...", "type": "..."}, ...}
+    """
+    from src.plugins.base import PluginParameter
+    result: dict[str, Any] = {}
+    for param in parameters_schema:
+        if not isinstance(param, PluginParameter):
+            continue
+        value = parameter_values.get(param.name)
+        result[param.name] = {
+            "value": value,
+            "type": param.type,
+            "description": param.description,
+            "required": param.required,
+            "default": param.default,
+            "options": param.options,
+        }
     return result
 
 

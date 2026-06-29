@@ -1,8 +1,9 @@
-import os
-from typing import Optional
-from openai import OpenAI
+import time as time_module
 
-from src.utils.metrics import metrics
+from openai import OpenAI
+from openai import APIError as OpenAI_APIError, RateLimitError, APITimeoutError
+
+from src.utils.metrics import get_metrics
 
 
 MODELS = {
@@ -18,13 +19,9 @@ class LLMManager:
         self,
         api_key: str,
         base_url: str,
-        plugin_id: Optional[str] = None,
-        execution_id: Optional[str] = None
     ):
         self.api_key = api_key
         self.base_url = base_url
-        self.plugin_id = plugin_id
-        self.execution_id = execution_id
 
         self.client = OpenAI(
             api_key=self.api_key,
@@ -33,16 +30,6 @@ class LLMManager:
 
         self.models = MODELS
 
-        self._in_container = os.getenv("PLUGIN_INPUT") is not None
-        self._pushgateway_metrics = None
-
-        if self._in_container and plugin_id and execution_id:
-            try:
-                from src.utils.pushgateway import get_pushgateway_metrics
-                self._pushgateway_metrics = get_pushgateway_metrics(plugin_id, execution_id)
-            except ImportError:
-                pass  # Pushgateway not available
-
     def get_client(self) -> OpenAI:
         return self.client
 
@@ -50,31 +37,34 @@ class LLMManager:
         return self.models.get(purpose, self.models["medium"])
 
     def completion(self, purpose: str, messages: list, **kwargs) -> str:
-        import time
-
-        model = self.get_model_name(purpose)
-        start = time.time()
+        metrics = get_metrics()
+        start = time_module.time()
+        status = "success"
 
         try:
+            model = self.get_model_name(purpose)
             response = self.client.chat.completions.create(
                 model=model,
                 messages=messages,
                 **kwargs
             )
-            duration = time.time() - start
-
-            if self._pushgateway_metrics:
-                self._pushgateway_metrics.llm_request(purpose, duration, status="success")
-                self._pushgateway_metrics.push()
-
             return response.choices[0].message.content
-        except Exception as e:
-            duration = time.time() - start
-
-            if self._pushgateway_metrics:
-                self._pushgateway_metrics.llm_request(
-                    purpose, duration, status="error", error_type="request_failed"
-                )
-                self._pushgateway_metrics.push()
-
+        except RateLimitError:
+            status = "rate_limited"
             raise
+        except APITimeoutError:
+            status = "timeout"
+            raise
+        except OpenAI_APIError as e:
+            status = f"api_error_{getattr(e, 'status_code', None) or 'unknown'}"
+            raise
+        except Exception:
+            status = "unknown_error"
+            raise
+        finally:
+            duration = time_module.time() - start
+            metrics.llm_api_requests.labels(purpose=purpose, status=status).inc()
+            metrics.llm_api_duration.labels(purpose=purpose).observe(duration)
+
+            if status != "success":
+                metrics.llm_api_errors.labels(purpose=purpose, error_type=status).inc()

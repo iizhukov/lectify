@@ -87,12 +87,14 @@ class ContainerRunner:
                 progress_callback(10, "Запуск контейнера...")
 
             image_name = f"lectify-plugin-{plugin_id}"
+            fat = config.plugins_fat_images
             container_id = self._start_container(
                 image_name,
                 execution_id,
                 node_id,
                 input_key,
-                plugin_id
+                plugin_id,
+                fat=fat,
             )
 
             if not container_id:
@@ -219,7 +221,8 @@ class ContainerRunner:
         execution_id: str,
         node_id: str,
         input_path: str,
-        plugin_id: str = ""
+        plugin_id: str = "",
+        fat: bool = False,
     ) -> Optional[str]:
         temp_dir = Path(tempfile.gettempdir()) / "lectify"
         node_dir = temp_dir / execution_id / node_id
@@ -234,7 +237,6 @@ class ContainerRunner:
             "PLUGIN_OUTPUT": "/output/output.json",
             "PLUGIN_ID": plugin_id,
             "EXECUTION_ID": execution_id,
-            "PUSHGATEWAY_URL": "pushgateway:9091",
             "MINIO_ENDPOINT": "minio:9000",
             "DATABASE_URL": "postgresql://lectify:lectify_password@postgres:5432/lectify",
             "OPENAI_API_KEY": config.openai_api_key,
@@ -253,7 +255,8 @@ class ContainerRunner:
             environment=environment,
             network="lectify_lectify",
             mem_limit="1g",
-            cpu_quota=50000  # 50% CPU
+            cpu_quota=50000,  # 50% CPU
+            fat=fat,
         )
 
         return container.id if container else None
@@ -323,8 +326,9 @@ class PollingContainerRunner(ContainerRunner):
                 progress_callback(10, "Запуск...")
 
             image_name = f"lectify-plugin-{plugin_id}"
+            fat = config.plugins_fat_images
             container_id = self._start_container(
-                image_name, execution_id, node_id, input_path
+                image_name, execution_id, node_id, input_path, fat=fat,
             )
 
             if not container_id:

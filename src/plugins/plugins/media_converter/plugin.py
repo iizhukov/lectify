@@ -36,12 +36,13 @@ class MediaConverterPlugin(Plugin):
     data_sources = {
         "file": DataSource(
             type="file",
+            source="file_id",
             required=True,
         ),
     }
 
     output_artifacts = {
-        "output": OutputSource(type="file", filename="output.m4a"),
+        "output": OutputSource(type="file", filename="output.m4a", target_field="file_id"),
     }
 
     parameters_schema = [

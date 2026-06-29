@@ -284,6 +284,11 @@ class Config:
         """Registry password/token. Uses GITHUB_TOKEN env var if empty (CI)."""
         return self._config.get("Plugins", "REGISTRY_PASSWORD", fallback="")
 
+    @property
+    def plugins_fat_images(self) -> bool:
+        """Use fat Docker images (larger, but faster builds thanks to layer caching)."""
+        return self._config.getboolean("Plugins", "FAT_IMAGES", fallback=False)
+
     # ========================================================================
     # Orchestrator Configuration
     # ========================================================================

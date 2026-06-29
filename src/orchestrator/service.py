@@ -1,7 +1,3 @@
-"""
-OrchestratorService — главный сервис оркестратора.
-Запускается как отдельный asyncio процесс, опрашивает БД и выполняет воркфлоу.
-"""
 import asyncio
 import time
 from collections import defaultdict, deque
@@ -21,8 +17,6 @@ from src.utils.logging import get_logger
 from src.utils.metrics import get_metrics
 from src.db.entity import DBFile
 from src.db.database import SessionLocal
-from src.utils.pushgateway_collector import replay_llm_metrics
-from src.config import config
 
 
 logger = get_logger(__name__)
@@ -199,7 +193,7 @@ class OrchestratorService:
                     if not node_exec:
                         return
 
-                    input_data = _map_inputs(node_def, deps[node_id], node_outputs, execution_file_id, execution_file_path)
+                    input_data = _map_inputs(node_def, deps[node_id], node_outputs, execution_file_id, execution_file_path, input_files=execution.input_files)
                     node_output = await self._run_node(
                         execution_id=execution_id,
                         node_exec=node_exec,
@@ -231,7 +225,6 @@ class OrchestratorService:
                         if not tasks and not failed:
                             completed_event.set()
 
-            # Запускаем все ноды, готовые сразу (без pending зависимостей)
             async with self._lock:
                 for node_def in sorted_nodes:
                     node_id = node_def["id"]
@@ -240,17 +233,17 @@ class OrchestratorService:
                     if all(dep in completed for dep in deps[node_id]):
                         tasks[node_id] = asyncio.create_task(run_node_task(node_def))
 
-            # Если нечего запускать — сразу завершаем
             if not tasks:
                 if not failed:
                     self.exec_repo.update_status(execution_id, ExecutionStatus.COMPLETED)
                     logger.info("execution_completed", execution_id=execution_id)
+
                 return
 
-            # Ждём завершения (с периодической проверкой CANCELLED)
             while True:
                 if completed_event.is_set():
                     break
+
                 await asyncio.sleep(1.0)
                 exec_record = self.exec_repo.get(execution_id)
                 if exec_record and str(exec_record.status) == str(ExecutionStatus.CANCELLED):
@@ -283,6 +276,7 @@ class OrchestratorService:
                 execution = self.exec_repo.get(execution_id)
                 if execution is not None:
                     status = str(execution.status)
+
                     if status == str(ExecutionStatus.COMPLETED):
                         self._metrics.workflows_completed.inc()
                     elif status == str(ExecutionStatus.FAILED):
@@ -351,17 +345,6 @@ class OrchestratorService:
             )
             elapsed_ms = (time.monotonic() - node_start) * 1000
             self._metrics.node_execution_duration.labels(node_id=node_id).observe(elapsed_ms / 1000)
-
-            try:
-                pushgateway_url = getattr(config, 'pushgateway_url', 'localhost:9091')
-                replay_llm_metrics(plugin_id, execution_id, pushgateway_url)
-            except Exception as metrics_err:
-                logger.warning(
-                    "failed_to_collect_plugin_metrics",
-                    plugin_id=plugin_id,
-                    execution_id=execution_id,
-                    error=str(metrics_err)
-                )
 
             logger.info("node_completed", execution_id=execution_id, node_id=node_id)
             return output_data if output_data else None
@@ -502,6 +485,7 @@ def _map_inputs(
     node_outputs: Dict[str, Dict],
     file_id: str,
     file_path: str | None = None,
+    input_files: Dict[str, str] | None = None,
 ) -> Dict[str, Any]:
     input_mapping = node_def.get("input_mapping", [])
     plugin_id = node_def.get("plugin_id", "")
@@ -510,49 +494,53 @@ def _map_inputs(
 
     if not input_mapping:
         result = {}
-        if dependencies:
-            result = node_outputs.get(dependencies[0], {}).copy()
-        if not is_input_plugin:
+        if is_input_plugin:
+            if input_files:
+                node_id = node_def.get("id", "")
+                if node_id in input_files:
+                    result["file_id"] = input_files[node_id]
+        else:
+            if dependencies:
+                result = node_outputs.get(dependencies[0], {}).copy()
             result["file_id"] = file_id
             if file_path:
                 result["file_path"] = file_path
-        return result
+    else:
+        result = {}
+        for rule in input_mapping:
+            target = rule["target_field"]
+            source = str(rule["source"])
 
-    result = {}
-    for rule in input_mapping:
-        target = rule["target_field"]
-        source = str(rule["source"])
+            if source.startswith("$"):
+                source = source[1:]
+                parts = source.split(".", 2)
 
-        if source.startswith("$"):
-            source = source[1:]
-            parts = source.split(".", 2)
+                if parts[0] == "__input":
+                    value = node_outputs.get("__input", {}).get(".".join(parts[1:]))
+                elif len(parts) >= 2 and parts[1] == "output":
+                    source_node = parts[0]
+                    source_field = ".".join(parts[2:])
+                    value = node_outputs.get(source_node, {}).get(source_field)
+                else:
+                    value = node_outputs.get("__input", {}).get(source)
 
-            if parts[0] == "__input":
-                value = node_outputs.get("__input", {}).get(".".join(parts[1:]))
-            elif len(parts) >= 2 and parts[1] == "output":
-                source_node = parts[0]
-                source_field = ".".join(parts[2:])
-                value = node_outputs.get(source_node, {}).get(source_field)
+                transform = rule.get("transform", "passthrough")
+                result[target] = _apply_transform(value, transform)
             else:
-                value = node_outputs.get("__input", {}).get(source)
+                result[target] = source
 
-            transform = rule.get("transform", "passthrough")
-            result[target] = _apply_transform(value, transform)
-        else:
-            result[target] = source
+        if "file_id" not in result:
+            for dep in dependencies:
+                dep_output = node_outputs.get(dep, {})
 
-    if "file_id" not in result:
-        for dep in dependencies:
-            dep_output = node_outputs.get(dep, {})
+                if dep_output.get("file_id"):
+                    result["file_id"] = dep_output["file_id"]
+                    break
 
-            if dep_output.get("file_id"):
-                result["file_id"] = dep_output["file_id"]
-                break
-
-        if "file_id" not in result and not is_input_plugin:
-            result["file_id"] = file_id
-    if file_path and not is_input_plugin:
-        result["file_path"] = file_path
+            if "file_id" not in result and not is_input_plugin:
+                result["file_id"] = file_id
+        if file_path and not is_input_plugin:
+            result["file_path"] = file_path
 
     logger.debug(
         "input_mapping_complete",

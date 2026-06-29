@@ -9,7 +9,7 @@ from src.db.models.execution import ExecutionModel, ExecutionNodeModel, NodeExec
 from src.db.models.workflow_template import WorkflowTemplateModel, WorkflowGraph
 
 
-def _node_to_model(node: DBExecutionNode) -> ExecutionNodeModel:
+def _node_to_model(node: DBExecutionNode, parameters: Optional[dict] = None) -> ExecutionNodeModel:
     def _dt(v):
         return v.isoformat() if v else None
 
@@ -49,6 +49,7 @@ def _node_to_model(node: DBExecutionNode) -> ExecutionNodeModel:
         started_at=_dt(node.started_at),
         ended_at=_dt(node.ended_at),
         created_at=_dt(node.created_at),
+        parameters=parameters,
     )
 
 
@@ -86,7 +87,7 @@ def _execution_to_model(exec: DBExecution) -> ExecutionModel:
         status=ExecutionStatus(cast(str, exec.status)),
         started_at=_dt(exec.started_at),
         ended_at=_dt(exec.ended_at),
-        error_message=str(exec.error_message),
+        error_message=exec.error_message,
         created_at=_dt(exec.created_at),
         nodes=nodes,
         workflow_template=workflow_template,

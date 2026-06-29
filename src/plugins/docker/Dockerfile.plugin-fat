@@ -2,12 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps needed by common Python packages
+# Install ALL system deps needed by every plugin (ffmpeg, libreoffice, texlive, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ffmpeg \
+    texlive-latex-base \
+    texlive-fonts-recommended \
+    texlive-latex-extra \
+    texlive-lang-cyrillic \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for caching)
+# Copy requirements first (for caching — this layer rarely changes)
 COPY requirements.txt .
 
 # Install Python deps
@@ -16,19 +21,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy config module (needed by storage, db, llm)
 COPY src/config.py src/
 
-# Copy only necessary files for plugin runtime
+# Copy ALL plugins at once — benefits from Docker layer caching across builds
 COPY src/plugins/__init__.py src/plugins/
 COPY src/plugins/base.py src/plugins/
 COPY src/plugins/registry.py src/plugins/
 COPY src/plugins/runner.py src/plugins/
 COPY src/plugins/datasource.py src/plugins/
-
-# Create plugins directory and empty __init__.py (avoid cross-plugin imports)
-RUN mkdir -p src/plugins/plugins && echo "" > src/plugins/plugins/__init__.py
-
-# Copy specific plugin code (ARG will be passed during build)
-ARG PLUGIN_ID
-COPY src/plugins/plugins/${PLUGIN_ID}/ src/plugins/plugins/${PLUGIN_ID}/
+COPY src/plugins/plugins/ src/plugins/plugins/
 
 # Copy minimal utils (storage, logging, metrics)
 COPY src/utils/storage.py src/utils/
