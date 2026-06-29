@@ -216,6 +216,23 @@
           ${formatKV('Время выполнения мс', node.execution_time_ms)}
           ${formatKV('Ошибка', node.error_message)}
         </div>
+        ${node.parameters ? `
+          <div class="mt-4 pt-4 border-t border-brand-light">
+            <h3 class="text-sm font-semibold text-brand-dark mb-2">Параметры</h3>
+            <dl class="space-y-2">
+              ${Object.entries(node.parameters).map(([key, param]) => `
+                <div class="flex gap-4">
+                  <dt class="text-xs text-brand-muted w-36 shrink-0 pt-0.5">${escapeHtml(key)}</dt>
+                  <dd class="text-xs text-brand-dark">
+                    ${param.value !== undefined && param.value !== null ? escapeHtml(String(param.value)) : '<span class="text-brand-muted italic">—</span>'}
+                    ${param.options && param.options.length ? `<span class="ml-1 text-brand-muted">(${param.options.map(o => escapeHtml(o)).join(', ')})</span>` : ''}
+                    ${param.description ? `<div class="text-brand-muted text-xs mt-0.5">${escapeHtml(param.description)}</div>` : ''}
+                  </dd>
+                </div>
+              `).join('')}
+            </dl>
+          </div>
+        ` : ''}
         <div class="mt-4 pt-4 border-t border-brand-light">
           <div class="flex items-center justify-between mb-2">
             <h3 class="text-sm font-semibold text-brand-dark">Входные данные</h3>
@@ -492,7 +509,6 @@
 
       const { original, outputFile, byNode, sortedNodes } = groupArtifacts(artifacts, nodeNameMap, startedAtMap);
 
-      // Save which sections are open before re-render
       const openIds = new Set(
         [...list.querySelectorAll('.collapse-content')]
           .filter(el => el.style.maxHeight && el.style.maxHeight !== '0px')

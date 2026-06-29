@@ -68,6 +68,8 @@ LOG_FILE_BACKUP_COUNT = 5
 [Plugins]
 # Собирать Docker-образы плагинов при старте main.py
 BUILD_ON_STARTUP = false
+# Использовать жирные Docker-образы (большие, но быстрая сборка благодаря кешированию слоёв)
+FAT_IMAGES = false
 
 # Container registry для кеширования и шаринга образов
 # Пусто = только локальные образы (по умолчанию)

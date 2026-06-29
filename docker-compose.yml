@@ -41,16 +41,6 @@ services:
       - lectify
     restart: unless-stopped
 
-  # Pushgateway - для метрик из краткоживущих контейнеров
-  pushgateway:
-    image: prom/pushgateway:v1.6.2
-    container_name: lectify-pushgateway
-    ports:
-      - "9091:9091"
-    networks:
-      - lectify
-    restart: unless-stopped
-
   # Loki - агрегация логов
   loki:
     image: grafana/loki:2.9.3

@@ -1,12 +1,15 @@
 import asyncio
+import re
+import time
 import uvicorn
 import sys
 import pathlib
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from prometheus_client import generate_latest
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -15,8 +18,45 @@ from src.db.database import init_sqlalchemy_db
 from src.api import api_router
 from src.web.routes import web_router
 from src.utils.logging import setup_logging, get_logger
+from src.utils.metrics import get_metrics
 
 from src.orchestrator import OrchestratorService, OrchestratorConfig
+
+
+_UUID_RE = re.compile(
+    r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.IGNORECASE
+)
+_NUM_ID_RE = re.compile(r'/\d+')
+
+
+def _normalize_path(path: str) -> str:
+    """Нормализует путь для метрик — заменяет UUID и числовые ID на плейсхолдеры."""
+    path = _UUID_RE.sub('/{id}', path)
+    path = _NUM_ID_RE.sub('/{id}', path)
+    return path
+
+
+class HTTPMetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in ("/metrics", "/health", "/ready"):
+            return await call_next(request)
+
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration = time.perf_counter() - start
+
+        m = get_metrics()
+        m.http_requests_total.labels(
+            method=request.method,
+            path=_normalize_path(request.url.path),
+            status=response.status_code,
+        ).inc()
+        m.http_request_duration.labels(
+            method=request.method,
+            path=_normalize_path(request.url.path),
+        ).observe(duration)
+
+        return response
 
 
 _orchestrator_service: OrchestratorService | None = None
@@ -53,6 +93,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ИИ Конспектирование", lifespan=lifespan)
+app.add_middleware(HTTPMetricsMiddleware)
 
 STATIC_PATH = pathlib.Path(__file__).parent / "resources" / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")

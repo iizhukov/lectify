@@ -2,7 +2,7 @@
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import timezone
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -15,27 +15,34 @@ if PROJECT_ROOT not in sys.path:
 
 def _get_input_mapping(node_id: str) -> list:
     mappings = {
+        # speech_to_text data_sources = {"audio_file": ...}
+        # media_converter outputs file_id=MinIO_URL after upload
         "speech_to_text": [
-            {"target_field": "media_path", "source": "$media_converter.output.media_path"}
+            {"target_field": "audio_file", "source": "$media_converter.output.file_id"},
         ],
+        # text_to_md data_sources = {"txt_file": ..., "prompt": ...}
+        # speech_to_text output model has txt_path (updated to MinIO URL after upload)
         "text_to_md": [
-            {"target_field": "txt_path", "source": "$speech_to_text.output.txt_path"},
-            {"target_field": "prompt_id", "source": "$prompt_for_md.output.prompt_id"}
+            {"target_field": "txt_file", "source": "$speech_to_text.output.txt_path"},
+            {"target_field": "prompt", "source": "$prompt_for_md.output.prompt_id"},
         ],
+        # text_to_latex data_sources = {"txt_file": ..., "prompt": ...}
         "text_to_latex": [
-            {"target_field": "txt_path", "source": "$speech_to_text.output.txt_path"},
-            {"target_field": "prompt_id", "source": "$prompt_for_latex.output.prompt_id"}
+            {"target_field": "txt_file", "source": "$speech_to_text.output.txt_path"},
+            {"target_field": "prompt", "source": "$prompt_for_latex.output.prompt_id"},
         ],
+        # latex_to_pdf data_sources = {"latex_file": ...}
         "latex_to_pdf": [
-            {"target_field": "latex_path", "source": "$text_to_latex.output.latex_path"}
+            {"target_field": "latex_file", "source": "$text_to_latex.output.latex_path"},
         ],
+        # speech_to_text_simple: same pattern — use file_id from media_converter
         "speech_to_text_simple": [
-            {"target_field": "file_id", "source": "$media_converter_simple.output.file_id"},
-            {"target_field": "media_path", "source": "$media_converter_simple.output.media_path"}
+            {"target_field": "audio_file", "source": "$media_converter_simple.output.file_id"},
         ],
+        # text_to_md_simple: target_field must match data_sources keys
         "text_to_md_simple": [
-            {"target_field": "txt_path", "source": "$speech_to_text_simple.output.txt_path"},
-            {"target_field": "prompt_id", "source": "$prompt_selector_md.output.prompt_id"}
+            {"target_field": "txt_file", "source": "$speech_to_text_simple.output.txt_path"},
+            {"target_field": "prompt", "source": "$prompt_selector_md.output.prompt_id"},
         ],
     }
     return mappings.get(node_id, [])
@@ -104,7 +111,6 @@ def _migrate_transcription_workflow():
                     {"target_field": "file_id", "source": "$__input.input_audio.file_id"},
                     {"target_field": "filename", "source": "$__input.input_audio.filename"},
                     {"target_field": "minio_path", "source": "$__input.input_audio.minio_path"},
-                    {"target_field": "file_path", "source": "$__input.input_audio.file_path"},
                     {"target_field": "size", "source": "$__input.input_audio.size"},
                     {"target_field": "content_type", "source": "$__input.input_audio.content_type"}
                 ]
@@ -115,8 +121,7 @@ def _migrate_transcription_workflow():
                 "name": "Конвертация медиа",
                 "parameters": {"format": "m4a", "bitrate": "64k"},
                 "input_mapping": [
-                    {"target_field": "file_id", "source": "$input_audio.output.file_id"},
-                    {"target_field": "file_path", "source": "$input_audio.output.file_path"}
+                    {"target_field": "file_id", "source": "$input_audio.output.file_id"}
                 ]
             },
             {
@@ -181,7 +186,6 @@ def _migrate_transcription_to_pdf_workflow():
                     {"target_field": "file_id", "source": "$__input.input_audio_pdf.file_id"},
                     {"target_field": "filename", "source": "$__input.input_audio_pdf.filename"},
                     {"target_field": "minio_path", "source": "$__input.input_audio_pdf.minio_path"},
-                    {"target_field": "file_path", "source": "$__input.input_audio_pdf.file_path"},
                     {"target_field": "size", "source": "$__input.input_audio_pdf.size"},
                     {"target_field": "content_type", "source": "$__input.input_audio_pdf.content_type"}
                 ]
@@ -192,8 +196,7 @@ def _migrate_transcription_to_pdf_workflow():
                 "name": "Конвертация медиа",
                 "parameters": {"format": "m4a", "bitrate": "64k"},
                 "input_mapping": [
-                    {"target_field": "file_id", "source": "$input_audio_pdf.output.file_id"},
-                    {"target_field": "file_path", "source": "$input_audio_pdf.output.file_path"}
+                    {"target_field": "file_id", "source": "$input_audio_pdf.output.file_id"}
                 ]
             },
             {
@@ -202,8 +205,7 @@ def _migrate_transcription_to_pdf_workflow():
                 "name": "Распознавание речи",
                 "parameters": {"language": "auto"},
                 "input_mapping": [
-                    {"target_field": "file_id", "source": "$media_converter_pdf.output.file_id"},
-                    {"target_field": "media_path", "source": "$media_converter_pdf.output.media_path"}
+                    {"target_field": "audio_file", "source": "$media_converter_pdf.output.file_id"}
                 ]
             },
             {
@@ -219,8 +221,8 @@ def _migrate_transcription_to_pdf_workflow():
                 "name": "Создание LaTeX",
                 "parameters": {"subject": "auto"},
                 "input_mapping": [
-                    {"target_field": "txt_path", "source": "$speech_to_text_pdf.output.txt_path"},
-                    {"target_field": "prompt_id", "source": "$prompt_selector_latex.output.prompt_id"}
+                    {"target_field": "txt_file", "source": "$speech_to_text_pdf.output.txt_path"},
+                    {"target_field": "prompt", "source": "$prompt_selector_latex.output.prompt_id"}
                 ]
             },
             {
@@ -229,7 +231,7 @@ def _migrate_transcription_to_pdf_workflow():
                 "name": "Компиляция PDF",
                 "parameters": {"max_attempts": 3, "use_llm_repair": True},
                 "input_mapping": [
-                    {"target_field": "latex_path", "source": "$text_to_latex_pdf.output.latex_path"}
+                    {"target_field": "latex_file", "source": "$text_to_latex_pdf.output.latex_path"}
                 ]
             },
         ],
@@ -271,12 +273,7 @@ def _migrate_text_to_markdown_workflow():
                 "name": "Входной текстовый файл",
                 "parameters": {"input_type": "text"},
                 "input_mapping": [
-                    {"target_field": "file_id", "source": "$__input.input_text.file_id"},
-                    {"target_field": "filename", "source": "$__input.input_text.filename"},
-                    {"target_field": "minio_path", "source": "$__input.input_text.minio_path"},
-                    {"target_field": "file_path", "source": "$__input.input_text.file_path"},
-                    {"target_field": "size", "source": "$__input.input_text.size"},
-                    {"target_field": "content_type", "source": "$__input.input_text.content_type"}
+                    {"target_field": "file_id", "source": "$__input.input_text.file_id"}
                 ]
             },
             {
@@ -292,8 +289,8 @@ def _migrate_text_to_markdown_workflow():
                 "name": "Создание Markdown",
                 "parameters": {"max_chars": 40000},
                 "input_mapping": [
-                    {"target_field": "txt_path", "source": "$input_text.output.file_path"},
-                    {"target_field": "prompt_id", "source": "$prompt_selector_txt_md.output.prompt_id"}
+                    {"target_field": "txt_file", "source": "$__input.input_text.file_id"},
+                    {"target_field": "prompt", "source": "$prompt_selector_txt_md.output.prompt_id"}
                 ]
             },
         ],

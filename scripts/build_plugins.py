@@ -6,6 +6,7 @@ Usage:
     python scripts/build_plugins.py              # build all plugins
     python scripts/build_plugins.py latex_to_pdf  # build specific plugin
     python scripts/build_plugins.py --rebuild   # rebuild all from scratch
+    python scripts/build_plugins.py --fat       # use fat images (layer caching)
 
 This script should be run:
     - After adding a new plugin
@@ -22,6 +23,7 @@ from tqdm import tqdm
 
 from src.docker.client import DockerClient
 from src.plugins.registry import PluginRegistry
+from src.config import config
 
 
 def main():
@@ -42,6 +44,13 @@ def main():
         action="store_true",
         help="Push images to configured registry after building",
     )
+    parser.add_argument(
+        "--fat",
+        action="store_true",
+        default=None,
+        help="Use fat Docker images (larger, but faster builds via layer caching). "
+             "Overrides config.cfg setting.",
+    )
     args = parser.parse_args()
 
     registry = PluginRegistry()
@@ -56,6 +65,10 @@ def main():
         print("No plugins found.")
         return
 
+    fat = args.fat if args.fat is not None else config.plugins_fat_images
+    if fat:
+        print("Using fat Docker images (layer caching enabled)\n")
+
     print(f"Building {len(plugin_ids)} plugin(s): {plugin_ids}\n")
 
     client = DockerClient()
@@ -66,9 +79,9 @@ def main():
     for plugin_id in tqdm(plugin_ids, desc="Building plugins", unit="plugin"):
         try:
             if args.rebuild:
-                success = client.build_plugin_image(plugin_id, push=args.push)
+                success = client.build_plugin_image(plugin_id, push=args.push, fat=fat)
             else:
-                success = client._ensure_plugin_image(plugin_id, push=args.push)
+                success = client._ensure_plugin_image(plugin_id, push=args.push, fat=fat)
             if success:
                 passed += 1
             else:
