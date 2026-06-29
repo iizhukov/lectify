@@ -1,19 +1,19 @@
 name: Build Plugin Images
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "src/plugins/**"
-      - "src/docker/**"
-      - "src/utils/storage.py"
-      - "src/utils/logging.py"
-      - "src/utils/metrics.py"
-      - "src/db/**"
-      - "src/llm/**"
-      - "src/config.py"
-      - "Dockerfile*"
-      - "scripts/build_plugins.py"
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "src/plugins/**"
+  #     - "src/docker/**"
+  #     - "src/utils/storage.py"
+  #     - "src/utils/logging.py"
+  #     - "src/utils/metrics.py"
+  #     - "src/db/**"
+  #     - "src/llm/**"
+  #     - "src/config.py"
+  #     - "Dockerfile*"
+  #     - "scripts/build_plugins.py"
   workflow_dispatch:
     inputs:
       plugin:
