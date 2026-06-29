@@ -133,31 +133,18 @@
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": true
-          },
+          "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "pointSize": 5, "showPoints": "never", "spanNulls": true},
           "unit": "reqps"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "id": 4,
-      "options": {
-        "legend": {"displayMode": "list", "placement": "bottom"},
-        "tooltip": {"mode": "single"}
-      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
       "targets": [
-        {
-          "expr": "rate(lectify_llm_api_requests_total[5m])",
-          "legendFormat": "LLM API req/s",
-          "refId": "A"
-        }
+        {"expr": "sum(rate(lectify_http_requests_total[30s]))", "legendFormat": "Total RPS", "refId": "A"},
+        {"expr": "sum by(status) (rate(lectify_http_requests_total[30s]))", "legendFormat": "{{status}}", "refId": "B"}
       ],
-      "title": "LLM API Requests",
+      "title": "HTTP Requests / sec",
       "type": "timeseries"
     },
     {
@@ -165,36 +152,18 @@
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": true
-          },
+          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "pointSize": 5, "showPoints": "never", "spanNulls": true},
           "unit": "s"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
       "id": 5,
-      "options": {
-        "legend": {"displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "single"}
-      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
       "targets": [
-        {
-          "expr": "histogram_quantile(0.95, rate(lectify_llm_api_duration_seconds_bucket[5m]))",
-          "legendFormat": "p95",
-          "refId": "A"
-        },
-        {
-          "expr": "histogram_quantile(0.50, rate(lectify_llm_api_duration_seconds_bucket[5m]))",
-          "legendFormat": "p50",
-          "refId": "B"
-        }
+        {"expr": "histogram_quantile(0.95, sum by(le) (rate(lectify_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A"},
+        {"expr": "histogram_quantile(0.50, sum by(le) (rate(lectify_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "B"}
       ],
-      "title": "LLM API Latency",
+      "title": "HTTP Latency",
       "type": "timeseries"
     },
     {
@@ -202,31 +171,36 @@
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "unit": "short"
+          "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "pointSize": 5, "showPoints": "never", "spanNulls": true},
+          "unit": "ops"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
       "id": 6,
-      "options": {
-        "legend": {"displayMode": "list", "placement": "bottom"},
-        "tooltip": {"mode": "single"}
-      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
       "targets": [
-        {
-          "expr": "rate(lectify_llm_api_errors_total[5m]) * 60",
-          "legendFormat": "API errors/min",
-          "refId": "A"
-        }
+        {"expr": "sum by(operation) (rate(lectify_db_operations_total[30s]))", "legendFormat": "{{operation}}", "refId": "A"}
       ],
-      "title": "LLM API Errors",
+      "title": "DB Operations / sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "pointSize": 5, "showPoints": "never", "spanNulls": true},
+          "unit": "s"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by(le) (rate(lectify_db_operation_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A"},
+        {"expr": "histogram_quantile(0.50, sum by(le) (rate(lectify_db_operation_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "B"}
+      ],
+      "title": "DB Query Latency",
       "type": "timeseries"
     }
   ],
