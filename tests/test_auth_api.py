@@ -1,6 +1,3 @@
-"""
-Интеграционные тесты для auth и profile API endpoints
-"""
 import pytest
 import uuid
 

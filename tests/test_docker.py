@@ -1,9 +1,4 @@
-"""
-Tests for Docker module
-"""
-
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 
 class TestDockerClient:
@@ -23,11 +18,8 @@ class TestDockerClient:
         from src.docker.client import DockerClient
 
         client = DockerClient()
-        # If Docker is not available, is_available returns False
-        # If available, returns True
         result = client.is_available()
 
-        # This test passes if Docker is available or not
         assert isinstance(result, bool)
 
     @patch('docker.from_env')
@@ -37,7 +29,6 @@ class TestDockerClient:
 
         mock_from_env.side_effect = docker.errors.DockerException("Connection refused")
 
-        # Reset singleton for test
         from src.docker import client as docker_module
         docker_module.DockerClient._instance = None
         docker_module.DockerClient._client = None

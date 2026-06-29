@@ -1,6 +1,3 @@
-"""
-Интеграционные тесты для API endpoints
-"""
 import pytest
 
 

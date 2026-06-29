@@ -1,9 +1,5 @@
-"""
-Интеграционные тесты для работы с базой данных
-"""
 import pytest
 import uuid
-from datetime import datetime
 
 from src.db.models import NodeStatus, FileStatus
 

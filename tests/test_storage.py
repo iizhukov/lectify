@@ -1,11 +1,5 @@
-"""
-Интеграционные тесты для MinIO хранилища
-"""
 import pytest
 import uuid
-from pathlib import Path
-
-from src.utils.storage import MinIOStorage
 
 
 @pytest.mark.integration
@@ -182,8 +176,7 @@ class TestMinIOStorage:
             node_id=node_id,
             artifact_type=artifact_type
         )
-        
-        # Проверяем структуру: {workflow_id}/{node_id}/{artifact_type}/{filename}
+
         parts = minio_path.split("/")
         assert parts[0] == workflow_id
         assert parts[1] == node_id

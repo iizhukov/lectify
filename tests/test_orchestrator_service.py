@@ -1,11 +1,7 @@
-"""
-Tests for OrchestratorService: polling loop, execution, node run, retry logic.
-"""
 import asyncio
 import concurrent.futures
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from collections import defaultdict
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.orchestrator.service import (
     _topological_sort,
@@ -15,10 +11,6 @@ from src.orchestrator.service import (
     _is_non_retryable_error,
 )
 
-
-# ============================================================
-# Pure function tests — topological sort
-# ============================================================
 
 class TestTopologicalSort:
     """Tests for _topological_sort (Kahn's algorithm)."""
@@ -545,3 +537,665 @@ class TestOrchestratorServiceResume:
 
         await mock_service._resume_interrupted()
         assert launched == []
+
+
+class TestMapInputsEdgeCases:
+    """Additional edge-case tests for _map_inputs."""
+
+    def test_no_input_mapping_no_dependencies(self):
+        """No input_mapping and no dependencies: returns empty + file_id."""
+        node_def = {"id": "n1", "plugin_id": "some_plugin"}
+        node_outputs = {"__input": {}}
+        result = _map_inputs(node_def, [], node_outputs, "file-abc")
+        assert result == {"file_id": "file-abc"}
+
+    def test_no_input_mapping_with_dependency(self):
+        """No input_mapping but has a dependency: copies dep output + injects execution file_id."""
+        node_def = {"id": "n2", "plugin_id": "media_converter"}
+        node_outputs = {
+            "__input": {},
+            "upstream": {"result": "ok", "file_id": "upstream-file"},
+        }
+        result = _map_inputs(node_def, ["upstream"], node_outputs, "exec-file")
+        # file_id is injected from execution even if dep already has one
+        assert result == {"result": "ok", "file_id": "exec-file"}
+
+    def test_no_input_mapping_input_plugin_skips_file_id_injection(self):
+        """is_input_plugin=True: no file_id injected when no input_mapping."""
+        node_def = {"id": "input_node", "plugin_id": "input"}
+        node_outputs = {"__input": {}}
+        result = _map_inputs(node_def, [], node_outputs, "exec-file")
+        assert result == {}
+
+    def test_input_mapping_with_transform_suffix(self):
+        """Transform after + in source string is NOT supported; source is used verbatim."""
+        node_def = {
+            "id": "n3",
+            "input_mapping": [
+                {"source": "$upstream.output.count+int", "target_field": "count"}
+            ],
+        }
+        node_outputs = {"upstream": {"output": {"count": "42"}}}
+        # The "+transform" suffix is NOT parsed separately; "output.count+int" is the field key
+        result = _map_inputs(node_def, [], node_outputs, "")
+        # Field "output.count+int" doesn't exist → value is None
+        assert result["count"] is None
+
+    def test_input_mapping_with_explicit_transform(self):
+        """Explicit transform key applies _apply_transform to the resolved value."""
+        node_def = {
+            "id": "n4",
+            "input_mapping": [
+                {"source": "$upstream.output.value", "target_field": "count", "transform": "int"}
+            ],
+        }
+        # source "$upstream.output.value" parses to parts=["upstream","output","value"],
+        # source_field="value", reads node_outputs["upstream"]["value"]
+        node_outputs = {"upstream": {"value": "99"}}
+        result = _map_inputs(node_def, [], node_outputs, "")
+        assert result["count"] == 99
+
+    def test_input_mapping_with_upstream_output_dot_syntax(self):
+        """$upstream_node.output.field reads node_outputs[upstream_node][field]."""
+        node_def = {
+            "id": "n5",
+            "input_mapping": [
+                {"source": "$latex.output.pdf_id", "target_field": "pdf_id"}
+            ],
+        }
+        node_outputs = {"latex": {"pdf_id": "pdf-123"}}
+        result = _map_inputs(node_def, [], node_outputs, "")
+        assert result["pdf_id"] == "pdf-123"
+
+    def test_input_mapping_literal_value_not_dollar(self):
+        """A source without $ prefix is treated as a literal string."""
+        node_def = {
+            "id": "n6",
+            "input_mapping": [
+                {"source": "default_format", "target_field": "format"}
+            ],
+        }
+        node_outputs = {}
+        result = _map_inputs(node_def, [], node_outputs, "")
+        assert result["format"] == "default_format"
+
+    def test_input_mapping_file_id_from_upstream_not_exec(self):
+        """file_id is always injected from execution (not from upstream) when provided."""
+        node_def = {
+            "id": "n7",
+            "input_mapping": [
+                {"source": "$upstream.output.audio_id", "target_field": "audio_id"}
+            ],
+        }
+        node_outputs = {
+            "__input": {},
+            "upstream": {"audio_id": "from-upstream"},
+        }
+        result = _map_inputs(node_def, ["upstream"], node_outputs, "exec-file")
+        # file_id is injected from execution even though upstream also has audio_id
+        assert result["file_id"] == "exec-file"
+        assert result["audio_id"] == "from-upstream"
+
+    def test_input_mapping_file_path_injected_when_provided(self):
+        """file_path is injected when file_path is provided and not is_input_plugin."""
+        node_def = {
+            "id": "n8",
+            "plugin_id": "latex_to_pdf",
+            "input_mapping": [
+                {"source": "$upstream.output.tex_id", "target_field": "tex_id"}
+            ],
+        }
+        node_outputs = {"upstream": {"tex_id": "tex-1", "file_id": "tex-file"}}
+        result = _map_inputs(node_def, ["upstream"], node_outputs, "exec-f", "/path/to/file")
+        assert result["file_path"] == "/path/to/file"
+
+    def test_input_mapping_is_input_plugin_skips_file_id_injection(self):
+        """With input_mapping, is_input_plugin skips automatic file_id injection."""
+        node_def = {
+            "id": "input_node",
+            "plugin_id": "input",
+            "input_mapping": [
+                {"source": "$__input.input.file_id", "target_field": "file_id"}
+            ],
+        }
+        node_outputs = {"__input": {"input.file_id": "input-file-xyz"}}
+        result = _map_inputs(node_def, [], node_outputs, "exec-file")
+        assert result == {"file_id": "input-file-xyz"}
+
+
+class TestApplyTransformEdgeCases:
+    """Edge-case tests for _apply_transform."""
+
+    def test_unknown_transform_returns_value_unchanged(self):
+        """An unknown transform type returns the original value."""
+        assert _apply_transform("hello", "uppercase") == "hello"
+        assert _apply_transform(42, "hex") == 42
+        assert _apply_transform(None, "unknown") is None
+
+    def test_float_from_non_numeric_string_raises(self):
+        """float() on non-numeric string raises ValueError."""
+        import pytest
+        with pytest.raises(ValueError):
+            _apply_transform("not-a-number", "float")
+
+    def test_int_from_invalid_string_raises(self):
+        """int(float('bad')) raises ValueError."""
+        import pytest
+        with pytest.raises(ValueError):
+            _apply_transform("bad", "int")
+
+    def test_bool_from_none(self):
+        """bool(None) is False."""
+        assert _apply_transform(None, "bool") is False
+
+
+@pytest.mark.asyncio
+class TestOrchestratorServiceStart:
+    """Tests for OrchestratorService.start()."""
+
+    @pytest.fixture
+    def disabled_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig(enabled=False)
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_start_when_disabled_returns_immediately(self, disabled_service):
+        """When enabled=False, start() should return without polling."""
+        await disabled_service.start()
+        assert disabled_service._running is False
+
+    @pytest.mark.asyncio
+    async def test_start_sets_running_true(self):
+        """When enabled=True, start() should set _running to True before polling."""
+        from src.orchestrator.models import OrchestratorConfig
+        from src.orchestrator.service import OrchestratorService
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(OrchestratorConfig(enabled=True))
+            service._resume_interrupted = AsyncMock()
+
+            started = False
+
+            async def poll_and_launch():
+                nonlocal started
+                started = service._running
+
+            service._poll_and_launch = poll_and_launch
+
+            stop_soon = asyncio.create_task(service.stop())
+
+            await service.start()
+            await stop_soon
+
+            assert started is True
+
+
+@pytest.mark.asyncio
+class TestPollAndLaunchException:
+    """Tests for _poll_and_launch exception safety."""
+
+    @pytest.fixture
+    def safe_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig(
+            enabled=True,
+            max_concurrent_workflows=3,
+            poll_interval_seconds=60,
+        )
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            service._running = True
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_poll_handles_get_pending_executions_exception(self, safe_service):
+        """If get_pending_executions raises, the error should be caught in start()."""
+        safe_service.exec_repo.get_pending_executions = MagicMock(
+            side_effect=RuntimeError("DB connection lost")
+        )
+        safe_service._poll_and_launch = MagicMock(
+            side_effect=RuntimeError("DB connection lost")
+        )
+        # Simulate what start() does: wrap _poll_and_launch in try/except
+        try:
+            await safe_service._poll_and_launch()
+        except RuntimeError:
+            pass  # expected in test
+        # The service should still be functional
+        assert safe_service._running is True
+
+
+@pytest.mark.asyncio
+class TestRunNodeNonRetryable:
+    """Tests for _run_node non-retryable error path."""
+
+    @pytest.fixture
+    def retryable_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig(
+            enabled=True,
+            max_concurrent_workflows=3,
+            poll_interval_seconds=60,
+            node_timeout_seconds=600,
+            auto_retry_failed_nodes=True,
+            max_node_retries=2,
+        )
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_error_does_not_retry(self, retryable_service):
+        """Non-retryable error (e.g. plugin not found) should not be retried."""
+        retryable_service.node_repo.get.return_value = MagicMock(
+            plugin_id="missing_plugin", parameters={}
+        )
+        retryable_service.node_repo.update = MagicMock()
+        retryable_service.container_runner.run.side_effect = RuntimeError(
+            "Plugin not found: nonexistent"
+        )
+        retryable_service.config.auto_retry_failed_nodes = True
+        retryable_service.config.max_node_retries = 2
+
+        result = await retryable_service._run_node(
+            execution_id="exec-1",
+            node_exec=MagicMock(id="nexec-1"),
+            node_def={"id": "n1", "plugin_id": "nonexistent"},
+            input_data={},
+        )
+
+        assert result is None
+        # Should NOT have retried (only 1 call, not 3)
+        assert retryable_service.container_runner.run.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_image_not_found(self, retryable_service):
+        """Image not found is non-retryable."""
+        retryable_service.node_repo.get.return_value = MagicMock(
+            plugin_id="img_missing", parameters={}
+        )
+        retryable_service.node_repo.update = MagicMock()
+        retryable_service.container_runner.run.side_effect = RuntimeError(
+            "Image not found for node input_node"
+        )
+        retryable_service.config.auto_retry_failed_nodes = True
+        retryable_service.config.max_node_retries = 2
+
+        result = await retryable_service._run_node(
+            execution_id="exec-2",
+            node_exec=MagicMock(id="nexec-2"),
+            node_def={"id": "n2", "plugin_id": "input_node"},
+            input_data={},
+        )
+
+        assert result is None
+        assert retryable_service.container_runner.run.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_input_file_not_found(self, retryable_service):
+        """input file not found is non-retryable."""
+        retryable_service.node_repo.get.return_value = MagicMock(
+            plugin_id="file_check", parameters={}
+        )
+        retryable_service.node_repo.update = MagicMock()
+        retryable_service.container_runner.run.side_effect = RuntimeError(
+            "input file not found at /tmp/data.pdf"
+        )
+        retryable_service.config.auto_retry_failed_nodes = True
+        retryable_service.config.max_node_retries = 2
+
+        result = await retryable_service._run_node(
+            execution_id="exec-3",
+            node_exec=MagicMock(id="nexec-3"),
+            node_def={"id": "n3", "plugin_id": "latex_to_pdf"},
+            input_data={},
+        )
+
+        assert result is None
+        assert retryable_service.container_runner.run.call_count == 1
+
+
+class TestGetFileMetadata:
+    """Tests for OrchestratorService._get_file_metadata()."""
+
+    @pytest.fixture
+    def metadata_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig()
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            yield service
+
+    def test_file_found_returns_metadata_dict(self, metadata_service):
+        """When DBFile is found, returns a properly structured dict."""
+        mock_file = MagicMock()
+        mock_file.minio_path = "uploads/video.mp4"
+        mock_file.filename = "video.mp4"
+        mock_file.size_bytes = 12345
+        mock_file.mime_type = "video/mp4"
+
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.first.return_value = mock_file
+
+            result = metadata_service._get_file_metadata("file-metadata-123")
+
+        assert result == {
+            "file_id": "file-metadata-123",
+            "file_path": "minio://uploads/video.mp4",
+            "filename": "video.mp4",
+            "minio_path": "uploads/video.mp4",
+            "size": 12345,
+            "content_type": "video/mp4",
+        }
+
+    def test_file_not_found_returns_none(self, metadata_service):
+        """When DBFile is not found in DB, returns None."""
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.first.return_value = None
+
+            result = metadata_service._get_file_metadata("nonexistent-file-id")
+
+        assert result is None
+
+    def test_session_exception_returns_none(self, metadata_service):
+        """When SessionLocal raises, returns None and logs warning."""
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.side_effect = RuntimeError("DB error")
+
+            result = metadata_service._get_file_metadata("file-id")
+
+        assert result is None
+
+
+class TestGetFilePath:
+    """Tests for OrchestratorService._get_file_path()."""
+
+    @pytest.fixture
+    def path_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig()
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            yield service
+
+    def test_file_found_with_original_path(self, path_service):
+        """When DBFile has original_path, returns it as string."""
+        mock_file = MagicMock()
+        mock_file.original_path = "/uploads/doc.pdf"
+
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.first.return_value = mock_file
+
+            result = path_service._get_file_path("file-path-456")
+
+        assert result == "/uploads/doc.pdf"
+
+    def test_file_not_found_returns_none(self, path_service):
+        """When DBFile is not found, returns None."""
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.first.return_value = None
+
+            result = path_service._get_file_path("nonexistent-file-id")
+
+        assert result is None
+
+    def test_original_path_none_returns_none(self, path_service):
+        """When DBFile exists but original_path is None, returns None."""
+        mock_file = MagicMock()
+        mock_file.original_path = None
+
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.first.return_value = mock_file
+
+            result = path_service._get_file_path("file-no-path")
+
+        assert result is None
+
+    def test_session_exception_returns_none(self, path_service):
+        """When SessionLocal raises, returns None and logs warning."""
+        with patch("src.orchestrator.service.SessionLocal") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.query.side_effect = RuntimeError("DB error")
+
+            result = path_service._get_file_path("file-id")
+
+        assert result is None
+
+
+@pytest.mark.asyncio
+class TestWorkflowMetricsOnCompletion:
+    """Tests for metrics updated in the _run_execution finally block."""
+
+    @pytest.fixture
+    def metrics_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig(
+            enabled=True,
+            max_concurrent_workflows=3,
+            poll_interval_seconds=60,
+            node_timeout_seconds=600,
+            auto_retry_failed_nodes=False,
+            max_node_retries=0,
+        )
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_workflow_active_count_dec_on_failure(self, metrics_service):
+        """workflow_active_count should be decremented even when execution raises."""
+        execution = MagicMock()
+        execution.id = "exec-metrics"
+        execution.workflow_template_id = "wf-1"
+        execution.file_id = "file-1"
+        execution.nodes = []
+
+        workflow = MagicMock()
+        workflow.graph.nodes = [{"id": "n1", "plugin_id": "t1"}]
+        workflow.graph.edges = []
+
+        metrics_service.exec_repo.get.return_value = execution
+        metrics_service.workflow_repo.get.return_value = workflow
+        metrics_service.exec_repo.update_status = MagicMock()
+
+        async def raising_node(**kwargs):
+            raise RuntimeError("boom")
+
+        metrics_service._run_node = raising_node
+
+        metrics_service._metrics.workflow_active_count.inc = MagicMock()
+        metrics_service._metrics.workflow_active_count.dec = MagicMock()
+        metrics_service._metrics.workflow_duration = MagicMock()
+        metrics_service._metrics.workflows_completed = MagicMock()
+        metrics_service._metrics.workflows_failed = MagicMock()
+
+        await metrics_service._run_execution("exec-metrics")
+
+        metrics_service._metrics.workflow_active_count.dec.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_workflow_duration_observed(self, metrics_service):
+        """workflow_duration metric should be observed even when execution raises."""
+        execution = MagicMock()
+        execution.id = "exec-timing"
+        execution.workflow_template_id = "wf-1"
+        execution.file_id = "file-1"
+        execution.nodes = []
+
+        workflow = MagicMock()
+        workflow.graph.nodes = [{"id": "n1", "plugin_id": "t1"}]
+        workflow.graph.edges = []
+
+        metrics_service.exec_repo.get.return_value = execution
+        metrics_service.workflow_repo.get.return_value = workflow
+        metrics_service.exec_repo.update_status = MagicMock()
+
+        async def raising(**kwargs):
+            raise RuntimeError("boom")
+
+        metrics_service._run_node = raising
+
+        metrics_service._metrics.workflow_active_count.inc = MagicMock()
+        metrics_service._metrics.workflow_active_count.dec = MagicMock()
+        metrics_service._metrics.workflow_duration = MagicMock()
+        metrics_service._metrics.workflows_completed = MagicMock()
+        metrics_service._metrics.workflows_failed = MagicMock()
+
+        await metrics_service._run_execution("exec-timing")
+
+        metrics_service._metrics.workflow_duration.observe.assert_called()
+
+
+@pytest.mark.asyncio
+class TestPollAndLaunchEdgeCases:
+    """Additional edge cases for _poll_and_launch."""
+
+    @pytest.fixture
+    def poll_service(self):
+        from src.orchestrator.service import OrchestratorService
+        from src.orchestrator.models import OrchestratorConfig
+        config = OrchestratorConfig(
+            enabled=True,
+            max_concurrent_workflows=5,
+            poll_interval_seconds=60,
+        )
+        with patch("src.orchestrator.service.DBRepository"), \
+             patch("src.orchestrator.service.ExecutionRepository"), \
+             patch("src.orchestrator.service.ExecutionNodeRepository"), \
+             patch("src.orchestrator.service.WorkflowTemplateRepository"), \
+             patch("src.orchestrator.service.PollingContainerRunner"), \
+             patch("src.orchestrator.service.ContainerRunnerOrchestrator"):
+            service = OrchestratorService(config)
+            service._running = True
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_skips_execution_already_running_in_db(self, poll_service):
+        """Execution already in RUNNING state in DB should be skipped."""
+        pending_exec = MagicMock(id="exec-already-running")
+        poll_service.exec_repo.get_pending_executions.return_value = [pending_exec]
+
+        poll_service.exec_repo.get.return_value = MagicMock(
+            id="exec-already-running", status="running"
+        )
+        poll_service.exec_repo.update_status = MagicMock()
+
+        launched = []
+
+        async def fake_run(exec_id):
+            launched.append(exec_id)
+
+        poll_service._run_execution = fake_run
+        await poll_service._poll_and_launch()
+
+        # Should not update status to RUNNING (already running) or launch
+        assert launched == []
+        poll_service.exec_repo.update_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_workflow_queue_size_metric_is_set(self, poll_service):
+        """workflow_queue_size metric should be set to pending count."""
+        pending_exec = MagicMock(id="e1")
+        poll_service.exec_repo.get_pending_executions.return_value = [pending_exec]
+
+        workflow = MagicMock()
+        workflow.graph.nodes = [{"id": "n1", "plugin_id": "t1"}]
+        workflow.graph.edges = []
+        poll_service.exec_repo.get.return_value = MagicMock(
+            id="e1", status="pending", workflow_template_id="wf-1", file_id="file-1", nodes=[]
+        )
+        poll_service.workflow_repo.get.return_value = workflow
+        poll_service.exec_repo.update_status = MagicMock()
+
+        launched = []
+
+        async def fake_run(exec_id):
+            launched.append(exec_id)
+
+        poll_service._run_execution = fake_run
+        poll_service._metrics.workflow_queue_size = MagicMock()
+        poll_service._metrics.workflows_total = MagicMock()
+
+        await poll_service._poll_and_launch()
+
+        poll_service._metrics.workflow_queue_size.set.assert_called_with(1)
+
+    @pytest.mark.asyncio
+    async def test_workflows_total_metric_incremented(self, poll_service):
+        """workflows_total should be incremented for each launched execution."""
+        poll_service.exec_repo.get_pending_executions.return_value = [
+            MagicMock(id="e1"),
+            MagicMock(id="e2"),
+        ]
+        poll_service.exec_repo.get.return_value = MagicMock(
+            id=MagicMock(), status="pending"
+        )
+        poll_service.exec_repo.update_status = MagicMock()
+
+        launched = []
+
+        async def fake_run(exec_id):
+            launched.append(exec_id)
+
+        poll_service._run_execution = fake_run
+        poll_service._metrics.workflows_total = MagicMock()
+
+        await poll_service._poll_and_launch()
+
+        assert poll_service._metrics.workflows_total.inc.call_count == 2

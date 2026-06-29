@@ -1,11 +1,9 @@
-"""
-Pytest fixtures для интеграционных тестов
-"""
 import sys
 import os
 import pytest
 import tempfile
 import shutil
+
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator

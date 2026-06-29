@@ -1,6 +1,3 @@
-"""
-Интеграционные тесты для AuthRepository
-"""
 import pytest
 import uuid
 from datetime import datetime, timedelta

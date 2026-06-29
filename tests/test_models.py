@@ -1,5 +1,4 @@
 import pytest
-from datetime import datetime
 from pydantic import ValidationError
 
 
@@ -120,13 +119,13 @@ class TestPydanticModels:
 
     def test_execution_node_model(self):
         """ExecutionNodeModel should accept all fields"""
-        from src.db.models import ExecutionNodeModel
+        from src.db.models import ExecutionNodeModel, ExecutionStatus
 
         node = ExecutionNodeModel(
             id="exec-node-123",
             execution_id="exec-123",
             node_id="node_1",
-            status="running",
+            status=ExecutionStatus.RUNNING,
             progress_percent=50,
             progress_message="Processing..."
         )
@@ -137,13 +136,13 @@ class TestPydanticModels:
 
     def test_execution_model(self):
         """ExecutionModel should accept all fields"""
-        from src.db.models import ExecutionModel
+        from src.db.models import ExecutionModel, ExecutionStatus
 
         execution = ExecutionModel(
             id="exec-123",
             workflow_template_id="workflow-123",
             file_id="file-123",
-            status="running"
+            status=ExecutionStatus.RUNNING
         )
 
         assert execution.id == "exec-123"

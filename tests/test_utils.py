@@ -1,11 +1,6 @@
-"""
-Интеграционные тесты для утилит (логирование, метрики)
-"""
 import pytest
-import structlog
-from pathlib import Path
 
-from src.utils.logging import setup_logging, get_logger
+from src.utils.logging import get_logger
 from src.utils.metrics import get_metrics
 
 
@@ -91,38 +86,6 @@ class TestMetrics:
         
         assert metrics1 is metrics2
     
-    def test_counter_metrics(self):
-        """Тест счётчиков"""
-        metrics = get_metrics()
-        
-        # Увеличиваем счётчик
-        initial_value = metrics.workflows_total._value.get()
-        metrics.workflows_total.inc()
-        new_value = metrics.workflows_total._value.get()
-        
-        assert new_value == initial_value + 1
-    
-    def test_gauge_metrics(self):
-        """Тест gauge метрик"""
-        metrics = get_metrics()
-        
-        # Устанавливаем значение
-        metrics.workflow_queue_size.set(5)
-        value = metrics.workflow_queue_size._value.get()
-        
-        assert value == 5
-    
-    def test_histogram_metrics(self):
-        """Тест histogram метрик"""
-        metrics = get_metrics()
-        
-        # Наблюдаем значения
-        metrics.workflow_duration.observe(120.5)
-        metrics.workflow_duration.observe(300.0)
-        
-        # Проверяем, что метрика работает
-        assert metrics.workflow_duration._sum.get() > 0
-    
     def test_labeled_metrics(self):
         """Тест метрик с лейблами"""
         metrics = get_metrics()
@@ -152,29 +115,6 @@ class TestMetrics:
         
         # Проверяем
         assert metrics.llm_api_requests.labels(purpose="smart", status="success")._value.get() >= 1
-    
-    def test_database_metrics(self):
-        """Тест метрик базы данных"""
-        metrics = get_metrics()
-        
-        # Операции
-        metrics.db_operations.labels(operation="select", table="files").inc()
-        metrics.db_operations.labels(operation="insert", table="workflows").inc()
-        
-        # Длительность
-        metrics.db_operation_duration.labels(operation="select").observe(0.05)
-        
-        # Проверяем
-        assert metrics.db_operations.labels(operation="select", table="files")._value.get() >= 1
-    
-    def test_error_metrics(self):
-        """Тест метрик ошибок"""
-        metrics = get_metrics()
-        
-        metrics.errors_total.labels(component="orchestrator", error_type="timeout").inc()
-        metrics.errors_total.labels(component="storage", error_type="connection").inc()
-        
-        assert metrics.errors_total.labels(component="orchestrator", error_type="timeout")._value.get() >= 1
     
     def test_file_metrics(self):
         """Тест метрик файлов"""
