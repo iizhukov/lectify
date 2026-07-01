@@ -1,0 +1,5 @@
+include:
+  - path: api/docker-compose.yml
+  - path: infra/docker-compose.yml
+  - path: orchestrator/docker-compose.yml
+  - path: plugins/docker-compose.yml
