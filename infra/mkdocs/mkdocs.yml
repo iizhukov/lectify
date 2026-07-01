@@ -1,0 +1,57 @@
+site_name: lectify
+site_description: Документация приложения lectify
+site_url: http://docs.localhost
+docs_dir: /src/docs
+
+repo_url: https://github.com/iizhukov/lectify
+repo_name: iizhukov/lectify
+
+theme:
+  name: material
+  language: ru
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Тёмная тема
+
+    - scheme: slate
+      primary: green
+      accent: green
+      toggle:
+        icon: material/brightness-4
+        name: Светлая тема
+  
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search:
+      lang: ru, en
+
+nav:
+  - Главная: index.md
+  - API сервисы:
+    - auth: services/api/auth/index.md
+    - profile: services/api/profile/index.md
+    - execution: services/api/execution/index.md
+    - file: services/api/file/index.md
+    - workflow: services/api/workflow/index.md
+    - prompt: services/api/prompt/index.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
