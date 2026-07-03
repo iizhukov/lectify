@@ -4,7 +4,7 @@ import sys
 
 from pathlib import Path
 
-from config.loader import ServiceManifestError, load_manifest, validate_manifest
+from utils import ServiceManifestError, load_manifest, validate_manifest
 from generators.runner import run_all
 from migrations import get_migrations_manager
 
@@ -27,6 +27,10 @@ service:
   name: {name}
   version: 0.1.0
   description: ""
+
+  # User main
+  main:
+    enabled: false
 
   # gRPC server
   grpc:

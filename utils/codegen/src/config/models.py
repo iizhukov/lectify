@@ -7,12 +7,6 @@ class PythonVersion(BaseModel):
     minor: int = Field(default=12, ge=10, le=13)
 
 
-# class KafkaConsumeMode(str):
-#     one = "one"
-#     batch = "batch"
-#     streaming = "streaming"
-
-
 class PostgresConfig(BaseModel):
     enabled: bool = True
     pool_size: int = Field(default=10, ge=1, le=100)
@@ -36,9 +30,13 @@ class GrpcServerConfig(BaseModel):
     port: int = 8080
 
 
-# class GrpcClientConfig(BaseModel):
-#     enabled: bool = False
-#     services: list[str] = Field(default_factory=list)
+class GrpcClientConfig(BaseModel):
+    enabled: bool = False
+    services: list[str] = Field(default_factory=list)
+
+
+class MainConfig(BaseModel):
+    enabled: bool = False
 
 
 # class KafkaTopic(BaseModel):
@@ -96,8 +94,9 @@ class Service(BaseModel):
     description: str = ""
     requirements: str | None = None  # path to user requirements file (relative to service root)
 
+    main: MainConfig = Field(default_factory=MainConfig)
     grpc: GrpcServerConfig = Field(default_factory=GrpcServerConfig)
-    # grpc_client: GrpcClientConfig = Field(default_factory=GrpcClientConfig)
+    grpc_client: GrpcClientConfig = Field(default_factory=GrpcClientConfig)
     # kafka_producer: KafkaProducerConfig = Field(default_factory=KafkaProducerConfig)
     # kafka_consumer: KafkaConsumerConfig = Field(default_factory=KafkaConsumerConfig)
 

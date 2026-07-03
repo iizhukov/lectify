@@ -8,9 +8,9 @@ import structlog
 
 
 log = structlog.get_logger()
-
-
 {% if manifest.service.grpc.enabled %}
+
+
 async def run_grpc() -> None:
     """Запускает gRPC сервер."""
     log.info("Starting gRPC server...")
@@ -21,13 +21,29 @@ async def run_grpc() -> None:
         log.error(f"gRPC server failed: {e}")
         raise
 {% endif %}
+{% if manifest.service.main.enabled %}
+
+
+async def run_main() -> None:
+    """Запускает main из src/."""
+    try:
+        from src.main import main
+        await main()
+    except Exception as e:
+        log.error(f"main.py failed: {e}")
+        raise
+{% endif %}
 
 
 async def main():
     tasks = []
-    
     {% if manifest.service.grpc.enabled %}
+
     tasks.append(run_grpc())
+    {% endif %}
+    {% if manifest.service.main.enabled %}
+
+    tasks.append(run_main())
     {% endif %}
     
     if not tasks:
