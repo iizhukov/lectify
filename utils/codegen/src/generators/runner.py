@@ -12,7 +12,7 @@ from generators.settings import SettingsGenerator
 # from generators.s3 import S3Generator
 # from generators.auth import AuthGenerator
 from generators.grpc_server import GrpcServerGenerator
-# from generators.grpc_client import GrpcClientGenerator
+from generators.grpc_client import GrpcClientGenerator
 # from generators.kafka_consumer import KafkaConsumerGenerator
 # from generators.kafka_producer import KafkaProducerGenerator
 # from generators.config_client import ConfigClientGenerator
@@ -40,7 +40,7 @@ def run_all(manifest: ServiceManifest, output_path: Path, watch: bool = False) -
         # S3Generator(manifest, output_path),
         # AuthGenerator(manifest, output_path),
         GrpcServerGenerator(manifest, output_path),
-        # GrpcClientGenerator(manifest, output_path),
+        GrpcClientGenerator(manifest, output_path),
         # KafkaConsumerGenerator(manifest, output_path),
         # KafkaProducerGenerator(manifest, output_path),
         # ConfigClientGenerator(manifest, output_path),

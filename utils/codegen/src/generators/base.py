@@ -22,8 +22,12 @@ class BaseGenerator(ABC):
         path.write_text(content, encoding="utf-8")
         self.files_written += 1
 
-    def write_root(self, rel_path: str, content: str) -> None:
+    def write_root(self, rel_path: str, content: str, skip_exist: bool = False) -> None:
         path = self.output.parent / rel_path
+
+        if skip_exist and path.exists():
+            return
+
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         self.files_written += 1
