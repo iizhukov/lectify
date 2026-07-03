@@ -14,7 +14,7 @@ class GrpcServerGenerator(BaseGenerator):
             return
 
         proto_path = get_service_proto(self.output.parent)
-        protos_out = self.output / "protos"
+        protos_out = self.output / "protos" / "server"
         protos_out.mkdir(parents=True, exist_ok=True)
 
         if not proto_path.exists():
@@ -55,15 +55,6 @@ class GrpcServerGenerator(BaseGenerator):
             self.render("grpc/server/grpc_server.py.j2", proto=proto_info),
         )
 
-        # self.write_root(
-        #     "main.py",
-        #     self.render("grpc/server/main.py.j2", proto=proto_info),
-        # )
-        # self.write_root(
-        #     "Dockerfile",
-        #     self.render("grpc/server/Dockerfile.j2"),
-        # )
-
     def _fix_pb2_grpc_imports(self, protos_out: Path) -> None:
         grpc_files = list(protos_out.glob("*_pb2_grpc.py"))
 
@@ -71,7 +62,7 @@ class GrpcServerGenerator(BaseGenerator):
             content = gf.read_text()
             fixed = re.sub(
                 r"import (\w+)_pb2 as \1__pb2",
-                r"from generated.protos import \1_pb2 as \1__pb2",
+                r"from generated.protos.server import \1_pb2 as \1__pb2",
                 content,
             )
 
