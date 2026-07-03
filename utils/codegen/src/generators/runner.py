@@ -7,23 +7,24 @@ from config.models import ServiceManifest
 
 from generators.base import BaseGenerator
 from generators.settings import SettingsGenerator
-from generators.observability import ObservabilityGenerator
-from generators.db import DbGenerator
-from generators.s3 import S3Generator
-from generators.auth import AuthGenerator
+# from generators.observability import ObservabilityGenerator
+# from generators.db import DbGenerator
+# from generators.s3 import S3Generator
+# from generators.auth import AuthGenerator
 from generators.grpc_server import GrpcServerGenerator
-from generators.grpc_client import GrpcClientGenerator
-from generators.kafka_consumer import KafkaConsumerGenerator
-from generators.kafka_producer import KafkaProducerGenerator
-from generators.config_client import ConfigClientGenerator
-from generators.mocks import MocksGenerator
-from generators.libs import LibsGenerator
-from generators.docker_compose import DockerComposeGenerator
-from generators.prometheus_scrape import PrometheusScrapeGenerator
-from generators.postgres_init import PostgresInitGenerator
-from generators.minio_init import MinioInitGenerator
+# from generators.grpc_client import GrpcClientGenerator
+# from generators.kafka_consumer import KafkaConsumerGenerator
+# from generators.kafka_producer import KafkaProducerGenerator
+# from generators.config_client import ConfigClientGenerator
+# from generators.mocks import MocksGenerator
+# from generators.libs import LibsGenerator
+# from generators.docker_compose import DockerComposeGenerator
+# from generators.prometheus_scrape import PrometheusScrapeGenerator
+# from generators.postgres_init import PostgresInitGenerator
+# from generators.minio_init import MinioInitGenerator
 from generators.requirements import RequirementsGenerator
 from generators.main import MainGenerator
+from generators.dockerfile import DockerfileGenerator
 
 
 def run_all(manifest: ServiceManifest, output_path: Path, watch: bool = False) -> None:
@@ -49,8 +50,9 @@ def run_all(manifest: ServiceManifest, output_path: Path, watch: bool = False) -
         # PrometheusScrapeGenerator(manifest, output_path),
         # PostgresInitGenerator(manifest, output_path),
         # MinioInitGenerator(manifest, output_path),
-        # RequirementsGenerator(manifest, output_path),
+        RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
+        DockerfileGenerator(manifest, output_path),
     ]
 
     for gen in gens:
