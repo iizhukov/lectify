@@ -7,16 +7,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
-# class DatabaseSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="DB_", extra="ignore")
+class DatabaseSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="DB_", extra="ignore")
 
-#     url: str = Field(
-#         default="postgresql+asyncpg://lectify:lectify_password@localhost:5432/{{ service.name }}",
-#         description="Async database DSN",
-#     )
-#     pool_size: int = Field(default={# {{service.postgres.pool_size}} #}, ge=1)
-#     pool_max_overflow: int = Field(default={# {{service.postgres.pool_max_overflow}} #}, ge=0)
-#     pool_mode: str = Field(default="{# {{service.postgres.pool_mode}} #}")
+    url: str = Field(
+        default="postgresql+asyncpg://lectify:lectify_password@localhost:5432/{{ service.name }}",
+        description="Async database DSN",
+    )
+    pool_size: int = Field(default={{service.postgres.pool_size}}, ge=1)
+    pool_max_overflow: int = Field(default={{service.postgres.pool_max_overflow}}, ge=0)
+    pool_mode: str = Field(default="{{service.postgres.pool_mode}}")
 
 
 # class KafkaSettings(BaseSettings):

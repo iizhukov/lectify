@@ -137,6 +137,8 @@ def cmd_migrations_status(args: argparse.Namespace) -> int:
     result = asyncio.run(manager.status())
     migrations_dir = result["migrations_dir"]
 
+    print("–" * 70)
+
     print(f"Migrations directory: {migrations_dir}")
     print(f"{'Seq':>4}  {'Status':<8}  Name")
     print("-" * 60)
@@ -152,6 +154,8 @@ def cmd_migrations_migrate(args: argparse.Namespace) -> int:
     service_root = Path(args.service_root or ".").resolve()
     manager = get_migrations_manager(service_root)
     result = asyncio.run(manager.migrate())
+
+    print("–" * 70)
 
     if result["applied"]:
         print(f"Applied: {', '.join(result['applied'])}")
@@ -177,6 +181,8 @@ def cmd_migrations_rollback(args: argparse.Namespace) -> int:
     manager = get_migrations_manager(service_root)
     result = asyncio.run(manager.rollback(steps=args.steps))
 
+    print("–" * 70)
+
     if result.get("message"):
         print(result["message"])
 
@@ -196,18 +202,22 @@ def cmd_migrations_make(args: argparse.Namespace) -> int:
     manager = get_migrations_manager(service_root)
     result = manager.make()
 
-    if result.get("migration_file"):
-        print(f"Created migration: {result['migration_file']}")
+    print("–" * 70)
 
-        if result.get("changes"):
+    if result.migration_file:
+        print(f"Created migration: {result.migration_file}")
+
+        if result.changes:
             print("Changes:")
 
-            for change in result["changes"]:
+            for change in result.changes:
                 print(f"  {change}")
-    elif result.get("message"):
-        print(result["message"])
-    elif result.get("error"):
-        print(f"ERROR: {result['error']}", file=sys.stderr)
+    
+    if result.message:
+        print(result.message)
+
+    if result.error:
+        print(f"ERROR: {result.error}", file=sys.stderr)
 
         return 1
 
