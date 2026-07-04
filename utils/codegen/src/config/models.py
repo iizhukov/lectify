@@ -8,7 +8,7 @@ class PythonVersion(BaseModel):
 
 
 class PostgresConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     pool_size: int = Field(default=10, ge=1, le=100)
     pool_max_overflow: int = Field(default=5, ge=0, le=50)
     pool_mode: Literal["session", "transaction", "cursor"] = "transaction"

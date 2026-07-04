@@ -133,7 +133,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_migrations_status(args: argparse.Namespace) -> int:
     service_root = Path(args.service_root or ".").resolve()
-    manager = get_migrations_manager(service_root, db_url=args.db_url)
+    manager = get_migrations_manager(service_root)
     result = asyncio.run(manager.status())
     migrations_dir = result["migrations_dir"]
 
@@ -150,7 +150,7 @@ def cmd_migrations_status(args: argparse.Namespace) -> int:
 
 def cmd_migrations_migrate(args: argparse.Namespace) -> int:
     service_root = Path(args.service_root or ".").resolve()
-    manager = get_migrations_manager(service_root, db_url=args.db_url)
+    manager = get_migrations_manager(service_root)
     result = asyncio.run(manager.migrate())
 
     if result["applied"]:
@@ -169,9 +169,16 @@ def cmd_migrations_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_migrations_rollback(args: argparse.Namespace) -> int:
+    if args.steps < 1:
+        print("ERROR: steps must be >= 1", file=sys.stderr)
+        return 1
+
     service_root = Path(args.service_root or ".").resolve()
-    manager = get_migrations_manager(service_root, db_url=args.db_url)
+    manager = get_migrations_manager(service_root)
     result = asyncio.run(manager.rollback(steps=args.steps))
+
+    if result.get("message"):
+        print(result["message"])
 
     if result["rolled_back"]:
         print(f"Rolled back: {', '.join(result['rolled_back'])}")
@@ -179,7 +186,6 @@ def cmd_migrations_rollback(args: argparse.Namespace) -> int:
     if result["errors"]:
         for e in result["errors"]:
             print(f"ERROR in {e['migration']}: {e['error']}", file=sys.stderr)
-
         return 1
 
     return 0
@@ -187,8 +193,8 @@ def cmd_migrations_rollback(args: argparse.Namespace) -> int:
 
 def cmd_migrations_make(args: argparse.Namespace) -> int:
     service_root = Path(args.service_root or ".").resolve()
-    manager = get_migrations_manager(service_root, db_url=args.db_url)
-    result = asyncio.run(manager.make())
+    manager = get_migrations_manager(service_root)
+    result = manager.make()
 
     if result.get("migration_file"):
         print(f"Created migration: {result['migration_file']}")
