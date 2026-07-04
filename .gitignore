@@ -61,3 +61,6 @@ infra/grafana_data/
 infra/alertmanager_data/
 
 CLAUDE.md
+
+proto/temp
+services/temp
