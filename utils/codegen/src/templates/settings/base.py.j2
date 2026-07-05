@@ -39,13 +39,13 @@ class DatabaseSettings(BaseSettings):
 #     mount_point: str = Field(default="{# {{service.vault.mount_point}} #}")
 
 
-# class MinioSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="MINIO_", extra="ignore")
+class MinioSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="MINIO_", extra="ignore")
 
-#     endpoint: str = Field(default="localhost:9000")
-#     access_key: str = Field(default="minioadmin")
-#     secret_key: str = Field(default="minioadmin")
-#     region: str = Field(default="{# {{service.minio.region}} #}")
+    endpoint: str = Field(default="localhost:9000")
+    access_key: str = Field(default="minioadmin")
+    secret_key: str = Field(default="minioadmin")
+    region: str = Field(default="{# {{service.minio.region}} #}")
 
 
 # class AuthSettings(BaseSettings):

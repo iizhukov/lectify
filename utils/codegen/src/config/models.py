@@ -15,9 +15,9 @@ class PostgresConfig(BaseModel):
     migration_dir: str | None = "migrations"
 
 
-# class MinioConfig(BaseModel):
-#     enabled: bool = False
-#     buckets: list[str] = Field(default_factory=list)
+class MinioConfig(BaseModel):
+    enabled: bool = False
+    buckets: list[str] = Field(default_factory=list)
 
 
 # class VaultConfig(BaseModel):
@@ -101,7 +101,7 @@ class Service(BaseModel):
     # kafka_consumer: KafkaConsumerConfig = Field(default_factory=KafkaConsumerConfig)
 
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
-    # minio: MinioConfig = Field(default_factory=MinioConfig)
+    minio: MinioConfig = Field(default_factory=MinioConfig)
     # vault: VaultConfig = Field(default_factory=VaultConfig)
 
     # auth: AuthConfig = Field(default_factory=AuthConfig)
