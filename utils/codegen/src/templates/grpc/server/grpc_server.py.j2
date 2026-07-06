@@ -9,7 +9,8 @@ import structlog
 from concurrent import futures
 from typing import Callable
 from grpc_reflection.v1alpha import reflection
-from grpc_health.v1.health import _health_pb2_grpc as health_grpc
+from grpc_health.v1 import health_pb2_grpc
+from grpc_health.v1.health import HealthServicer
 
 from generated.settings import get_settings
 from generated.grpc_server import grpc_app
@@ -36,8 +37,8 @@ async def serve(
 
     add_servicers(server)
 
-    health_servicer = health_grpc.HealthServicer()
-    health_grpc.add_HealthServicer_to_server(health_servicer, server)
+    health_servicer = HealthServicer()
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     service_names = list(grpc_app.METHOD_NAMES)
     service_names.append(reflection.SERVICE_NAME)

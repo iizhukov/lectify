@@ -1,3 +1,5 @@
+import sys
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -11,6 +13,14 @@ class BaseGenerator(ABC):
         self.svc = manifest.service
         self.output = output
         self.files_written = 0
+
+        self._add_to_path()
+
+    def _add_to_path(self) -> None:
+        output_parent = self.output.parent
+
+        if str(output_parent) not in sys.path:
+            sys.path.insert(0, str(output_parent))
 
     @abstractmethod
     def generate(self) -> None:

@@ -23,7 +23,6 @@ class S3Client:
             endpoint_url=f"http://{s.minio.endpoint}",
             aws_access_key_id=s.minio.access_key,
             aws_secret_access_key=s.minio.secret_key,
-            region_name=s.minio.region,
             config=BotoConfig(signature_version="s3v4"),
         )
         self._bucket = bucket_name

@@ -20,9 +20,9 @@ class MinioConfig(BaseModel):
     buckets: list[str] = Field(default_factory=list)
 
 
-# class VaultConfig(BaseModel):
-#     enabled: bool = True
-#     mount_point: str = "secret"
+class VaultConfig(BaseModel):
+    enabled: bool = True
+    vars: list[str] = Field(default_factory=list)
 
 
 class GrpcServerConfig(BaseModel):
@@ -102,7 +102,7 @@ class Service(BaseModel):
 
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     minio: MinioConfig = Field(default_factory=MinioConfig)
-    # vault: VaultConfig = Field(default_factory=VaultConfig)
+    vault: VaultConfig = Field(default_factory=VaultConfig)
 
     # auth: AuthConfig = Field(default_factory=AuthConfig)
     # config_client: ConfigClientConfig = Field(default_factory=ConfigClientConfig)

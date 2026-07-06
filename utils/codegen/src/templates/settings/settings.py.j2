@@ -102,7 +102,7 @@ def find_subclasses(base_class: Type, search_dir: Path) -> List[Type]:
                     subclasses.append(attr)
 
         except Exception as e:
-            log.warning("grpc_app_import_warning", module=module_name, error=str(e))
+            log.warning("settings_import_warning", module=module_name, error=str(e))
     
     return subclasses
 

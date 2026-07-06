@@ -5,12 +5,16 @@ class MainGenerator(BaseGenerator):
     def generate(self) -> None:
         if self.svc.main.enabled:
             self.write_root(
-                "src/main.py",
+                "main.py",
                 self.render("main/user_main.py.j2"),
                 skip_exist=True
             )
 
-        self.write_root(
+        self.write(
             "main.py",
             self.render("main/main.py.j2"),
+        )
+        self.write_root(
+            "Makefile",
+            self.render("main/Makefile.j2"),
         )

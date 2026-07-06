@@ -7,9 +7,10 @@ from config.models import ServiceManifest
 
 from generators.base import BaseGenerator
 from generators.settings import SettingsGenerator
+from generators.vault import VaultGenerator
 # from generators.observability import ObservabilityGenerator
 from generators.db import DbGenerator
-# from generators.s3 import S3Generator
+from generators.s3 import S3Generator
 # from generators.auth import AuthGenerator
 from generators.grpc_server import GrpcServerGenerator
 from generators.grpc_client import GrpcClientGenerator
@@ -26,7 +27,7 @@ from generators.main import MainGenerator
 from generators.dockerfile import DockerfileGenerator
 
 
-def run_all(manifest: ServiceManifest, output_path: Path, watch: bool = False) -> None:
+def run_all(manifest: ServiceManifest, output_path: Path) -> None:
     if output_path.exists():
         shutil.rmtree(output_path)
 
@@ -34,9 +35,10 @@ def run_all(manifest: ServiceManifest, output_path: Path, watch: bool = False) -
 
     gens: List[BaseGenerator] = [
         SettingsGenerator(manifest, output_path),
+        VaultGenerator(manifest, output_path),
         # ObservabilityGenerator(manifest, output_path),
         DbGenerator(manifest, output_path),
-        # S3Generator(manifest, output_path),
+        S3Generator(manifest, output_path),
         # AuthGenerator(manifest, output_path),
         GrpcServerGenerator(manifest, output_path),
         GrpcClientGenerator(manifest, output_path),
