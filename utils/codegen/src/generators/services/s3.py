@@ -1,4 +1,4 @@
-from generators.services.base import BaseGenerator
+from generators.base import BaseGenerator
 
 
 class S3Generator(BaseGenerator):

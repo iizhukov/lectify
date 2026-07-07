@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from generators.services.base import BaseGenerator
+from generators.base import BaseGenerator
 
 
 def _base_requirements(svc) -> list[str]:

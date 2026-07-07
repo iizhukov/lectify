@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 
 from pydantic import BaseModel
 
-from generators.services.base import BaseGenerator
+from generators.base import BaseGenerator
 
 
 class VaultGenerator(BaseGenerator):        

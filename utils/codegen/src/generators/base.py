@@ -5,6 +5,8 @@ from pathlib import Path
 
 from config.models import ServiceManifest
 from templates import env
+from utils import get_repo_root
+from settings import get_settings
 
 
 class BaseGenerator(ABC):
@@ -43,11 +45,22 @@ class BaseGenerator(ABC):
         path.write_text(content, encoding="utf-8")
         self.files_written += 1
 
+    def write_project(self, rel_path: str, content: str, skip_exist: bool = False) -> None:
+        path = get_repo_root() / rel_path
+
+        if skip_exist and path.exists():
+            return
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        self.files_written += 1
+
     def render(self, template_name: str, **kwargs) -> str:
         tmpl = env.get_template(template_name)
         return tmpl.render(
             service=self.svc,
             manifest=self.manifest,
             svc_dir=self.svc_dir,
+            settings=get_settings(),
             **kwargs
         )

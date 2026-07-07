@@ -6,7 +6,7 @@ from typing import List
 from config.models import ServiceManifest
 from utils import get_repo_root
 
-from generators.services.base import BaseGenerator
+from generators.base import BaseGenerator
 from generators.services.settings import SettingsGenerator
 from generators.services.vault import VaultGenerator
 # from generators.observability import ObservabilityGenerator
@@ -22,10 +22,6 @@ from generators.services.grpc_client import GrpcClientGenerator
 from generators.services.requirements import RequirementsGenerator
 from generators.services.main import MainGenerator
 from generators.services.dockerfile import DockerfileGenerator
-
-
-def run_infra() -> None:
-    infra_path = get_repo_root() / "infra"
 
 
 def run_service(manifest: ServiceManifest, output_path: Path) -> None:
@@ -56,6 +52,10 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
         gen.generate()
 
     print(f"[codegen] Generated {sum(g.files_written for g in gens)} files in {output_path}")
+
+
+def run_infra() -> None:
+    infra_path = get_repo_root() / "infra"
 
 
 def run_plugins() -> None:
