@@ -8,7 +8,7 @@ from pydantic import Field
 
 
 class DatabaseSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="DB_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_DB_", extra="ignore")
 
     url: str = Field(
         default="postgresql+asyncpg://lectify:lectify_password@localhost:5432/{{ service.name }}",
@@ -20,7 +20,7 @@ class DatabaseSettings(BaseSettings):
 
 
 # class KafkaSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="KAFKA_", extra="ignore")
+#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_KAFKA_", extra="ignore")
 
 #     bootstrap_servers: str = Field(default="localhost:9092")
 #     sasl_mechanism: str = Field(default="PLAIN")
@@ -31,16 +31,8 @@ class DatabaseSettings(BaseSettings):
 #     {% endif %}
 
 
-# class VaultSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="VAULT_", extra="ignore")
-
-#     addr: str = Field(default="http://localhost:8200")
-#     token: str | None = Field(default=None)
-#     mount_point: str = Field(default="{# {{service.vault.mount_point}} #}")
-
-
 class MinioSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="MINIO_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_MINIO_", extra="ignore")
 
     endpoint: str = Field(default="localhost:9000")
     access_key: str = Field(default="minioadmin")
@@ -48,20 +40,20 @@ class MinioSettings(BaseSettings):
 
 
 # class AuthSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="AUTH_", extra="ignore")
+#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_AUTH_", extra="ignore")
 
 #     addr: str = Field(default="http://localhost:9001")
 #     ticket_ttl_seconds: int = Field(default=60)
 
 
 # class ConfigServiceSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="CONFIG_", extra="ignore")
+#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_CONFIG_", extra="ignore")
 
 #     addr: str = Field(default="http://localhost:9002")
 
 
 # class ObservabilitySettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="OBS_", extra="ignore")
+#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_OBS_", extra="ignore")
 
 #     otlp_endpoint: str = Field(default="http://localhost:4317")
 #     log_level: str = Field(default="{# {{service.observability.log_level}} #}")
@@ -70,6 +62,6 @@ class MinioSettings(BaseSettings):
 
 
 class GrpcServerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="GRPC_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_GRPC_", extra="ignore")
 
     port: int = Field(default={{ service.grpc.port }})

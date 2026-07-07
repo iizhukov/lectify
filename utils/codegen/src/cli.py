@@ -65,6 +65,7 @@ service:
 
 #   vault:
 #     enabled: true
+#     vars: []
 
 #   # Auth (ticket-based inter-service auth)
 #   auth:
@@ -112,7 +113,7 @@ def cmd_validate(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_generate(args: argparse.Namespace) -> int:
+def cmd_generate(_: argparse.Namespace) -> int:
     manifest_path = Path.cwd() / "service.yaml"
     output_path = Path.cwd() / "generated/"
 
@@ -123,7 +124,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        run_all(manifest, output_path, watch=args.watch)
+        run_all(manifest, output_path)
     except Exception as e:
         print(f"[codegen] ERROR: {e}", file=sys.stderr)
         return 1
@@ -247,7 +248,6 @@ def main(argv: list[str] | None = None) -> int:
     p_validate.set_defaults(func=cmd_validate)
 
     p_gen = sub.add_parser("generate", help="Generate code from service.yaml")
-    p_gen.add_argument("--watch", action="store_true", help="Watch service.yaml for changes and regenerate")
     p_gen.set_defaults(func=cmd_generate)
 
     p_mig = sub.add_parser("migrations", help="Database migrations: make, migrate, status, rollback")

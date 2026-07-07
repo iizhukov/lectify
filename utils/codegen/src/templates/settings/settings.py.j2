@@ -15,7 +15,6 @@ from pydantic import Field
 from generated.settings.base import (
     DatabaseSettings,
     # KafkaSettings,
-    # VaultSettings,
     MinioSettings,
     # AuthSettings,
     # ConfigServiceSettings,
@@ -32,6 +31,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        env_prefix="{{ service.name | upper | replace("-", "_") }}"
     )
 
     service_name: str = "{{ service.name }}"
@@ -41,7 +41,6 @@ class Settings(BaseSettings):
     database: "DatabaseSettings" = Field(default_factory=lambda: _resolve(DatabaseSettings)())
     grpc: "GrpcServerSettings" = Field(default_factory=lambda: _resolve(GrpcServerSettings)())
     # kafka: "KafkaSettings" = Field(default_factory=lambda: _resolve(KafkaSettings)())
-    # vault: "VaultSettings" = Field(default_factory=lambda: _resolve(VaultSettings)())
     minio: "MinioSettings" = Field(default_factory=lambda: _resolve(MinioSettings)())
     # auth: "AuthSettings" = Field(default_factory=lambda: _resolve(AuthSettings)())
     # config_service: "ConfigServiceSettings" = Field(default_factory=lambda: _resolve(ConfigServiceSettings)())

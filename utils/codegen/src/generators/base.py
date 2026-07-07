@@ -12,6 +12,7 @@ class BaseGenerator(ABC):
         self.manifest = manifest
         self.svc = manifest.service
         self.output = output
+        self.svc_dir = output.parent
         self.files_written = 0
 
         self._add_to_path()
@@ -44,4 +45,9 @@ class BaseGenerator(ABC):
 
     def render(self, template_name: str, **kwargs) -> str:
         tmpl = env.get_template(template_name)
-        return tmpl.render(service=self.svc, manifest=self.manifest, **kwargs)
+        return tmpl.render(
+            service=self.svc,
+            manifest=self.manifest,
+            svc_dir=self.svc_dir,
+            **kwargs
+        )
