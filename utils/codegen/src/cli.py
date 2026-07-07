@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from utils import ServiceManifestError, load_manifest, validate_manifest
-from generators.runner import run_all
+from generators.runner import run_service, run_infra, run_plugins
 from migrations import get_migrations_manager
 
 
@@ -59,13 +59,13 @@ service:
     pool_mode: "transaction"
     migration_dir: "migrations"
 
-#   minio:
-#     enabled: false
-#     buckets: []
+  minio:
+    enabled: false
+    buckets: []
 
-#   vault:
-#     enabled: true
-#     vars: []
+  vault:
+    enabled: false
+    vars: []
 
 #   # Auth (ticket-based inter-service auth)
 #   auth:
@@ -113,7 +113,7 @@ def cmd_validate(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_generate(_: argparse.Namespace) -> int:
+def cmd_service(_: argparse.Namespace) -> int:
     manifest_path = Path.cwd() / "service.yaml"
     output_path = Path.cwd() / "generated/"
 
@@ -124,7 +124,27 @@ def cmd_generate(_: argparse.Namespace) -> int:
         return 1
 
     try:
-        run_all(manifest, output_path)
+        run_service(manifest, output_path)
+    except Exception as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def cmd_infra(_: argparse.Namespace) -> int:
+    try:
+        run_infra()
+    except Exception as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def cmd_plugins(_: argparse.Namespace) -> int:
+    try:
+        run_plugins()
     except Exception as e:
         print(f"[codegen] ERROR: {e}", file=sys.stderr)
         return 1
@@ -247,8 +267,14 @@ def main(argv: list[str] | None = None) -> int:
     p_validate = sub.add_parser("validate", help="Validate a service.yaml file in current directory")
     p_validate.set_defaults(func=cmd_validate)
 
-    p_gen = sub.add_parser("generate", help="Generate code from service.yaml")
-    p_gen.set_defaults(func=cmd_generate)
+    p_gen = sub.add_parser("service", help="Generate code from service.yaml")
+    p_gen.set_defaults(func=cmd_service)
+
+    p_gen = sub.add_parser("infra", help="Generate init scripts for infra/")
+    p_gen.set_defaults(func=cmd_infra)
+
+    p_gen = sub.add_parser("plugins", help="Generate for plugins/")
+    p_gen.set_defaults(func=cmd_plugins)
 
     p_mig = sub.add_parser("migrations", help="Database migrations: make, migrate, status, rollback")
     p_mig.add_argument("command", choices=["make", "migrate", "status", "rollback"], help="Migration command")

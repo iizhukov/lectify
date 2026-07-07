@@ -4,30 +4,31 @@ from pathlib import Path
 from typing import List
 
 from config.models import ServiceManifest
+from utils import get_repo_root
 
-from generators.base import BaseGenerator
-from generators.settings import SettingsGenerator
-from generators.vault import VaultGenerator
+from generators.services.base import BaseGenerator
+from generators.services.settings import SettingsGenerator
+from generators.services.vault import VaultGenerator
 # from generators.observability import ObservabilityGenerator
-from generators.db import DbGenerator
-from generators.s3 import S3Generator
+from generators.services.db import DbGenerator
+from generators.services.s3 import S3Generator
 # from generators.auth import AuthGenerator
-from generators.grpc_server import GrpcServerGenerator
-from generators.grpc_client import GrpcClientGenerator
+from generators.services.grpc_server import GrpcServerGenerator
+from generators.services.grpc_client import GrpcClientGenerator
 # from generators.kafka_consumer import KafkaConsumerGenerator
 # from generators.kafka_producer import KafkaProducerGenerator
 # from generators.config_client import ConfigClientGenerator
-# from generators.mocks import MocksGenerator
-# from generators.libs import LibsGenerator
-# from generators.docker_compose import DockerComposeGenerator
 # from generators.prometheus_scrape import PrometheusScrapeGenerator
-# from generators.minio_init import MinioInitGenerator
-from generators.requirements import RequirementsGenerator
-from generators.main import MainGenerator
-from generators.dockerfile import DockerfileGenerator
+from generators.services.requirements import RequirementsGenerator
+from generators.services.main import MainGenerator
+from generators.services.dockerfile import DockerfileGenerator
 
 
-def run_all(manifest: ServiceManifest, output_path: Path) -> None:
+def run_infra() -> None:
+    infra_path = get_repo_root() / "infra"
+
+
+def run_service(manifest: ServiceManifest, output_path: Path) -> None:
     if output_path.exists():
         shutil.rmtree(output_path)
 
@@ -45,11 +46,7 @@ def run_all(manifest: ServiceManifest, output_path: Path) -> None:
         # KafkaConsumerGenerator(manifest, output_path),
         # KafkaProducerGenerator(manifest, output_path),
         # ConfigClientGenerator(manifest, output_path),
-        # MocksGenerator(manifest, output_path),
-        # LibsGenerator(manifest, output_path),
-        # DockerComposeGenerator(manifest, output_path),
         # PrometheusScrapeGenerator(manifest, output_path),
-        # MinioInitGenerator(manifest, output_path),
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
         DockerfileGenerator(manifest, output_path),
@@ -59,3 +56,7 @@ def run_all(manifest: ServiceManifest, output_path: Path) -> None:
         gen.generate()
 
     print(f"[codegen] Generated {sum(g.files_written for g in gens)} files in {output_path}")
+
+
+def run_plugins() -> None:
+    ...
