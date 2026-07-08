@@ -64,3 +64,5 @@ CLAUDE.md
 
 proto/temp
 services/temp
+
+.codegen/context.json
