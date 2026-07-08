@@ -105,3 +105,17 @@ def validate_manifest(path: Path) -> list[str]:
     #     warnings.append("Config client enabled but no feature flags defined")
 
     return warnings
+
+
+def load_valid_services() -> list[ServiceManifest]:
+    services = []
+    for manifest_path in (get_repo_root() / "services/").rglob("*service.yaml"):
+        try:
+            validate_manifest(manifest_path)
+        except ServiceManifestError as e:
+            print(f"[codegen] WARNING: {manifest_path} is invalid")
+            continue
+
+        services.append(load_manifest(manifest_path))
+    
+    return services

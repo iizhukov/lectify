@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # observability: "ObservabilitySettings" = Field(default_factory=lambda: _resolve(ObservabilitySettings)())
 
 
+def _is_codegen_running() -> bool:
+    return sys.argv[0].endswith("codegen")
+
+
 def find_service_yaml(start_path: Optional[Path] = None) -> Optional[Path]:
     """Находит ближайший service.yaml вверх по дереву директорий."""
     if start_path is None:
@@ -107,6 +111,9 @@ def find_subclasses(base_class: Type, search_dir: Path) -> List[Type]:
 
 
 def _resolve(cls: Type[T]) -> Type[T]:
+    if _is_codegen_running():
+        return cls
+
     subclasses = find_subclasses(cls, get_service_root() / "src")
 
     if len(subclasses) == 0:

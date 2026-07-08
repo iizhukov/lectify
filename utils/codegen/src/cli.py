@@ -4,8 +4,8 @@ import sys
 
 from pathlib import Path
 
-from utils import ServiceManifestError, load_manifest, validate_manifest
-from generators.runner import run_service, run_infra, run_plugins
+from utils import ServiceManifestError, load_manifest, validate_manifest, load_valid_services
+from generators.runner import run_service, run_infra, run_plugins, run_project
 from migrations import get_migrations_manager
 
 
@@ -134,7 +134,19 @@ def cmd_service(_: argparse.Namespace) -> int:
 
 def cmd_infra(_: argparse.Namespace) -> int:
     try:
-        run_infra()
+        services = load_valid_services()
+        run_infra(services)
+    except Exception as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def cmd_project(_: argparse.Namespace) -> int:
+    try:
+        services = load_valid_services()
+        run_project(services)
     except Exception as e:
         print(f"[codegen] ERROR: {e}", file=sys.stderr)
         return 1
@@ -275,6 +287,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_gen = sub.add_parser("plugins", help="Generate for plugins/")
     p_gen.set_defaults(func=cmd_plugins)
+
+    p_gen = sub.add_parser("project", help="generate all project files")
+    p_gen.set_defaults(func=cmd_project)
 
     p_mig = sub.add_parser("migrations", help="Database migrations: make, migrate, status, rollback")
     p_mig.add_argument("command", choices=["make", "migrate", "status", "rollback"], help="Migration command")

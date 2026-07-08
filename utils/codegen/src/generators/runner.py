@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 
 from config.models import ServiceManifest
-from utils import get_repo_root, validate_manifest, load_manifest, ServiceManifestError
+from utils import get_repo_root, get_service_path
 
 from generators.services.base import BaseGenerator as ServiceBaseGenerator
 from generators.services.settings import SettingsGenerator
@@ -58,18 +58,8 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
     print(f"[codegen] Generated {sum(g.files_written for g in gens)} files in {output_path}")
 
 
-def run_infra() -> None:
+def run_infra(services: list[ServiceManifest]) -> None:
     output_path = get_repo_root() / "infra"
-
-    services = []
-    for manifest_path in (get_repo_root() / "services/").rglob("*service.yaml"):
-        try:
-            validate_manifest(manifest_path)
-        except ServiceManifestError as e:
-            print(f"[codegen] WARNING: {manifest_path} is invalid")
-            continue
-
-        services.append(load_manifest(manifest_path))
 
     gens: List[InfraBaseGenerator] = [
         MinioGenerator(services, output_path),
@@ -84,3 +74,11 @@ def run_infra() -> None:
 
 def run_plugins() -> None:
     ...
+
+
+def run_project(services: list[ServiceManifest]) -> None:
+    for service in services:
+        run_service(service, get_service_path(service.service.name) / "generated/")
+
+    run_infra(services)
+    run_plugins()
