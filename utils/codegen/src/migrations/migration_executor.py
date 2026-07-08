@@ -85,6 +85,7 @@ class MigrationExecutor:
         
         try:
             async with engine.connect() as conn:
+                await self._ensure_migrations_table(conn)
                 all_migrations = self._get_all_migrations()
                 applied_names = await self._get_applied_migrations(conn)
 

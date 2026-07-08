@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import List
 
 from config.models import ServiceManifest
-from utils import get_repo_root
+from utils import get_repo_root, validate_manifest, load_manifest, ServiceManifestError
 
-from generators.base import BaseGenerator
+from generators.services.base import BaseGenerator as ServiceBaseGenerator
 from generators.services.settings import SettingsGenerator
 from generators.services.vault import VaultGenerator
 # from generators.observability import ObservabilityGenerator
@@ -23,6 +23,10 @@ from generators.services.requirements import RequirementsGenerator
 from generators.services.main import MainGenerator
 from generators.services.dockerfile import DockerfileGenerator
 
+from generators.infra.base import BaseGenerator as InfraBaseGenerator
+from generators.infra.minio import MinioGenerator
+from generators.infra.postgres import PostgresGenerator
+
 
 def run_service(manifest: ServiceManifest, output_path: Path) -> None:
     if output_path.exists():
@@ -30,7 +34,7 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
 
     output_path.mkdir(parents=True)
 
-    gens: List[BaseGenerator] = [
+    gens: List[ServiceBaseGenerator] = [
         SettingsGenerator(manifest, output_path),
         VaultGenerator(manifest, output_path),
         # ObservabilityGenerator(manifest, output_path),
@@ -55,7 +59,27 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
 
 
 def run_infra() -> None:
-    infra_path = get_repo_root() / "infra"
+    output_path = get_repo_root() / "infra"
+
+    services = []
+    for manifest_path in (get_repo_root() / "services/").rglob("*service.yaml"):
+        try:
+            validate_manifest(manifest_path)
+        except ServiceManifestError as e:
+            print(f"[codegen] WARNING: {manifest_path} is invalid")
+            continue
+
+        services.append(load_manifest(manifest_path))
+
+    gens: List[InfraBaseGenerator] = [
+        MinioGenerator(services, output_path),
+        PostgresGenerator(services, output_path),
+    ]
+
+    for gen in gens:
+        gen.generate()
+
+    print(f"[codegen] Generated {sum(g.files_written for g in gens)} files in {output_path}")
 
 
 def run_plugins() -> None:

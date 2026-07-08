@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 
 from pydantic import BaseModel
 
-from generators.base import BaseGenerator
+from generators.services.base import BaseGenerator
 
 
 class VaultGenerator(BaseGenerator):        
@@ -17,13 +17,25 @@ class VaultGenerator(BaseGenerator):
 
     def _generate_init__vault_agent(self) -> None:
         vault_vars = self._get_vault_vars()
-        
+
         self.write(
-            f"scripts/init-vault.sh",
+            f"scripts/init-vault.local.sh",
             self.render(
                 "services/vault/init-vault.sh.j2",
                 vault_vars=vault_vars,
-            )
+                vault_addr="localhost",
+            ),
+            executable=True
+        )
+        
+        self.write(
+            f"scripts/init-vault.docker.sh",
+            self.render(
+                "services/vault/init-vault.sh.j2",
+                vault_vars=vault_vars,
+                vault_addr="vault",
+            ),
+            executable=True
         )
     
     def _generate_agent_config(self) -> None:

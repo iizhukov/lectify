@@ -7,13 +7,13 @@
 set -e
 
 SERVICE_NAME="{{ service.name }}"
-VAULT_ADDR="${VAULT_ADDR:-http://localhost:8200}"
-VAULT_TOKEN="${VAULT_TOKEN:-root}"
+VAULT_ADDR="http://{{ vault_addr }}:{{ settings.VAULT_PORT }}"
+VAULT_TOKEN="{{ settings.VAULT_DEV_ROOT_TOKEN_ID }}"
 
 echo "🔐 Initializing Vault for ${SERVICE_NAME}..."
 
 # Проверка доступности Vault
-if ! vault status >/dev/null 2>&1; then
+if ! VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault status >/dev/null 2>&1; then
     echo "❌ Vault is not accessible at $VAULT_ADDR"
     echo "   Run: docker run -d --name vault-dev -p 8200:8200 -e VAULT_DEV_ROOT_TOKEN_ID=root hashicorp/vault:latest"
     exit 1
@@ -24,17 +24,17 @@ echo "✅ Vault is running"
 mkdir -p vault
 
 # Настройка AppRole
-if vault auth enable approle 2>/dev/null; then
+if VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault auth enable approle 2>/dev/null; then
     echo "✅ AppRole enabled"
 else
     echo "ℹ️ AppRole already enabled"
 fi
 
 # Создание политики доступа
-if vault policy read "${SERVICE_NAME}-policy" >/dev/null 2>&1; then
+if VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault policy read "${SERVICE_NAME}-policy" >/dev/null 2>&1; then
     echo "ℹ️ Policy '${SERVICE_NAME}-policy' already exists"
 else
-    vault policy write "${SERVICE_NAME}-policy" - <<EOF
+    VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault policy write "${SERVICE_NAME}-policy" - <<EOF
 path "secret/data/${SERVICE_NAME}/*" {
   capabilities = ["read", "create", "update", "list"]
 }
@@ -43,10 +43,10 @@ EOF
 fi
 
 # Создание AppRole роли
-if vault read auth/approle/role/"${SERVICE_NAME}-role" >/dev/null 2>&1; then
+if VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault read auth/approle/role/"${SERVICE_NAME}-role" >/dev/null 2>&1; then
     echo "ℹ️ AppRole '${SERVICE_NAME}-role' already exists"
 else
-    vault write auth/approle/role/"${SERVICE_NAME}-role" \
+    VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault write auth/approle/role/"${SERVICE_NAME}-role" \
         secret_id_ttl=24h \
         token_ttl=1h \
         token_max_ttl=4h \
@@ -57,7 +57,7 @@ fi
 # Создание секретов
 SECRET_PATH="secret/${SERVICE_NAME}/settings"
 
-if vault kv get "$SECRET_PATH" >/dev/null 2>&1; then
+if VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault kv get "$SECRET_PATH" >/dev/null 2>&1; then
     echo "ℹ️ Secrets already exist at ${SECRET_PATH}"
 else
     echo "📝 Creating secrets at ${SECRET_PATH}..."
@@ -67,7 +67,7 @@ else
     SECRETS="$SECRETS {{ var_name }}={{ var_value }}"
 {% endfor %}
     
-    vault kv put "$SECRET_PATH" $SECRETS
+    VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault kv put "$SECRET_PATH" $SECRETS
     echo "✅ Secrets created"
 fi
 
@@ -77,7 +77,7 @@ ROLE_ID_FILE="vault/${SERVICE_NAME}-role-id.txt"
 if [ -f "$ROLE_ID_FILE" ]; then
     echo "ℹ️ Role ID file already exists: $ROLE_ID_FILE"
 else
-    vault read -field=role_id auth/approle/role/"${SERVICE_NAME}-role"/role-id > "$ROLE_ID_FILE"
+    VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault read -field=role_id auth/approle/role/"${SERVICE_NAME}-role"/role-id > "$ROLE_ID_FILE"
     echo "✅ Role ID saved to $ROLE_ID_FILE"
 fi
 
@@ -88,7 +88,7 @@ SECRET_ID_FILE="vault/${SERVICE_NAME}-secret-id.txt"
 if [ -f "$SECRET_ID_FILE" ]; then
     echo "ℹ️ Secret ID file already exists: $SECRET_ID_FILE"
 else
-    vault write -f -field=secret_id auth/approle/role/"${SERVICE_NAME}-role"/secret-id > "$SECRET_ID_FILE"
+    VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$VAULT_TOKEN" vault write -f -field=secret_id auth/approle/role/"${SERVICE_NAME}-role"/secret-id > "$SECRET_ID_FILE"
     echo "✅ Secret ID saved to $SECRET_ID_FILE"
 fi
 

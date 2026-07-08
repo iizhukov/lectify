@@ -1,4 +1,4 @@
-from generators.base import BaseGenerator
+from generators.services.base import BaseGenerator
 
 
 class DockerfileGenerator(BaseGenerator):

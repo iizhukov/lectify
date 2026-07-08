@@ -4,7 +4,7 @@ import sys
 
 from pathlib import Path
 
-from generators.base import BaseGenerator
+from generators.services.base import BaseGenerator
 from utils import get_service_proto
 
 

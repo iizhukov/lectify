@@ -11,7 +11,7 @@ class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_DB_", extra="ignore")
 
     url: str = Field(
-        default="postgresql+asyncpg://lectify:lectify_password@localhost:5432/{{ service.name }}",
+        default="postgresql+asyncpg://{{ service.name }}:{{ context.postgres_password }}@localhost:{{ settings.POSTGRES_PORT }}/{{ service.name | replace("-", "_")}}",
         description="Async database DSN",
     )
     pool_size: int = Field(default={{service.postgres.pool_size}}, ge=1)
@@ -35,8 +35,8 @@ class MinioSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_MINIO_", extra="ignore")
 
     endpoint: str = Field(default="localhost:9000")
-    access_key: str = Field(default="minioadmin")
-    secret_key: str = Field(default="minioadmin")
+    access_key: str = Field(default="{{ service.name }}")
+    secret_key: str = Field(default="{{ context.minio_password }}")
 
 
 # class AuthSettings(BaseSettings):

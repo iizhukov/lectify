@@ -23,6 +23,9 @@ def get_repo_root() -> Path:
 
 
 def get_service_proto(service: Path) -> Path:
+    if service.parts[-1] == "service.yaml":
+        service = service.parent
+
     relative_path = service.relative_to(get_repo_root())
 
     if not relative_path.parts or relative_path.parts[0] != "services":
@@ -79,7 +82,10 @@ def load_manifest(path: str | Path) -> ServiceManifest:
 
 
 def validate_manifest(path: Path) -> list[str]:
-    manifest = load_manifest(path / "service.yaml")
+    if path.parts[-1] != "service.yaml":
+        path /= "service.yaml"
+
+    manifest = load_manifest(path)
     warnings: list[str] = []
     svc = manifest.service
 
