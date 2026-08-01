@@ -42,14 +42,14 @@ service:
     enabled: false
     services: []
 
-#   # Kafka
-#   kafka_producer:
-#     enabled: false
-#     topics: []
+  # Kafka
+  kafka_producer:
+    enabled: false
+    topics: []
 
-#   kafka_consumer:
-#     enabled: false
-#     topics: []
+  kafka_consumer:
+    enabled: false
+    topics: []
 
   # Infrastructure
   postgres:

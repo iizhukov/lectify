@@ -60,25 +60,25 @@ class MainConfig(BaseModel):
     enabled: bool = False
 
 
-# class KafkaTopic(BaseModel):
-#     name: str = Field(pattern=r"^[a-zA-Z0-9._-]+$")
-#     partitions: int = Field(default=3, ge=1)
-#     replication_factor: int = Field(default=1, ge=1)
-#     retention_hours: int = Field(default=168, ge=1)
+class KafkaTopic(BaseModel):
+    name: str = Field(pattern=r"^[a-zA-Z0-9._-]+$")
+    partitions: int = Field(default=3, ge=1)
+    replication_factor: int = Field(default=1, ge=1)
+    retention_hours: int = Field(default=168, ge=1)
 
 
-# class KafkaProducerConfig(BaseModel):
-#     enabled: bool = False
-#     topics: list[str] = Field(default_factory=list)
+class KafkaProducerConfig(BaseModel):
+    enabled: bool = False
+    topics: list[str] = Field(default_factory=list)
 
 
-# class KafkaConsumerConfig(BaseModel):
-#     enabled: bool = False
-#     topics: list[str] = Field(default_factory=list)
-#     group_id: str | None = None
-#     auto_offset_reset: Literal["earliest", "latest"] = "earliest"
-#     max_poll_records: int = Field(default=100, ge=1)
-#     max_poll_interval_ms: int = Field(default=300000, ge=1000)
+class KafkaConsumerConfig(BaseModel):
+    enabled: bool = False
+    topics: list[str] = Field(default_factory=list)
+    group_id: str | None = None
+    auto_offset_reset: Literal["earliest", "latest"] = "earliest"
+    max_poll_records: int = Field(default=100, ge=1)
+    max_poll_interval_ms: int = Field(default=300000, ge=1000)
 
 
 # class AuthConfig(BaseModel):
@@ -114,12 +114,13 @@ class Service(BaseModel):
     python: PythonVersion = Field(default_factory=lambda: PythonVersion(major=3, minor=12))
     description: str = ""
     requirements: str | None = None  # path to user requirements file (relative to service root)
+    active: bool = False
 
     main: MainConfig = Field(default_factory=MainConfig)
     grpc: GrpcServerConfig = Field(default_factory=GrpcServerConfig)
     grpc_client: GrpcClientConfig = Field(default_factory=GrpcClientConfig)
-    # kafka_producer: KafkaProducerConfig = Field(default_factory=KafkaProducerConfig)
-    # kafka_consumer: KafkaConsumerConfig = Field(default_factory=KafkaConsumerConfig)
+    kafka_producer: KafkaProducerConfig = Field(default_factory=KafkaProducerConfig)
+    kafka_consumer: KafkaConsumerConfig = Field(default_factory=KafkaConsumerConfig)
 
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     minio: MinioConfig = Field(default_factory=MinioConfig)

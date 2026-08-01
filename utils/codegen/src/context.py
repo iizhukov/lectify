@@ -13,6 +13,7 @@ from utils import get_repo_root
 class ServiceContext(BaseModel):
     minio_password: Optional[str] = None
     postgres_password: Optional[str] = None
+    kafka_password: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
@@ -78,6 +79,16 @@ class ContextManager:
             self._save()
 
         return context.postgres_password
+
+    def ensure_kafka_password(self, service_name: str) -> str:
+        context = self.get_service_context(service_name)
+
+        if not context.kafka_password:
+            context.kafka_password = self.generate_password()
+            context.updated_at = datetime.now().isoformat()
+            self._save()
+
+        return context.kafka_password
     
     def delete_service(self, service_name: str):
         if service_name in self._data.services:

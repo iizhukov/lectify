@@ -116,6 +116,11 @@ def load_valid_services() -> list[ServiceManifest]:
             print(f"[codegen] WARNING: {manifest_path} is invalid")
             continue
 
-        services.append(load_manifest(manifest_path))
+        manifest = load_manifest(manifest_path)
+
+        if not manifest.service.active:
+            continue
+
+        services.append(manifest)
     
     return services

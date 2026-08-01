@@ -180,7 +180,15 @@ def setup_logging():
     logging.root.addHandler(loki_handler)
     {% endif %}
 
-    # 4. Configure structlog
+    # 4. Suppress noisy library loggers
+    for _lib_logger in ['aiokafka.consumer.subscription_state', 'aiokafka.consumer.group_coordinator',
+                         'aiokafka.consumer.consumer', 'aiokafka.cluster',
+                         'aiokafka.coordinator', 'aiokafka.connector',
+                         'aiokafka.producer.sender', 'aiokafka.producer.producer']:
+        logging.getLogger(_lib_logger).setLevel(logging.WARNING)
+
+    # 5. Configure structlog
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

@@ -19,16 +19,16 @@ class DatabaseSettings(BaseSettings):
     pool_mode: str = Field(default="{{service.postgres.pool_mode}}")
 
 
-# class KafkaSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_KAFKA_", extra="ignore")
+class KafkaSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_KAFKA_", extra="ignore")
 
-#     bootstrap_servers: str = Field(default="localhost:9092")
-#     sasl_mechanism: str = Field(default="PLAIN")
-#     sasl_username: str | None = Field(default=None)
-#     sasl_password: str | None = Field(default=None)
-#     {% if topics_consumer %}
-#     consumer_group_id: str = Field(default="{# {{service.name}} #}-consumer")
-#     {% endif %}
+    bootstrap_servers: str = Field(default="localhost:9092")
+    sasl_mechanism: str = Field(default="PLAIN")
+    sasl_username: str | None = Field(default=None)
+    sasl_password: str | None = Field(default=None)
+    {% if topics_consumer %}
+    consumer_group_id: str = Field(default="{{ service.name }}-consumer")
+    {% endif %}
 
 
 class MinioSettings(BaseSettings):

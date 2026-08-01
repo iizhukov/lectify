@@ -1,3 +1,5 @@
 minio/init-script.sh
 
 postgres/init-script.sh
+
+kafka/init-script.sh

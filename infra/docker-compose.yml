@@ -110,6 +110,18 @@ services:
     networks:
       - lectify-network
 
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: lectify-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./kafka/init-script.sh:/init-script.sh
+    entrypoint: /bin/bash /init-script.sh
+    networks:
+      - lectify-network
+
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: lectify-kafka-ui

@@ -67,7 +67,20 @@ async def run_grpc() -> None:
     except Exception as e:
         log.error(f"gRPC server failed: {e}")
         raise
+{% endif %}{% if manifest.service.kafka_consumer.enabled %}
+
+
+async def run_kafka_consumer() -> None:
+    """Запускает Kafka consumer"""
+    log.info("Starting Kafka consumer...")
+    try:
+        from generated.kafka.consumer import run_consumer
+        await run_consumer()
+    except Exception as e:
+        log.error(f"Kafka consumer failed: {e}")
+        raise
 {% endif %}
+
 {% if manifest.service.main.enabled %}
 
 
@@ -110,6 +123,9 @@ async def main():
     tasks = []
     {% if manifest.service.grpc.enabled %}
     tasks.append(run_grpc())
+    {% endif %}
+    {% if manifest.service.kafka_consumer.enabled %}
+    tasks.append(run_kafka_consumer())
     {% endif %}
     {% if manifest.service.main.enabled %}
     tasks.append(run_main())

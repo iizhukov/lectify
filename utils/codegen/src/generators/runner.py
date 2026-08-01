@@ -16,8 +16,8 @@ from generators.services.s3 import S3Generator
 # from generators.auth import AuthGenerator
 from generators.services.grpc_server import GrpcServerGenerator
 from generators.services.grpc_client import GrpcClientGenerator
-# from generators.kafka_consumer import KafkaConsumerGenerator
-# from generators.kafka_producer import KafkaProducerGenerator
+from generators.services.kafka_consumer import KafkaConsumerGenerator
+from generators.services.kafka_producer import KafkaProducerGenerator
 # from generators.config_client import ConfigClientGenerator
 # from generators.prometheus_scrape import PrometheusScrapeGenerator
 from generators.services.requirements import RequirementsGenerator
@@ -27,6 +27,7 @@ from generators.services.dockerfile import DockerfileGenerator
 from generators.infra.base import BaseGenerator as InfraBaseGenerator
 from generators.infra.minio import MinioGenerator
 from generators.infra.postgres import PostgresGenerator
+from generators.infra.kafka import KafkaGenerator
 
 
 def run_service(manifest: ServiceManifest, output_path: Path) -> None:
@@ -45,8 +46,8 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
         # AuthGenerator(manifest, output_path),
         GrpcServerGenerator(manifest, output_path),
         GrpcClientGenerator(manifest, output_path),
-        # KafkaConsumerGenerator(manifest, output_path),
-        # KafkaProducerGenerator(manifest, output_path),
+        KafkaConsumerGenerator(manifest, output_path),
+        KafkaProducerGenerator(manifest, output_path),
         # ConfigClientGenerator(manifest, output_path),
         # PrometheusScrapeGenerator(manifest, output_path),
         RequirementsGenerator(manifest, output_path),
@@ -66,6 +67,7 @@ def run_infra(services: list[ServiceManifest]) -> None:
     gens: List[InfraBaseGenerator] = [
         MinioGenerator(services, output_path),
         PostgresGenerator(services, output_path),
+        KafkaGenerator(services, output_path),
     ]
 
     for gen in gens:
@@ -79,6 +81,8 @@ def run_plugins() -> None:
 
 
 def run_project(services: list[ServiceManifest]) -> None:
+    services = list(filter(lambda s: s.service.active, services))
+
     for service in services:
         run_service(service, get_service_path(service.service.name) / "generated/")
 
