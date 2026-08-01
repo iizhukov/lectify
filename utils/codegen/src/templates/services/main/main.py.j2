@@ -3,14 +3,7 @@
 # To regenerate: codegen generate
 # ---------------------------------------------------------------------------
 
-import asyncio
-import os
-import socket
 import sys
-import inspect
-import subprocess
-import structlog
-
 from pathlib import Path
 
 
@@ -25,7 +18,19 @@ if str(parent_dir) not in sys.path:
     sys.path.insert(0, str(parent_dir))
 
 
-log = structlog.get_logger()
+import asyncio
+import os
+import socket
+import inspect
+import subprocess
+
+from generated.logger import get_logger, setup_logging, log_logging_ready{% if service.logging.loki.enabled %}, start_loki_agent{% endif %}
+
+
+# Настраиваем логирование при старте
+setup_logging()
+
+log = get_logger("main")
 
 
 def is_running_under_vault() -> bool:
@@ -94,13 +99,19 @@ async def run_main() -> None:
 
 
 async def main():
+    {% if service.logging.loki.enabled %}
+    # Запускаем Loki агента (в event loop)
+    start_loki_agent()
+    log_logging_ready()
+    {% endif %}
+    
+    log.info("service_starting", service="{{ service.name }}")
+    
     tasks = []
     {% if manifest.service.grpc.enabled %}
-
     tasks.append(run_grpc())
     {% endif %}
     {% if manifest.service.main.enabled %}
-
     tasks.append(run_main())
     {% endif %}
     
@@ -113,6 +124,15 @@ async def main():
     except Exception as e:
         log.error(f"Error in main: {e}")
         raise
+    {% if service.logging.loki.enabled %}
+    finally:
+        try:
+            from generated.logger import flush_loki_agent, shutdown_loki_agent
+            await flush_loki_agent()
+            await shutdown_loki_agent()
+        except ImportError:
+            pass
+    {% endif %}
 
 
 if __name__ == "__main__":

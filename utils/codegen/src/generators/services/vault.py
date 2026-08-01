@@ -27,7 +27,7 @@ class VaultGenerator(BaseGenerator):
             ),
             executable=True
         )
-        
+
         self.write(
             f"scripts/init-vault.docker.sh",
             self.render(
@@ -36,6 +36,11 @@ class VaultGenerator(BaseGenerator):
                 vault_addr="vault",
             ),
             executable=True
+        )
+
+        self.write_root(
+            f"vault/.gitkeep",
+            "",
         )
     
     def _generate_agent_config(self) -> None:

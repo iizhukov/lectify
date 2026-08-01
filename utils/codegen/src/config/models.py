@@ -25,6 +25,27 @@ class VaultConfig(BaseModel):
     vars: list[str] = Field(default_factory=list)
 
 
+class LoggingFileConfig(BaseModel):
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+    path: str = "logs/app.log"
+    max_bytes: int = 10485760
+    backup_count: int = 5
+
+
+class LoggingLokiConfig(BaseModel):
+    enabled: bool = False
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    batch_size: int = 100
+    flush_interval: int = 5
+    max_retries: int = 3
+    timeout: int = 10
+
+
+class LoggingConfig(BaseModel):
+    file: LoggingFileConfig = LoggingFileConfig()
+    loki: LoggingLokiConfig = LoggingLokiConfig()
+
+
 class GrpcServerConfig(BaseModel):
     enabled: bool = False
     port: int = 8080
@@ -103,6 +124,7 @@ class Service(BaseModel):
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     minio: MinioConfig = Field(default_factory=MinioConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     # auth: AuthConfig = Field(default_factory=AuthConfig)
     # config_client: ConfigClientConfig = Field(default_factory=ConfigClientConfig)

@@ -67,6 +67,20 @@ service:
     enabled: false
     vars: []
 
+  logging:
+    file:
+        level: DEBUG
+        path: logs/app.log
+        max_bytes: 10485760  # 10MB
+        backup_count: 5
+    loki:
+        enabled: false
+        level: INFO
+        batch_size: 100
+        flush_interval: 5
+        max_retries: 3
+        timeout: 10
+
 #   # Auth (ticket-based inter-service auth)
 #   auth:
 #     enabled: true

@@ -140,7 +140,7 @@ class NginxSettings(BaseModel):
     
     @property
     def url(self) -> str:
-        return f"http://gateway-nginx:{self.port}"
+        return f"http://nginx:{self.port}"
 
 
 class MkDocsSettings(BaseModel):

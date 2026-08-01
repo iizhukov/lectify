@@ -6,7 +6,6 @@
 .PHONY: help run run-vault run-direct clean health
 
 SERVICE_NAME := {{ service.name }}
-SERVICE_ID := {{ service.id }}
 GRPC_PORT := {{ service.grpc.port }}
 VAULT_ENABLED := {{ service.vault.enabled }}
 {% if service.vault.enabled %}
@@ -14,6 +13,14 @@ VAULT_CONFIG := generated/vault/agent-{{ service.name }}.local.hcl
 {% endif %}
 VAULT_ADDR := "http://localhost:{{ settings.VAULT_PORT }}"
 VAULT_TOKEN := "{{ settings.VAULT_DEV_ROOT_TOKEN_ID }}"
+
+SHOW_VAULT_LOG ?= 0
+
+  ifeq ($(SHOW_VAULT_LOG),1)
+    VAULT_REDIRECT :=
+  else
+    VAULT_REDIRECT := 2>/dev/null
+  endif
 
 # Colors for output
 GREEN := \033[0;32m
@@ -23,12 +30,12 @@ NC := \033[0m # No Color
 
 help:
 	@echo "$(GREEN)Available commands:$(NC)"
-	@echo "  $(YELLOW)make run$(NC)          - Run the service (auto-detect Vault)"
+	@echo "  $(YELLOW)make run SHOW_VAULT_LOG=1$(NC) - Run with Vault Agent logs visible"
 	@echo "  $(YELLOW)make run-direct$(NC)   - Run directly without Vault"
 	@echo "  $(YELLOW)make clean$(NC)        - Clean generated files"
 	@echo "  $(YELLOW)make health$(NC)       - Check service health"
 {% if service.vault.enabled %}
-	@echo "  $(YELLOW)make run-vault$(NC)    - Run with Vault Agent"
+	@echo "  $(YELLOW)make run-vault SHOW_VAULT_LOG=1$(NC)    - Run with Vault Agent"
 	@echo "  $(YELLOW)make vault-init$(NC)   - Initialize Vault for this service"
 {% endif %}
 	@echo ""
@@ -53,7 +60,7 @@ check-vault-config:
 	fi
 
 check-secrets:
-	@if [ -f vault/$(SERVICE_ID)-role-id.txt ] && [ -f vault/$(SERVICE_ID)-secret-id.txt ]; then \
+	@if [ -f vault/$(SERVICE_NAME)-role-id.txt ] && [ -f vault/$(SERVICE_NAME)-secret-id.txt ]; then \
 		echo "$(GREEN)Vault secrets found$(NC)"; \
 	else \
 		echo "$(YELLOW)Vault secrets not found, running vault-init...$(NC)"; \
@@ -74,7 +81,7 @@ vault-init: check-vault
 
 run-vault: check-vault check-vault-config check-secrets
 	@echo "$(GREEN)Running $(SERVICE_NAME) with Vault Agent...$(NC)"
-	VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault agent -config=$(VAULT_CONFIG)
+	VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault agent -config=$(VAULT_CONFIG) $(VAULT_REDIRECT)
 
 {% endif %}
 
@@ -84,7 +91,7 @@ run:
 	@if command -v VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault >/dev/null 2>&1 && [ -f $(VAULT_CONFIG) ]; then \
 		echo "$(GREEN)Starting with Vault Agent...$(NC)"; \
 		$(MAKE) check-secrets; \
-		VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault agent -config=$(VAULT_CONFIG); \
+		VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault agent -config=$(VAULT_CONFIG) $(VAULT_REDIRECT); \
 	else \
 		echo "$(YELLOW)Running directly...$(NC)"; \
 		python generated/main.py; \
@@ -113,6 +120,13 @@ clean:
 	rm -rf __pycache__/
 	rm -rf .pytest_cache/
 	rm -rf *.egg-info/
-	rm -rf vault/
+	rm -f vault/$(SERVICE_NAME)-role-id.txt vault/$(SERVICE_NAME)-secret-id.txt
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
+
+{% if service.vault.enabled %}
+clean-secrets:
+	@echo "$(GREEN)Cleaning Vault secrets for $(SERVICE_NAME)...$(NC)"
+	rm -f vault/$(SERVICE_NAME)-role-id.txt vault/$(SERVICE_NAME)-secret-id.txt
+	@echo "$(GREEN)Secrets removed. Run 'make vault-init' to reinitialize.$(NC)"
+{% endif %}

@@ -5,7 +5,6 @@
 
 import sys
 import importlib
-import structlog
 
 from pathlib import Path
 from typing import Type, TypeVar, Optional, List
@@ -21,9 +20,11 @@ from generated.settings.base import (
     # ObservabilitySettings,
     GrpcServerSettings,
 )
+from generated.logger import get_logger
+
 
 T = TypeVar('T')
-log = structlog.get_logger()
+log = get_logger()
 
 
 class Settings(BaseSettings):

@@ -4,7 +4,6 @@
 # ---------------------------------------------------------------------------
 
 import grpc
-import structlog
 
 from concurrent import futures
 from typing import Callable
@@ -14,9 +13,10 @@ from grpc_health.v1.health import HealthServicer
 
 from generated.settings import get_settings
 from generated.grpc_server import grpc_app
+from generated.logger import get_logger
 
 
-log = structlog.get_logger()
+log = get_logger()
 
 
 async def serve(

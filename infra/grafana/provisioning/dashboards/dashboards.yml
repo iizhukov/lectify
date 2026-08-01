@@ -1,12 +1,13 @@
 apiVersion: 1
 
 providers:
-  - name: 'default'
+  - name: 'Lectify Dashboards'
     orgId: 1
-    folder: ''
+    folder: 'Lectify'
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
+    updateIntervalSeconds: 10
     allowUiUpdates: true
     options:
       path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

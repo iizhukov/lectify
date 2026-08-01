@@ -26,6 +26,8 @@ echo "✅ MinIO is ready!"
 # ============================================
 echo "📦 Creating buckets..."
 
+mc mb myminio/loki-data --ignore-existing
+
 {% for bucket in buckets %}
 mc mb myminio/{{ bucket }} --ignore-existing
 {% endfor %}

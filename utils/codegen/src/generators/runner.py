@@ -8,6 +8,7 @@ from utils import get_repo_root, get_service_path
 
 from generators.services.base import BaseGenerator as ServiceBaseGenerator
 from generators.services.settings import SettingsGenerator
+from generators.services.logger import LoggerGenerator
 from generators.services.vault import VaultGenerator
 # from generators.observability import ObservabilityGenerator
 from generators.services.db import DbGenerator
@@ -36,6 +37,7 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
 
     gens: List[ServiceBaseGenerator] = [
         SettingsGenerator(manifest, output_path),
+        LoggerGenerator(manifest, output_path),
         VaultGenerator(manifest, output_path),
         # ObservabilityGenerator(manifest, output_path),
         DbGenerator(manifest, output_path),

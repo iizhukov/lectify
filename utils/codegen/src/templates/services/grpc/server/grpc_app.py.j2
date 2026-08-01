@@ -5,7 +5,6 @@
 
 import sys
 import grpc
-import structlog
 import importlib
 
 from pathlib import Path
@@ -13,9 +12,10 @@ from typing import Optional, Type, List
 
 import generated.grpc_server.grpc_server as grpc_server
 import generated.protos.server.index_pb2_grpc as index_pb2_grpc
+from generated.logger import get_logger
 
 
-log = structlog.get_logger()
+log = get_logger()
 METHOD_NAMES = [{% for method in proto.methods %}"{{ proto.package }}.{{ proto.service_name }}.{{ method.name }}"{{ "," if not loop.last else "" }}{% endfor %}]
 
 
