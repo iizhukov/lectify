@@ -182,11 +182,27 @@ services:
     restart: unless-stopped
     command: -config.file=/etc/tempo.yaml
     ports:
-      - "${TEMPO_GRPC_PORT}:4317"   # OTLP gRPC
+      - "${TEMPO_GRPC_PORT_HOST:-4319}:4317"   # OTLP gRPC (internal — collector connects via docker network)
       - "${TEMPO_HTTP_PORT}:4318"   # OTLP HTTP
     volumes:
       - ./tempo/tempo-config.yml:/etc/tempo.yaml:ro
       - tempo_data:/var/tempo
+    networks:
+      - lectify-network
+
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.0
+    container_name: lectify-otel-collector
+    restart: unless-stopped
+    command: --config=/etc/otel-collector-config.yaml
+    ports:
+      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"   # OTLP gRPC
+      - "8889:8889"                                 # Prometheus exporter
+    volumes:
+      - ./otel_collector/config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      - tempo
     networks:
       - lectify-network
 

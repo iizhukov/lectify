@@ -24,8 +24,14 @@ import socket
 import inspect
 import subprocess
 
-from generated.logger import get_logger, setup_logging, log_logging_ready{% if service.logging.loki.enabled %}, start_loki_agent{% endif %}
-
+from generated.logger import (  # type: ignore
+    get_logger,
+    setup_logging,
+    log_logging_ready,
+    {% if service.logging.loki.enabled %}
+    start_loki_agent,
+    {% endif %}
+)
 
 # Настраиваем логирование при старте
 setup_logging()
@@ -45,6 +51,17 @@ def is_running_under_vault() -> bool:
         return False
     
     return os.environ.get("VAULT_TOKEN") is not None or os.environ.get("VAULT_ADDR") is not None
+{% if manifest.service.observability.enabled %}
+
+
+async def run_observability() -> None:
+    """Настраивает OpenTelemetry трассировку и метрики через OTLP gRPC."""
+    from generated.observability import configure_tracing, configure_metrics
+
+    configure_tracing()
+    configure_metrics()
+    log.info("observability_configured")
+{% endif %}
 {% if manifest.service.grpc.enabled %}
 
 
@@ -63,7 +80,12 @@ async def run_grpc() -> None:
     log.info("Starting gRPC server...")
     try:
         from generated.grpc_server import grpc_app
+        {% if manifest.service.observability.enabled %}
+        from generated.middleware import TracingInterceptor
+        await grpc_app.run(interceptors=[TracingInterceptor()])
+        {% else %}
         await grpc_app.run()
+        {% endif %}
     except Exception as e:
         log.error(f"gRPC server failed: {e}")
         raise
@@ -121,6 +143,9 @@ async def main():
     log.info("service_starting", service="{{ service.name }}")
     
     tasks = []
+    {% if manifest.service.observability.enabled %}
+    tasks.append(run_observability())
+    {% endif %}
     {% if manifest.service.grpc.enabled %}
     tasks.append(run_grpc())
     {% endif %}
@@ -146,7 +171,7 @@ async def main():
             from generated.logger import flush_loki_agent, shutdown_loki_agent
             await flush_loki_agent()
             await shutdown_loki_agent()
-        except ImportError:
+        except Exception:
             pass
     {% endif %}
 

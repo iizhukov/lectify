@@ -15,8 +15,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-from generated.logger.logger import get_logger
-from generated.logger.file import JSONFormatter
+from generated.logger.logger import get_logger  # type: ignore
+from generated.logger.file import JSONFormatter  # type: ignore
 
 
 _COLORS = {
@@ -187,11 +187,26 @@ def setup_logging():
                          'aiokafka.producer.sender', 'aiokafka.producer.producer']:
         logging.getLogger(_lib_logger).setLevel(logging.WARNING)
 
-    # 5. Configure structlog
+    # 5. Configure structlog with trace context injection
+
+    try:
+        from opentelemetry import trace
+
+        def _add_trace_context(logger, method_name, event_dict):
+            span = trace.get_current_span()
+            if span is not None and span.is_recording():
+                ctx = span.get_span_context()
+                event_dict["trace_id"] = format(ctx.trace_id, "032x")
+                event_dict["span_id"] = format(ctx.span_id, "016x")
+            return event_dict
+    except ImportError:
+        def _add_trace_context(logger, method_name, event_dict):
+            return event_dict
 
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
+            _add_trace_context,
             structlog.processors.add_log_level,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.TimeStamper(fmt="iso"),

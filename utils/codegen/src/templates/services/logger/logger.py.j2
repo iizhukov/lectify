@@ -3,10 +3,7 @@
 # To regenerate: codegen generate
 # ---------------------------------------------------------------------------
 
-import inspect
 import structlog
-
-from typing import Optional
 
 
 class LoggerFactory:
@@ -24,5 +21,5 @@ class LoggerFactory:
 _logger_factory = LoggerFactory()
 
 
-def get_logger(name: Optional[str] = None) -> structlog.BoundLogger:
+def get_logger(name: str) -> structlog.BoundLogger:
     return _logger_factory.get_logger(name)

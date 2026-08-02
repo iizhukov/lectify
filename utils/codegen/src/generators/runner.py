@@ -10,7 +10,7 @@ from generators.services.base import BaseGenerator as ServiceBaseGenerator
 from generators.services.settings import SettingsGenerator
 from generators.services.logger import LoggerGenerator
 from generators.services.vault import VaultGenerator
-# from generators.observability import ObservabilityGenerator
+from generators.services.observability import ObservabilityGenerator
 from generators.services.db import DbGenerator
 from generators.services.s3 import S3Generator
 # from generators.auth import AuthGenerator
@@ -40,7 +40,7 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
         SettingsGenerator(manifest, output_path),
         LoggerGenerator(manifest, output_path),
         VaultGenerator(manifest, output_path),
-        # ObservabilityGenerator(manifest, output_path),
+        ObservabilityGenerator(manifest, output_path),
         DbGenerator(manifest, output_path),
         S3Generator(manifest, output_path),
         # AuthGenerator(manifest, output_path),
@@ -49,7 +49,6 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
         KafkaConsumerGenerator(manifest, output_path),
         KafkaProducerGenerator(manifest, output_path),
         # ConfigClientGenerator(manifest, output_path),
-        # PrometheusScrapeGenerator(manifest, output_path),
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
         DockerfileGenerator(manifest, output_path),

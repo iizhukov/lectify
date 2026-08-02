@@ -21,7 +21,7 @@
       "icon": "external link",
       "tags": [],
       "targetBlank": true,
-      "title": "← Overview",
+      "title": "\u2190 Overview",
       "type": "link",
       "url": "/d/overview"
     },
@@ -29,7 +29,7 @@
       "icon": "external link",
       "tags": [],
       "targetBlank": true,
-      "title": "📝 Logs",
+      "title": "\ud83d\udcdd Logs",
       "type": "link",
       "url": "/d/logs"
     },
@@ -37,7 +37,7 @@
       "icon": "external link",
       "tags": [],
       "targetBlank": true,
-      "title": "📈 Metrics",
+      "title": "\ud83d\udcc8 Metrics",
       "type": "link",
       "url": "/d/metrics"
     }
@@ -46,24 +46,25 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
-      "title": "🔍 Traces",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "title": "\ud83d\udd0d Traces",
       "type": "row"
     },
     {
-      "gridPos": {"h": 3, "w": 24, "x": 0, "y": 1},
-      "id": 100,
-      "type": "markdown",
-      "options": {
-        "content": "## 🔍 Distributed Tracing\n\n| [← Overview](/d/overview) | [📝 Logs](/d/logs) | [📈 Metrics](/d/metrics) |\n|:---:|:---:|:---:|\n| Back to overview | View application logs | View service metrics |\n\n---\n\n**🚧 This dashboard is under construction. Traces will appear here once services start sending data to Tempo.**"
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
-      "title": "Navigation"
-    },
-    {
-      "datasource": {"type": "tempo", "uid": "tempo"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -74,38 +75,68 @@
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
-            "scaleDistribution": {"type": "linear"},
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "spanNulls": false,
-            "stacking": {"group": "A", "mode": "none"},
-            "thresholdsStyle": {"mode": "off"}
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"color": "green", "value": null}
+              {
+                "color": "green",
+                "value": null
+              }
             ]
           },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "id": 1,
       "options": {
-        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "pluginVersion": "11.2.0",
       "targets": [
         {
-          "expr": "sum(rate(tempo_traces_ingested[5m]))",
-          "legendFormat": "Traces ingested",
+          "expr": "sum(rate(tempo_distributor_spans_received[5m]))",
+          "legendFormat": "Spans received",
           "refId": "A"
         }
       ],
@@ -113,10 +144,15 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "tempo", "uid": "tempo"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -127,47 +163,77 @@
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
-            "scaleDistribution": {"type": "linear"},
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "spanNulls": false,
-            "stacking": {"group": "A", "mode": "none"},
-            "thresholdsStyle": {"mode": "off"}
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"color": "green", "value": null}
+              {
+                "color": "green",
+                "value": null
+              }
             ]
           },
           "unit": "s"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "id": 2,
       "options": {
-        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "pluginVersion": "11.2.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum(rate(tempo_trace_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(grpc_server_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(tempo_trace_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(grpc_server_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(tempo_trace_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(grpc_server_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "C"
         }
@@ -176,36 +242,41 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "tempo", "uid": "tempo"},
-      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 12},
-      "id": 3,
-      "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showLabels": true,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "wrapLogMessage": false
+      "type": "traces",
+      "title": "Recent Traces",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 12
       },
       "targets": [
         {
-          "expr": "{}",
+          "query": "{ .service =~ \"${service}\" }",
+          "queryMode": "traceql",
           "refId": "A"
         }
-      ],
-      "title": "Recent Traces",
-      "type": "traces"
+      ]
     }
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["lectify", "traces"],
+  "tags": [
+    "lectify",
+    "traces"
+  ],
   "templating": {
     "list": [
       {
-        "current": {"selected": true, "text": ".*", "value": ".*"},
+        "current": {
+          "selected": true,
+          "text": ".*",
+          "value": ".*"
+        },
         "description": "Filter by service name (regex)",
         "hide": 0,
         "label": "Service",
@@ -216,7 +287,10 @@
       }
     ]
   },
-  "time": {"from": "now-1h", "to": "now"},
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Traces",

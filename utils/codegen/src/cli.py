@@ -90,12 +90,12 @@ service:
 #     enabled: false
 #     flags: []
 
-#   # Observability
-#   observability:
-#     enabled: true
-#     log_level: INFO
-#     trace_sampling_rate: 1.0
-#     metrics_enabled: true
+  # Observability (metrics exported via OTLP gRPC)
+  observability:
+    enabled: true
+    log_level: INFO
+    trace_sampling_rate: 1.0
+    metrics_enabled: true
 """,
         encoding="utf-8",
     )

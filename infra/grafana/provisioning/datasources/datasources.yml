@@ -13,7 +13,8 @@ datasources:
     secureJsonData:
       httpHeaderValue1: "1"
 
-  - name: Prometheus
+  - uid: prometheus
+    name: Prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
@@ -21,12 +22,14 @@ datasources:
     jsonData:
       timeInterval: 30s
 
-  - name: Tempo
+  - uid: tempo
+    name: Tempo
     type: tempo
     access: proxy
     url: http://tempo:3200
     editable: true
     jsonData:
       httpMethod: GET
+      grpcPort: "4317"
       serviceMap:
         datasourceUid: prometheus

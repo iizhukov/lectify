@@ -11,20 +11,20 @@ from typing import Type, TypeVar, Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
-from generated.settings.base import (
+from generated.settings.base import (  # type: ignore
     DatabaseSettings,
     KafkaSettings,
     MinioSettings,
     # AuthSettings,
     # ConfigServiceSettings,
-    # ObservabilitySettings,
+    ObservabilitySettings,
     GrpcServerSettings,
 )
-from generated.logger import get_logger
+from generated.logger import get_logger  # type: ignore
 
 
 T = TypeVar('T')
-log = get_logger()
+log = get_logger("settings")
 
 
 class Settings(BaseSettings):
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     minio: "MinioSettings" = Field(default_factory=lambda: _resolve(MinioSettings)())
     # auth: "AuthSettings" = Field(default_factory=lambda: _resolve(AuthSettings)())
     # config_service: "ConfigServiceSettings" = Field(default_factory=lambda: _resolve(ConfigServiceSettings)())
-    # observability: "ObservabilitySettings" = Field(default_factory=lambda: _resolve(ObservabilitySettings)())
+    observability: "ObservabilitySettings" = Field(default_factory=lambda: _resolve(ObservabilitySettings)())
 
 
 def _is_codegen_running() -> bool:

@@ -52,13 +52,13 @@ class MinioSettings(BaseSettings):
 #     addr: str = Field(default="http://localhost:9002")
 
 
-# class ObservabilitySettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_OBS_", extra="ignore")
+class ObservabilitySettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_OBS_", extra="ignore")
 
-#     otlp_endpoint: str = Field(default="http://localhost:4317")
-#     log_level: str = Field(default="{# {{service.observability.log_level}} #}")
-#     trace_sampling_rate: float = Field(default={# {{service.observability.trace_sampling_rate}} #})
-#     metrics_enabled: bool = Field(default=True)
+    otlp_endpoint: str = Field(default="http://localhost:4317")
+    log_level: str = Field(default="{{ service.observability.log_level }}")
+    trace_sampling_rate: float = Field(default={{ service.observability.trace_sampling_rate }})
+    metrics_enabled: bool = Field(default={{ service.observability.metrics_enabled }})
 
 
 class GrpcServerSettings(BaseSettings):

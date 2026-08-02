@@ -6,7 +6,7 @@
 import grpc
 
 {% for svc in client_services %}
-from generated.protos.clients.{{ svc.name }} import {{ svc.proto_module }}_pb2_grpc as {{ svc.name }}__pb2_grpc
+from generated.protos.clients.{{ svc.name }} import {{ svc.proto_module }}_pb2_grpc as {{ svc.name }}__pb2_grpc  # type: ignore
 {% endfor %}
 
 

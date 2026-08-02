@@ -11,13 +11,33 @@ from grpc_reflection.v1alpha import reflection
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
-from generated.settings import get_settings
-from generated.grpc_server import grpc_app
-from generated.logger import get_logger
+from generated.settings import get_settings  # type: ignore
+from generated.grpc_server import grpc_app  # type: ignore
+from generated.logger import get_logger  # type: ignore
 
 
-log = get_logger()
+log = get_logger("grpc_server")
 
+{% if manifest.service.observability.enabled %}
+
+async def serve(
+    add_servicers: Callable[[grpc.aio.Server], None],
+    port: int | None = None,
+    max_workers: int = 10,
+    interceptors: list | None = None,
+) -> None:
+    s = get_settings()
+    listen_port = port or s.grpc.port
+
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=max_workers),
+        interceptors=interceptors or [],
+        options=[
+            ("grpc.max_send_message_length", 50 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 50 * 1024 * 1024),
+        ],
+    )
+{% else %}
 
 async def serve(
     add_servicers: Callable[[grpc.aio.Server], None],
@@ -34,6 +54,7 @@ async def serve(
             ("grpc.max_receive_message_length", 50 * 1024 * 1024),
         ],
     )
+{% endif %}
 
     add_servicers(server)
 

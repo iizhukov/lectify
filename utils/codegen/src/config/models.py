@@ -81,6 +81,13 @@ class KafkaConsumerConfig(BaseModel):
     max_poll_interval_ms: int = Field(default=300000, ge=1000)
 
 
+class ObservabilityConfig(BaseModel):
+    enabled: bool = True
+    trace_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    metrics_enabled: bool = True
+    service_name: str | None = None
+
+
 # class AuthConfig(BaseModel):
 #     enabled: bool = True
 #     require_ticket: bool = True
@@ -96,16 +103,6 @@ class KafkaConsumerConfig(BaseModel):
 # class ConfigClientConfig(BaseModel):
 #     enabled: bool = False
 #     flags: list[FeatureFlag] = Field(default_factory=list)
-
-
-# class ObservabilityConfig(BaseModel):
-#     enabled: bool = True
-#     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-#     trace_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0)
-#     metrics_enabled: bool = True
-#     service_name: str | None = None
-#     metrics_path: str = "/metrics"
-#     metrics_port: int = 9090
 
 
 class Service(BaseModel):
@@ -126,11 +123,11 @@ class Service(BaseModel):
     minio: MinioConfig = Field(default_factory=MinioConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     # auth: AuthConfig = Field(default_factory=AuthConfig)
     # config_client: ConfigClientConfig = Field(default_factory=ConfigClientConfig)
 
-    # observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
 
 class ServiceManifest(BaseModel):

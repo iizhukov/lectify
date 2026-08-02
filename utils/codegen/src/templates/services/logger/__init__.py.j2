@@ -3,12 +3,12 @@
 # To regenerate: codegen generate
 # ---------------------------------------------------------------------------
 
-from generated.logger.logger import get_logger, LoggerFactory
-from generated.logger.file import JSONFormatter
-from generated.logger.setup import setup_logging, log_logging_ready
+from generated.logger.logger import get_logger, LoggerFactory  # type: ignore
+from generated.logger.file import JSONFormatter  # type: ignore
+from generated.logger.setup import setup_logging, log_logging_ready  # type: ignore
 {% if service.logging.loki.enabled %}
-from generated.logger.setup import start_loki_agent
-from generated.logger.loki import LokiAgent, init_loki_agent, shutdown_loki_agent, flush_loki_agent, get_loki_agent
+from generated.logger.setup import start_loki_agent  # type: ignore
+from generated.logger.loki import LokiAgent, init_loki_agent, shutdown_loki_agent, flush_loki_agent, get_loki_agent  # type: ignore
 {% endif %}
 
 

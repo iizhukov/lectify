@@ -12,8 +12,8 @@ from typing import Any, AsyncIterator, Optional, Type, List
 from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaError
 
-from generated.settings import get_settings
-from generated.logger import get_logger
+from generated.settings import get_settings  # type: ignore
+from generated.logger import get_logger  # type: ignore
 
 
 log = get_logger("kafka_consumer")

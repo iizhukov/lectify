@@ -8,8 +8,8 @@ from typing import Any
 from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
-from generated.settings import get_settings
-from generated.logger import get_logger
+from generated.settings import get_settings  # type: ignore
+from generated.logger import get_logger  # type: ignore
 
 
 log = get_logger("kafka_producer")

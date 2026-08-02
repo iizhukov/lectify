@@ -10,12 +10,12 @@ import importlib
 from pathlib import Path
 from typing import Optional, Type, List
 
-import generated.grpc_server.grpc_server as grpc_server
-import generated.protos.server.index_pb2_grpc as index_pb2_grpc
-from generated.logger import get_logger
+import generated.grpc_server.grpc_server as grpc_server  # type: ignore
+import generated.protos.server.index_pb2_grpc as index_pb2_grpc  # type: ignore
+from generated.logger import get_logger  # type: ignore
 
 
-log = get_logger()
+log = get_logger("grpc_server")
 METHOD_NAMES = [{% for method in proto.methods %}"{{ proto.package }}.{{ proto.service_name }}.{{ method.name }}"{{ "," if not loop.last else "" }}{% endfor %}]
 
 
@@ -134,7 +134,12 @@ def add_{{ proto.service_name }}_servicer(server: grpc.aio.Server) -> None:
         log.error("grpc_app_error", error=str(e))
         raise
 
-
+{% if manifest.service.observability.enabled %}
+async def run(port: int | None = None, interceptors: list | None = None) -> None:
+    """Start the gRPC server. Call this from main()."""
+    await grpc_server.serve(add_{{ proto.service_name }}_servicer, port, interceptors=interceptors)
+{% else %}
 async def run(port: int | None = None) -> None:
     """Start the gRPC server. Call this from main()."""
     await grpc_server.serve(add_{{ proto.service_name }}_servicer, port)
+{% endif %}
