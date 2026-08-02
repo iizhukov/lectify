@@ -270,6 +270,18 @@ services:
     networks:
       - lectify-network
 
+  dbui:
+    image: sosedoff/pgweb:latest
+    container_name: lectify-dbui
+    restart: unless-stopped
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432?sslmode=disable
+    ports:
+      - "${DBUI_PORT}:8081"
+    networks:
+      - lectify-network
+
+
 networks:
   lectify-network:
 
