@@ -17,6 +17,8 @@ VAULT_TOKEN := "{{ settings.VAULT_DEV_ROOT_TOKEN_ID }}"
 VENV_DIR := venv
 PYTHON := $(VENV_DIR)/bin/python
 PIP := $(VENV_DIR)/bin/pip
+REQUIREMENTS_FILE := generated/requirements.txt
+REQUIREMENTS_CHECKSUM := $(VENV_DIR)/.requirements.checksum
 
 SHOW_VAULT_LOG ?= 0
 
@@ -39,6 +41,7 @@ help:
 	@echo "  $(YELLOW)make run SHOW_VAULT_LOG=1$(NC) - Run with Vault Agent logs visible"
 	@echo "  $(YELLOW)make run-direct$(NC)      - Run directly without Vault"
 	@echo "  $(YELLOW)make clean$(NC)           - Clean generated files and venv"
+	@echo "  $(YELLOW)make check-requirements$(NC) - Update deps if requirements.txt changed"
 	@echo "  $(YELLOW)make health$(NC)          - Check service health"
 {% if service.vault.enabled %}
 	@echo "  $(YELLOW)make run-vault SHOW_VAULT_LOG=1$(NC)    - Run with Vault Agent"
@@ -55,7 +58,9 @@ help:
 venv:
 	@echo "$(GREEN)Creating virtualenv in $(VENV_DIR)...$(NC)"
 	python3 -m venv $(VENV_DIR)
-	$(PIP) install -r generated/requirements.txt
+	$(PIP) install -r $(REQUIREMENTS_FILE)
+	$(shell mkdir -p $(VENV_DIR))
+	@md5sum $(REQUIREMENTS_FILE) > $(REQUIREMENTS_CHECKSUM) 2>/dev/null || md5 -r $(REQUIREMENTS_FILE) > $(REQUIREMENTS_CHECKSUM) 2>/dev/null || true
 	@echo "$(GREEN)Done. Activate with: source $(VENV_DIR)/bin/activate$(NC)"
 
 {% if service.vault.enabled %}
@@ -97,11 +102,27 @@ run-vault: check-vault check-vault-config check-secrets
 
 {% endif %}
 
+check-requirements:
+	@if [ -f $(REQUIREMENTS_CHECKSUM) ] && [ -f $(REQUIREMENTS_FILE) ]; then \
+		COMPUTED=$$(md5sum $(REQUIREMENTS_FILE) 2>/dev/null | cut -d' ' -f1 || md5 -r $(REQUIREMENTS_FILE) 2>/dev/null | cut -d' ' -f1); \
+		STORED=$$(cat $(REQUIREMENTS_CHECKSUM)); \
+		if [ "$$COMPUTED" != "$$STORED" ]; then \
+			echo "$(YELLOW)requirements.txt changed, reinstalling dependencies...$(NC)"; \
+			$(PIP) install -r $(REQUIREMENTS_FILE); \
+			md5sum $(REQUIREMENTS_FILE) > $(REQUIREMENTS_CHECKSUM) 2>/dev/null || md5 -r $(REQUIREMENTS_FILE) > $(REQUIREMENTS_CHECKSUM) 2>/dev/null || true; \
+		fi \
+	elif [ -f $(REQUIREMENTS_FILE) ]; then \
+		echo "$(YELLOW)Initializing dependency tracking...$(NC)"; \
+		$(PIP) install -r $(REQUIREMENTS_FILE); \
+		md5sum $(REQUIREMENTS_FILE) > $(REQUIREMENTS_CHECKSUM) 2>/dev/null || md5 -r $(REQUIREMENTS_FILE) > $(REQUIREMENTS_CHECKSUM) 2>/dev/null || true; \
+	fi
+
 check-venv:
 	@if [ ! -f $(PYTHON) ]; then \
 		echo "$(YELLOW)Virtualenv not found, creating...$(NC)"; \
 		$(MAKE) venv; \
 	fi
+	@$(MAKE) check-requirements 2>/dev/null || true
 
 run: check-venv
 	@echo "$(GREEN)Running $(SERVICE_NAME)...$(NC)"

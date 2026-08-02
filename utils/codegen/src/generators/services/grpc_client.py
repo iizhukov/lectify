@@ -4,8 +4,10 @@ import sys
 
 from pathlib import Path
 
+from google.protobuf import descriptor_pb2
+
 from generators.services.base import BaseGenerator
-from utils import get_service_proto, get_service_path, get_service_manifest
+from utils import get_service_proto, get_service_path, get_service_manifest, get_repo_root
 
 
 class GrpcClientGenerator(BaseGenerator):
@@ -34,7 +36,12 @@ class GrpcClientGenerator(BaseGenerator):
     def _build_service_list(self) -> list[dict]:
         result = []
 
-        for svc_name in self.svc.grpc_client.services:
+        services = list(self.svc.grpc_client.services)
+
+        if self.svc.ticket_auth.enabled and "infra_tas" not in services:
+            services.append("infra_tas")
+
+        for svc_name in services:
             svc_path = get_service_path(svc_name)
             svc_manifest = get_service_manifest(svc_path)
             proto_path = get_service_proto(svc_path)
@@ -46,7 +53,7 @@ class GrpcClientGenerator(BaseGenerator):
             methods = self._parse_proto_methods(proto_path)
             pkg, svc_cls = self._parse_proto_package_and_service(proto_path)
 
-            svc_addr = "localhost"
+            svc_addr = svc_name if self.docker else "localhost"
             svc_port = svc_manifest.service.grpc.port
 
             result.append({
@@ -93,6 +100,8 @@ class GrpcClientGenerator(BaseGenerator):
             if content != fixed:
                 gf.write_text(fixed)
 
+        self._fix_pb2_descriptor_name(protos_out, proto_path, svc['name'])
+
     def _parse_proto_methods(self, proto_path: Path) -> list[dict]:
         content = proto_path.read_text(encoding="utf-8")
         methods = []
@@ -108,6 +117,38 @@ class GrpcClientGenerator(BaseGenerator):
             })
         return methods
 
+
+    def _fix_pb2_descriptor_name(self, protos_out: Path, proto_path: Path, service_name: str) -> None:
+        proto_root = get_repo_root() / "proto"
+        try:
+            unique_name = str(proto_path.relative_to(proto_root))
+        except ValueError:
+            unique_name = f"{service_name}/{proto_path.name}"
+
+        for pb2_file in protos_out.glob(f"{proto_path.stem}_pb2.py"):
+            content = pb2_file.read_text(encoding="utf-8")
+            match = re.search(r"AddSerializedFile\(b'(.*?)'\)", content, re.DOTALL)
+            if not match:
+                continue
+
+            serialized_repr = match.group(1)
+            raw_bytes = serialized_repr.encode('latin1').decode('unicode_escape')
+
+            fdp = descriptor_pb2.FileDescriptorProto()
+            fdp.ParseFromString(raw_bytes.encode('latin1'))
+
+            if fdp.name != unique_name:
+                fdp.name = unique_name
+                new_serialized = fdp.SerializeToString()
+                new_escaped = new_serialized.decode('latin1').encode('unicode_escape').decode('latin1')
+                content = content.replace(
+                    f"AddSerializedFile(b'{serialized_repr}')",
+                    f"AddSerializedFile(b'{new_escaped}')",
+                )
+                pb2_file.write_text(content, encoding="utf-8")
+                print(f"[codegen] gRPC client: fixed descriptor name for {service_name}: {unique_name}")
+
+
     def _parse_proto_package_and_service(self, proto_path: Path) -> tuple[str, str]:
         content = proto_path.read_text(encoding="utf-8")
         pkg_match = re.search(r"package\s+([a-zA-Z0-9._]+)\s*;", content)
@@ -118,6 +159,5 @@ class GrpcClientGenerator(BaseGenerator):
 
 
 def _to_snake(name: str) -> str:
-    """Convert PascalCase or kebab-case to snake_case."""
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
     return re.sub("_", "", s1).lower()

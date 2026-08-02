@@ -7,4 +7,4 @@ log = get_logger("main")
 
 async def main() -> None:
     pool_size = get_settings().database.pool_size
-    log.debug("Pool size (changed from config)", pool_size=pool_size)
+    log.info("Pool size (changed from config)", pool_size=pool_size)

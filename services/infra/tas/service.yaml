@@ -1,7 +1,7 @@
 service:
-  name: example_server
+  name: infra_tas
   version: 0.1.0
-  description: ""
+  description: "Ticket Authorization System - issues and validates JWT tickets for service-to-service auth"
 
   # Enable service in project generation
   active: true
@@ -13,18 +13,17 @@ service:
 
   # User main.py
   main:
-    enabled: true
+    enabled: false
 
   # gRPC server
   grpc:
     enabled: true
-    port: 10001
+    port: 10010
 
   # gRPC client (call other services)
   grpc_client:
-    enabled: true
-    services:
-      - infra_tas
+    enabled: false
+    services: []
 
   # Kafka
   kafka_producer:
@@ -32,8 +31,8 @@ service:
     topics: []
 
   kafka_consumer:
-    enabled: true
-    topics: [example]
+    enabled: false
+    topics: []
     group_id: null
     auto_offset_reset: "earliest"
     max_poll_records: 100
@@ -48,20 +47,18 @@ service:
     migration_dir: "migrations"
 
   minio:
-    enabled: true
-    buckets:
-      - example
+    enabled: false
+    buckets: []
 
   vault:
     enabled: true
     vars:
-      - SERVER_MINIO_ACCESS_KEY
-      - SERVER_MINIO_SECRET_KEY
-      - SERVER_DB_URL
+      - INFRA_TAS_JWT_PRIVATE_KEY
+      - INFRA_TAS_DB_URL
 
   scheduler:
-    enabled: true
-    storage: "database"
+    enabled: false
+    storage: "memory"
 
   logging:
     file:
@@ -76,12 +73,6 @@ service:
         flush_interval: 5
         max_retries: 3
         timeout: 10
-
-  # Ticket Authorization
-  ticket_auth:
-    enabled: true
-    tas_service: "infra_tas"
-    ticket_ttl: 60
 
   # Observability
   observability:

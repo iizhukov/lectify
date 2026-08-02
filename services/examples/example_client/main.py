@@ -75,7 +75,7 @@ async def run_grpc_calls() -> None:
 async def main() -> None:
     log.info("example_client_started")
 
-    await run_kafka_producer()
+    # await run_kafka_producer()
     await run_grpc_calls()
 
     log.info("example_client_done")

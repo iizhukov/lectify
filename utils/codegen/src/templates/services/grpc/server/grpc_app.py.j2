@@ -134,7 +134,7 @@ def add_{{ proto.service_name }}_servicer(server: grpc.aio.Server) -> None:
         log.error("grpc_app_error", error=str(e))
         raise
 
-{% if manifest.service.observability.enabled %}
+{% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled %}
 async def run(port: int | None = None, interceptors: list | None = None) -> None:
     """Start the gRPC server. Call this from main()."""
     await grpc_server.serve(add_{{ proto.service_name }}_servicer, port, interceptors=interceptors)

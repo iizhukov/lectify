@@ -11,7 +11,7 @@ def _base_requirements(svc) -> list[str]:
         "pydantic>=2.0.0",
         "pydantic-settings>=2.0.0",
     ]
-    if svc.grpc.enabled or svc.grpc_client.enabled:
+    if svc.grpc.enabled or svc.grpc_client.enabled or svc.ticket_auth.enabled:
         deps += [
             "grpcio>=1.60.0",
             "grpcio-tools>=1.60.0",
@@ -35,16 +35,27 @@ def _base_requirements(svc) -> list[str]:
     if svc.kafka_producer.enabled or svc.kafka_consumer.enabled:
         deps.append("aiokafka>=0.10.0")
 
+    if svc.grpc_client.enabled or svc.ticket_auth.enabled:
+        deps += [
+            "opentelemetry-api>=1.22.0",
+            "opentelemetry-instrumentation-grpc>=0.43b0",
+        ]
+
     if svc.observability.enabled:
         deps += [
             "opentelemetry-sdk>=1.22.0",
-            "opentelemetry-api>=1.22.0",
             "opentelemetry-exporter-otlp-proto-grpc>=1.22.0",
-            "opentelemetry-instrumentation-grpc>=0.43b0",
         ]
 
     if svc.scheduler.enabled:
         deps.append("croniter>=2.0.0")
+
+    if svc.ticket_auth.enabled:
+        deps.append("pyjwt>=2.8.0")
+        deps.append("cryptography>=41.0.0")
+
+    if svc.name == "infra_tas":
+        deps.append("cryptography>=41.0.0")
 
     return deps
 

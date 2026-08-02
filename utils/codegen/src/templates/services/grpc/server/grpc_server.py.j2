@@ -18,7 +18,7 @@ from generated.logger import get_logger  # type: ignore
 
 log = get_logger("grpc_server")
 
-{% if manifest.service.observability.enabled %}
+{% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled %}
 
 async def serve(
     add_servicers: Callable[[grpc.aio.Server], None],

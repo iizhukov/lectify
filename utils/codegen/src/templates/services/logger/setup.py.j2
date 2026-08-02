@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
+from opentelemetry import trace
+from structlog.contextvars import get_contextvars, bind_contextvars
 
 from generated.logger.logger import get_logger  # type: ignore
 from generated.logger.file import JSONFormatter  # type: ignore
@@ -190,17 +192,49 @@ def setup_logging():
     # 5. Configure structlog with trace context injection
 
     try:
-        from opentelemetry import trace
-
         def _add_trace_context(logger, method_name, event_dict):
             span = trace.get_current_span()
-            if span is not None and span.is_recording():
+
+            if span is not None:
                 ctx = span.get_span_context()
-                event_dict["trace_id"] = format(ctx.trace_id, "032x")
-                event_dict["span_id"] = format(ctx.span_id, "016x")
+                if ctx.trace_id != 0:
+                    trace_id_hex = format(ctx.trace_id, "032x")
+                    span_id_hex = format(ctx.span_id, "016x")
+
+                    event_dict["trace_id"] = trace_id_hex
+                    event_dict["span_id"] = span_id_hex
+                    event_dict["trace_flags"] = str(ctx.trace_flags)
+
+                    _cvars = get_contextvars()
+                    if _cvars.get("trace_id") != trace_id_hex:
+                        bind_contextvars(trace_id=trace_id_hex, span_id=span_id_hex)
+                    return event_dict
+
+            if "trace_id" not in event_dict:
+                cvars = get_contextvars()
+                if cvars.get("trace_id"):
+                    event_dict["trace_id"] = cvars["trace_id"]
+                    if cvars.get("span_id"):
+                        event_dict["span_id"] = cvars["span_id"]
+                else:
+                    import uuid
+                    _new_tid = str(uuid.uuid4().hex)[:32]
+                    _new_sid = str(uuid.uuid4().hex)[:16]
+                    bind_contextvars(trace_id=_new_tid, span_id=_new_sid)
+                    event_dict["trace_id"] = _new_tid
+                    event_dict["span_id"] = _new_sid
+
             return event_dict
     except ImportError:
         def _add_trace_context(logger, method_name, event_dict):
+            cvars = get_contextvars()
+
+            if cvars.get("trace_id"):
+                event_dict["trace_id"] = cvars["trace_id"]
+
+            if cvars.get("span_id"):
+                event_dict["span_id"] = cvars["span_id"]
+
             return event_dict
 
     structlog.configure(

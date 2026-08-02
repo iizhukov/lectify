@@ -83,15 +83,10 @@ class KafkaConsumerConfig(BaseModel):
 
 class ObservabilityConfig(BaseModel):
     enabled: bool = True
+    log_level: str = 'INFO'
     trace_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     metrics_enabled: bool = True
     service_name: str | None = None
-
-
-# class AuthConfig(BaseModel):
-#     enabled: bool = True
-#     require_ticket: bool = True
-#     allowed_services: list[str] = Field(default_factory=list)
 
 
 # class FeatureFlag(BaseModel):
@@ -110,6 +105,12 @@ class SchedulerConfig(BaseModel):
     storage: Literal["memory", "database"] = "memory"
 
 
+class TicketAuthConfig(BaseModel):
+    enabled: bool = False
+    tas_service: str = "infra_tas"
+    ticket_ttl: int = 60
+
+
 class Service(BaseModel):
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
     version: str = Field(default="0.1.0", pattern=r"^\d+\.\d+\.\d+$")
@@ -126,13 +127,12 @@ class Service(BaseModel):
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     minio: MinioConfig = Field(default_factory=MinioConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
+    ticket_auth: TicketAuthConfig = Field(default_factory=TicketAuthConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
-    # auth: AuthConfig = Field(default_factory=AuthConfig)
     # config_client: ConfigClientConfig = Field(default_factory=ConfigClientConfig)
-
 
 
 class ServiceManifest(BaseModel):

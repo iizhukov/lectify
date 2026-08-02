@@ -4,15 +4,22 @@
 # ---------------------------------------------------------------------------
 
 import grpc
+import uuid
 
+from structlog.contextvars import get_contextvars, bind_contextvars
+
+{% if manifest.service.ticket_auth.enabled %}
+from generated.ticket_auth.interceptor import TicketAuthClientInterceptor  # type: ignore
+{% endif %}
 {% for svc in client_services %}
 from generated.protos.clients.{{ svc.name }} import {{ svc.proto_module }}_pb2_grpc as {{ svc.name }}__pb2_grpc  # type: ignore
 {% endfor %}
 
 
 class GrpcClients:
-    def __init__(self) -> None:
+    def __init__(self, source_service: str | None = None) -> None:
         self._channels: dict[str, grpc.aio.Channel] = {}
+        self._source_service = source_service
         self._defaults = {
             {% for svc in client_services %}
             "{{ svc.name }}": "{{ svc.address }}",
@@ -35,7 +42,22 @@ class GrpcClients:
             raise ValueError(f"No address for service: {service_name}")
 
         if service_name not in self._channels:
-            self._channels[service_name] = grpc.aio.insecure_channel(target)
+            # Generate trace_id in caller's context BEFORE channel creation.
+            # OTel CLIENT span will inherit it via _make_parent_context.
+            _cvars = get_contextvars()
+            if not _cvars.get("trace_id"):
+                bind_contextvars(trace_id=str(uuid.uuid4().hex)[:32], span_id=str(uuid.uuid4().hex)[:16])
+
+            {% if manifest.service.ticket_auth.enabled %}
+            _interceptor = TicketAuthClientInterceptor(
+                source_service=self._source_service or "{{ service.name }}",
+                target_service=service_name,
+            )
+            ch = grpc.aio.insecure_channel(target, interceptors=[_interceptor])
+            {% else %}
+            ch = grpc.aio.insecure_channel(target)
+            {% endif %}
+            self._channels[service_name] = ch
 
         return self._channels[service_name]
 

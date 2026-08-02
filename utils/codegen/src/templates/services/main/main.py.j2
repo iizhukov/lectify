@@ -4,6 +4,9 @@
 # ---------------------------------------------------------------------------
 
 import sys
+import structlog
+import uuid
+
 from pathlib import Path
 
 
@@ -80,9 +83,19 @@ async def run_grpc() -> None:
     log.info("Starting gRPC server...")
     try:
         from generated.grpc_server import grpc_app  # type: ignore
+        {% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled %}
+        interceptors = []
         {% if manifest.service.observability.enabled %}
         from generated.observability.middleware import TracingInterceptor  # type: ignore
-        await grpc_app.run(interceptors=[TracingInterceptor()])
+        interceptors.append(TracingInterceptor())
+        {% endif %}
+        {% if manifest.service.ticket_auth.enabled %}
+        from generated.ticket_auth.interceptor import TicketAuthServerInterceptor  # type: ignore
+        from generated.settings import get_settings  # type: ignore
+        _s = get_settings()
+        interceptors.append(TicketAuthServerInterceptor(target_service=_s.service_name))
+        {% endif %}
+        await grpc_app.run(interceptors=interceptors)
         {% else %}
         await grpc_app.run()
         {% endif %}
@@ -158,9 +171,6 @@ async def main():
     log.info("service_starting", service="{{ service.name }}")
     
     tasks = []
-    {% if manifest.service.observability.enabled %}
-    tasks.append(run_observability())
-    {% endif %}
     {% if manifest.service.grpc.enabled %}
     tasks.append(run_grpc())
     {% endif %}
@@ -179,7 +189,16 @@ async def main():
         return
     
     try:
+        {% if manifest.service.observability.enabled %}
+        await run_observability()
+        {% endif %}
         await asyncio.gather(*tasks, return_exceptions=True)
+        {% if manifest.service.observability.enabled %}
+        from opentelemetry import trace as _otel_trace
+        _tp = _otel_trace.get_tracer_provider()
+        if hasattr(_tp, "force_flush"):
+            _tp.force_flush()
+        {% endif %}
     except Exception as e:
         log.error(f"Error in main: {e}")
         raise

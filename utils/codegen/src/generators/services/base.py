@@ -12,12 +12,13 @@ from settings import get_settings
 
 
 class BaseGenerator(ABC):
-    def __init__(self, manifest: ServiceManifest, output: Path) -> None:
+    def __init__(self, manifest: ServiceManifest, output: Path, docker: bool = False) -> None:
         self.manifest = manifest
         self.svc = manifest.service
         self.output = output
         self.svc_dir = output.parent
         self.files_written = 0
+        self.docker = docker
 
         self._add_to_path()
 

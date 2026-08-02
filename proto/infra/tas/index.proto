@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package tas.v1;
+
+service TicketService {
+    rpc IssueTicket(IssueTicketRequest) returns (IssueTicketResponse);
+    rpc ValidateTicket(ValidateTicketRequest) returns (ValidateTicketResponse);
+    rpc GetPublicKey(GetPublicKeyRequest) returns (GetPublicKeyResponse);
+
+    // Permission management
+    rpc SetPermission(SetPermissionRequest) returns (SetPermissionResponse);
+    rpc RemovePermission(RemovePermissionRequest) returns (RemovePermissionResponse);
+    rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
+    rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+}
+
+message IssueTicketRequest {
+    string source_service = 1;
+    string target_service = 2;
+    int32 ttl_seconds = 3;
+}
+
+message IssueTicketResponse {
+    string ticket = 1;
+    int64 expires_at = 2;
+}
+
+message ValidateTicketRequest {
+    string ticket = 1;
+    string target_service = 2;
+}
+
+message ValidateTicketResponse {
+    bool valid = 1;
+    string source_service = 2;
+    string target_service = 3;
+}
+
+message GetPublicKeyRequest {}
+
+message GetPublicKeyResponse {
+    string public_key = 1;
+    string algorithm = 2;
+}
+
+// Permission types
+enum PermissionEffect {
+    PERMISSION_EFFECT_UNSPECIFIED = 0;
+    PERMISSION_EFFECT_ALLOW = 1;
+    PERMISSION_EFFECT_DENY = 2;
+}
+
+message PermissionRule {
+    string source_service = 1;
+    string target_service = 2;
+    PermissionEffect effect = 3;
+    string description = 4;
+}
+
+message SetPermissionRequest {
+    string source_service = 1;
+    string target_service = 2;
+    PermissionEffect effect = 3;
+    string description = 4;
+}
+
+message SetPermissionResponse {
+    bool success = 1;
+}
+
+message RemovePermissionRequest {
+    string source_service = 1;
+    string target_service = 2;
+}
+
+message RemovePermissionResponse {
+    bool success = 1;
+}
+
+message ListPermissionsRequest {}
+
+message ListPermissionsResponse {
+    repeated PermissionRule rules = 1;
+}
+
+message CheckPermissionRequest {
+    string source_service = 1;
+    string target_service = 2;
+}
+
+message CheckPermissionResponse {
+    bool allowed = 1;
+    PermissionEffect effect = 2;
+}

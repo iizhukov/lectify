@@ -18,6 +18,7 @@ from generators.services.grpc_server import GrpcServerGenerator
 from generators.services.grpc_client import GrpcClientGenerator
 from generators.services.kafka_consumer import KafkaConsumerGenerator
 from generators.services.scheduler import SchedulerGenerator
+from generators.services.ticket_auth import TicketAuthGenerator
 from generators.services.kafka_producer import KafkaProducerGenerator
 # from generators.config_client import ConfigClientGenerator
 # from generators.prometheus_scrape import PrometheusScrapeGenerator
@@ -31,7 +32,7 @@ from generators.infra.postgres import PostgresGenerator
 from generators.infra.kafka import KafkaGenerator
 
 
-def run_service(manifest: ServiceManifest, output_path: Path) -> None:
+def run_service(manifest: ServiceManifest, output_path: Path, docker: bool = False) -> None:
     if output_path.exists():
         shutil.rmtree(output_path)
 
@@ -46,10 +47,11 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
         S3Generator(manifest, output_path),
         # AuthGenerator(manifest, output_path),
         GrpcServerGenerator(manifest, output_path),
-        GrpcClientGenerator(manifest, output_path),
+        GrpcClientGenerator(manifest, output_path, docker=docker),
         KafkaConsumerGenerator(manifest, output_path),
         KafkaProducerGenerator(manifest, output_path),
         SchedulerGenerator(manifest, output_path),
+        TicketAuthGenerator(manifest, output_path, docker=docker),
         # ConfigClientGenerator(manifest, output_path),
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
@@ -81,11 +83,11 @@ def run_plugins() -> None:
     ...
 
 
-def run_project(services: list[ServiceManifest]) -> None:
+def run_project(services: list[ServiceManifest], docker: bool = False) -> None:
     services = list(filter(lambda s: s.service.active, services))
 
     for service in services:
-        run_service(service, get_service_path(service.service.name) / "generated/")
+        run_service(service, get_service_path(service.service.name) / "generated/", docker=docker)
 
     run_infra(services)
     run_plugins()

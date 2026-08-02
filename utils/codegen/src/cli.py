@@ -83,6 +83,12 @@ service:
     enabled: false
     storage: "memory"
 
+  # Ticket Authorization
+  ticket_auth:
+    enabled: false
+    tas_service: "infra_tas"
+    ticket_ttl: 60
+
   logging:
     file:
         level: DEBUG
@@ -135,7 +141,7 @@ def cmd_validate(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_service(_: argparse.Namespace) -> int:
+def cmd_service(args: argparse.Namespace) -> int:
     manifest_path = Path.cwd() / "service.yaml"
     output_path = Path.cwd() / "generated/"
 
@@ -146,7 +152,7 @@ def cmd_service(_: argparse.Namespace) -> int:
         return 1
 
     try:
-        run_service(manifest, output_path)
+        run_service(manifest, output_path, docker=args.docker)
     except Exception as e:
         print(f"[codegen] ERROR: {e}", file=sys.stderr)
         return 1
@@ -165,10 +171,10 @@ def cmd_infra(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_project(_: argparse.Namespace) -> int:
+def cmd_project(args: argparse.Namespace) -> int:
     try:
         services = load_valid_services()
-        run_project(services)
+        run_project(services, docker=args.docker)
     except Exception as e:
         print(f"[codegen] ERROR: {e}", file=sys.stderr)
         return 1
@@ -302,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
     p_validate.set_defaults(func=cmd_validate)
 
     p_gen = sub.add_parser("service", help="Generate code from service.yaml")
+    p_gen.add_argument("--docker", action="store_true", help="Use Docker service names as addresses instead of localhost")
     p_gen.set_defaults(func=cmd_service)
 
     p_gen = sub.add_parser("infra", help="Generate init scripts for infra/")
@@ -311,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gen.set_defaults(func=cmd_plugins)
 
     p_gen = sub.add_parser("project", help="generate all project files")
+    p_gen.add_argument("--docker", action="store_true", help="Use Docker service names as addresses instead of localhost")
     p_gen.set_defaults(func=cmd_project)
 
     p_mig = sub.add_parser("migrations", help="Database migrations: make, migrate, status, rollback")

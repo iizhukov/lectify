@@ -52,6 +52,17 @@ class MinioSettings(BaseSettings):
 #     addr: str = Field(default="http://localhost:9002")
 
 
+class TicketAuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_TICKET_AUTH_", extra="ignore")
+
+    enabled: bool = Field(default={{ service.ticket_auth.enabled }})
+    tas_service: str = Field(default="{{ service.ticket_auth.tas_service }}")
+    tas_address: str = Field(default="localhost:10010")
+    ticket_ttl: int = Field(default={{ service.ticket_auth.ticket_ttl }})
+    private_key: str = Field(default="")
+    public_key: str = Field(default="")
+
+
 class ObservabilitySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_OBS_", extra="ignore")
 

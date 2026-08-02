@@ -4,16 +4,36 @@
 # ---------------------------------------------------------------------------
 
 import time
-from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine
-
+import uuid
 import grpc.aio
+import structlog
+
+from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine
+from structlog.contextvars import get_contextvars, bind_contextvars
 from opentelemetry import trace, metrics
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, SpanContext, TraceFlags, NonRecordingSpan
+from opentelemetry import propagate as _otel_propagate
+from opentelemetry.trace.propagation import set_span_in_context
 
 from generated.logger import get_logger  # type: ignore
 
 
 log = get_logger("middleware")
+_TRACE_ID_HEADER = "x-trace-id"
+
+
+def _make_parent_context(trace_id_hex: str) -> object | None:
+    try:
+        trace_id = int(trace_id_hex, 16)
+        span_context = SpanContext(
+            trace_id=trace_id,
+            span_id=uuid.uuid4().int & 0xFFFFFFFFFFFFFFFF,
+            is_remote=True,
+            trace_flags=TraceFlags(TraceFlags.SAMPLED),
+        )
+        return set_span_in_context(NonRecordingSpan(span_context))
+    except Exception:
+        return None
 
 
 class _TracedHandler(grpc.RpcMethodHandler):
@@ -24,7 +44,9 @@ class _TracedHandler(grpc.RpcMethodHandler):
         handler: grpc.RpcMethodHandler,
         service: str,
         method: str,
+        otel_parent_ctx: object | None = None,
     ) -> None:
+        self._otel_parent_ctx = otel_parent_ctx
         self._handler = handler
         self._service = service
         self._method = method
@@ -75,6 +97,7 @@ class _TracedHandler(grpc.RpcMethodHandler):
             async for item in self._instrument_stream(context, async_iter):
                 yield item
         return wrapper
+
     async def _instrument(
         self,
         context: grpc.aio.ServicerContext,
@@ -82,17 +105,31 @@ class _TracedHandler(grpc.RpcMethodHandler):
     ) -> Any:
         self._inflight.add(1, {"rpc.service": self._service, "rpc.method": self._method})
 
+        _existing = get_contextvars()
+        trace_id_hex = _existing.get("trace_id", str(uuid.uuid4().hex)[:32])
+        bind_contextvars(
+            rpc_service=self._service,
+            rpc_method=self._method,
+            request_id=str(uuid.uuid4())[:8],
+            trace_id=trace_id_hex,
+        )
+
         start = time.monotonic()
         tracer = trace.get_tracer(__name__)
+
+        parent_ctx = self._otel_parent_ctx or _make_parent_context(trace_id_hex)
 
         try:
             with tracer.start_as_current_span(
                 f"{self._service}/{self._method}",
+                context=parent_ctx,
                 kind=SpanKind.SERVER,
             ) as span:
                 span.set_attribute("rpc.service", self._service)
                 span.set_attribute("rpc.method", self._method)
                 span.set_attribute("rpc.system", "grpc")
+                span.set_attribute("request_id", _existing.get("request_id", ""))
+                span.set_attribute("otel.trace_id", trace_id_hex)
 
                 result = await coro
 
@@ -128,17 +165,30 @@ class _TracedHandler(grpc.RpcMethodHandler):
     ) -> AsyncIterator[Any]:
         self._inflight.add(1, {"rpc.service": self._service, "rpc.method": self._method})
 
+        _existing = get_contextvars()
+        trace_id_hex = _existing.get("trace_id", str(uuid.uuid4().hex)[:32])
+        bind_contextvars(
+            rpc_service=self._service,
+            rpc_method=self._method,
+            request_id=str(uuid.uuid4())[:8],
+            trace_id=trace_id_hex,
+        )
+
         start = time.monotonic()
         tracer = trace.get_tracer(__name__)
+        parent_ctx = self._otel_parent_ctx or _make_parent_context(trace_id_hex)
 
         try:
             with tracer.start_as_current_span(
                 f"{self._service}/{self._method}",
+                context=parent_ctx,
                 kind=SpanKind.SERVER,
             ) as span:
                 span.set_attribute("rpc.service", self._service)
                 span.set_attribute("rpc.method", self._method)
                 span.set_attribute("rpc.system", "grpc")
+                span.set_attribute("request_id", _existing.get("request_id", ""))
+                span.set_attribute("otel.trace_id", trace_id_hex)
 
                 items = 0
                 async for item in async_iter:
@@ -198,4 +248,20 @@ class TracingInterceptor(grpc.aio.ServerInterceptor):
         service_name = parts[0]
         method_name = parts[1] if len(parts) > 1 else method_full
 
-        return _TracedHandler(handler, service_name, method_name)
+        otel_parent_ctx = None
+        if handler_call_details.invocation_metadata:
+            meta_dict = dict(handler_call_details.invocation_metadata)
+            propagated_trace_id = meta_dict.get(_TRACE_ID_HEADER, "")
+
+            if propagated_trace_id:
+                structlog.contextvars.bind_contextvars(
+                    trace_id=propagated_trace_id,
+                )
+
+            try:
+                _carrier = {k: [v] for k, v in handler_call_details.invocation_metadata}
+                otel_parent_ctx = _otel_propagate.extract(_carrier)
+            except Exception:
+                pass
+
+        return _TracedHandler(handler, service_name, method_name, otel_parent_ctx=otel_parent_ctx)

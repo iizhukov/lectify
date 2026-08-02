@@ -15,8 +15,8 @@ from generated.settings.base import (  # type: ignore
     DatabaseSettings,
     KafkaSettings,
     MinioSettings,
-    # AuthSettings,
     # ConfigServiceSettings,
+    TicketAuthSettings,
     ObservabilitySettings,
     GrpcServerSettings,
 )
@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     grpc: "GrpcServerSettings" = Field(default_factory=lambda: _resolve(GrpcServerSettings)())
     kafka: "KafkaSettings" = Field(default_factory=lambda: _resolve(KafkaSettings)())
     minio: "MinioSettings" = Field(default_factory=lambda: _resolve(MinioSettings)())
-    # auth: "AuthSettings" = Field(default_factory=lambda: _resolve(AuthSettings)())
     # config_service: "ConfigServiceSettings" = Field(default_factory=lambda: _resolve(ConfigServiceSettings)())
+    ticket_auth: "TicketAuthSettings" = Field(default_factory=lambda: _resolve(TicketAuthSettings)())
     observability: "ObservabilitySettings" = Field(default_factory=lambda: _resolve(ObservabilitySettings)())
 
 

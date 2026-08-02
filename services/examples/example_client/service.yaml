@@ -25,6 +25,7 @@ service:
     enabled: true
     services:
       - example_server
+      - infra_tas
 
   # Kafka
   kafka_producer:
@@ -60,6 +61,11 @@ service:
     enabled: false
     storage: "memory"
 
+  ticket_auth:
+    enabled: true
+    tas_service: "infra_tas"
+    ticket_ttl: 60
+
   logging:
     file:
         level: INFO
@@ -76,7 +82,7 @@ service:
 
   # Observability
   observability:
-    enabled: false
+    enabled: true
     log_level: INFO
     trace_sampling_rate: 1.0
     metrics_enabled: true
