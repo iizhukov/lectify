@@ -7,10 +7,14 @@ class ObservabilityGenerator(BaseGenerator):
             return
 
         self.write(
-            "observability.py",
+            "observability/__init__.py",
+            "",
+        )
+        self.write(
+            "observability/observability.py",
             self.render("services/observability/observability.py.j2"),
         )
         self.write(
-            "middleware.py",
+            "observability/middleware.py",
             self.render("services/observability/middleware.py.j2"),
         )

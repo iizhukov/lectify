@@ -143,6 +143,15 @@ class NginxSettings(BaseModel):
         return f"http://nginx:{self.port}"
 
 
+class DbUiSettings(BaseModel):
+    """PostgreSQL Web UI settings"""
+    port: int
+
+    @property
+    def url(self) -> str:
+        return f"http://dbui:{self.port}"
+
+
 class MkDocsSettings(BaseModel):
     """MkDocs settings"""
     port: int
@@ -211,6 +220,7 @@ class Settings(BaseSettings):
     
     # MkDocs
     MKDOCS_PORT: int
+    DBUI_PORT: int = 8083
     
     @property
     def postgres(self) -> PostgresSettings:
@@ -287,6 +297,11 @@ class Settings(BaseSettings):
     def nginx(self) -> NginxSettings:
         return NginxSettings(port=self.NGINX_PORT)
     
+    @property
+    @property
+    def dbui(self) -> DbUiSettings:
+        return DbUiSettings(port=self.DBUI_PORT)
+
     @property
     def mkdocs(self) -> MkDocsSettings:
         return MkDocsSettings(port=self.MKDOCS_PORT)

@@ -18,3 +18,7 @@ class MainGenerator(BaseGenerator):
             "Makefile",
             self.render("services/main/Makefile.j2"),
         )
+        self.write_root(
+            ".gitignore",
+            self.render("services/main/gitignore.j2")
+        )

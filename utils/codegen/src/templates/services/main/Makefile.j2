@@ -3,7 +3,7 @@
 # To regenerate: codegen generate
 # ---------------------------------------------------------------------------
 
-.PHONY: help run run-vault run-direct clean health
+.PHONY: help venv run run-vault run-direct clean health
 
 SERVICE_NAME := {{ service.name }}
 GRPC_PORT := {{ service.grpc.port }}
@@ -13,6 +13,10 @@ VAULT_CONFIG := generated/vault/agent-{{ service.name }}.local.hcl
 {% endif %}
 VAULT_ADDR := "http://localhost:{{ settings.VAULT_PORT }}"
 VAULT_TOKEN := "{{ settings.VAULT_DEV_ROOT_TOKEN_ID }}"
+
+VENV_DIR := venv
+PYTHON := $(VENV_DIR)/bin/python
+PIP := $(VENV_DIR)/bin/pip
 
 SHOW_VAULT_LOG ?= 0
 
@@ -30,13 +34,15 @@ NC := \033[0m # No Color
 
 help:
 	@echo "$(GREEN)Available commands:$(NC)"
+	@echo "  $(YELLOW)make venv$(NC)            - Create virtualenv and install deps"
+	@echo "  $(YELLOW)make run$(NC)             - Run via virtualenv"
 	@echo "  $(YELLOW)make run SHOW_VAULT_LOG=1$(NC) - Run with Vault Agent logs visible"
-	@echo "  $(YELLOW)make run-direct$(NC)   - Run directly without Vault"
-	@echo "  $(YELLOW)make clean$(NC)        - Clean generated files"
-	@echo "  $(YELLOW)make health$(NC)       - Check service health"
+	@echo "  $(YELLOW)make run-direct$(NC)      - Run directly without Vault"
+	@echo "  $(YELLOW)make clean$(NC)           - Clean generated files and venv"
+	@echo "  $(YELLOW)make health$(NC)          - Check service health"
 {% if service.vault.enabled %}
 	@echo "  $(YELLOW)make run-vault SHOW_VAULT_LOG=1$(NC)    - Run with Vault Agent"
-	@echo "  $(YELLOW)make vault-init$(NC)   - Initialize Vault for this service"
+	@echo "  $(YELLOW)make vault-init$(NC)      - Initialize Vault for this service"
 {% endif %}
 	@echo ""
 	@echo "Configuration:"
@@ -45,6 +51,12 @@ help:
 {% if service.vault.enabled %}
 	@echo "  Vault enabled: $(GREEN)$(VAULT_ENABLED)$(NC)"
 {% endif %}
+
+venv:
+	@echo "$(GREEN)Creating virtualenv in $(VENV_DIR)...$(NC)"
+	python3 -m venv $(VENV_DIR)
+	$(PIP) install -r generated/requirements.txt
+	@echo "$(GREEN)Done. Activate with: source $(VENV_DIR)/bin/activate$(NC)"
 
 {% if service.vault.enabled %}
 
@@ -85,7 +97,13 @@ run-vault: check-vault check-vault-config check-secrets
 
 {% endif %}
 
-run:
+check-venv:
+	@if [ ! -f $(PYTHON) ]; then \
+		echo "$(YELLOW)Virtualenv not found, creating...$(NC)"; \
+		$(MAKE) venv; \
+	fi
+
+run: check-venv
 	@echo "$(GREEN)Running $(SERVICE_NAME)...$(NC)"
 {% if service.vault.enabled %}
 	@if command -v VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault >/dev/null 2>&1 && [ -f $(VAULT_CONFIG) ]; then \
@@ -94,16 +112,16 @@ run:
 		VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" vault agent -config=$(VAULT_CONFIG) $(VAULT_REDIRECT); \
 	else \
 		echo "$(YELLOW)Running directly...$(NC)"; \
-		python generated/main.py; \
+		$(PYTHON) generated/main.py; \
 	fi
 {% else %}
 	@echo "$(YELLOW)Running directly...$(NC)"
-	python generated/main.py
+	$(PYTHON) generated/main.py
 {% endif %}
 
-run-direct:
+run-direct: check-venv
 	@echo "$(GREEN)Running $(SERVICE_NAME) directly...$(NC)"
-	python generated/main.py
+	$(PYTHON) generated/main.py
 
 health:
 	@echo "$(GREEN)Checking service health...$(NC)"
@@ -120,9 +138,11 @@ clean:
 	rm -rf __pycache__/
 	rm -rf .pytest_cache/
 	rm -rf *.egg-info/
+	rm -rf $(VENV_DIR)
 	rm -f vault/$(SERVICE_NAME)-role-id.txt vault/$(SERVICE_NAME)-secret-id.txt
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 {% if service.vault.enabled %}
 clean-secrets:

@@ -22,13 +22,24 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 0
 
     service_yaml.write_text(
-        f"""\
+        f"""
 service:
   name: {name}
   version: 0.1.0
   description: ""
 
-  # User main
+  # Enable service in project generation
+  active: false
+
+  # Python version
+  python:
+    major: 3
+    minor: 12
+
+  # Custom requirements file (relative to service root)
+  requirements: null
+
+  # User main.py
   main:
     enabled: false
 
@@ -50,6 +61,10 @@ service:
   kafka_consumer:
     enabled: false
     topics: []
+    group_id: null
+    auto_offset_reset: "earliest"
+    max_poll_records: 100
+    max_poll_interval_ms: 300000
 
   # Infrastructure
   postgres:
@@ -85,21 +100,27 @@ service:
         max_retries: 3
         timeout: 10
 
-#   # Auth (ticket-based inter-service auth)
-#   auth:
-#     enabled: true
-
-#   # Feature flags client
-#   config_client:
-#     enabled: false
-#     flags: []
-
   # Observability (metrics exported via OTLP gRPC)
   observability:
     enabled: true
     log_level: INFO
     trace_sampling_rate: 1.0
     metrics_enabled: true
+    service_name: null
+
+#   # Auth (ticket-based inter-service auth)
+#   auth:
+#     enabled: true
+#     require_ticket: true
+#     allowed_services: []
+
+#   # Feature flags client
+#   config_client:
+#     enabled: false
+#     flags:
+#       - key: "example_feature"
+#         default_value: false
+#         description: ""
 """,
         encoding="utf-8",
     )
