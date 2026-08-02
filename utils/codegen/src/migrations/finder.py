@@ -27,17 +27,23 @@ class ModelFinder:
         return base_class.metadata
     
     def _import_all_modules(self):
-        if not self.src_dir.exists():
-            return
-        
-        for py_file in self.src_dir.rglob("*.py"):
-            if py_file.stem == "__init__":
-                continue
+        dirs_to_scan = []
+        if self.src_dir.exists():
+            dirs_to_scan.append(self.src_dir)
 
-            module_path = py_file.relative_to(self.service_root)
-            module_name = str(module_path.with_suffix("")).replace("/", ".").replace("\\", ".")
+        generated_dir = self.service_root / "generated"
+        if generated_dir.exists():
+            dirs_to_scan.append(generated_dir)
 
-            try:
-                importlib.import_module(module_name)
-            except Exception as e:
-                print(f"[finder] Cannot import {module_name}: {e}")
+        for scan_dir in dirs_to_scan:
+            for py_file in sorted(scan_dir.rglob("*.py")):
+                if py_file.stem == "__init__":
+                    continue
+
+                module_path = py_file.relative_to(self.service_root)
+                module_name = str(module_path.with_suffix("")).replace("/", ".").replace("\\", ".")
+
+                try:
+                    importlib.import_module(module_name)
+                except Exception as e:
+                    print(f"[finder] Cannot import {module_name}: {e}")

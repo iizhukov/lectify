@@ -56,7 +56,7 @@ def is_running_under_vault() -> bool:
 
 async def run_observability() -> None:
     """Настраивает OpenTelemetry трассировку и метрики через OTLP gRPC."""
-    from generated.observability import configure_tracing, configure_metrics
+    from generated.observability import configure_tracing, configure_metrics  # type: ignore
 
     configure_tracing()
     configure_metrics()
@@ -79,9 +79,9 @@ async def run_grpc() -> None:
 
     log.info("Starting gRPC server...")
     try:
-        from generated.grpc_server import grpc_app
+        from generated.grpc_server import grpc_app  # type: ignore
         {% if manifest.service.observability.enabled %}
-        from generated.middleware import TracingInterceptor
+        from generated.middleware import TracingInterceptor  # type: ignore
         await grpc_app.run(interceptors=[TracingInterceptor()])
         {% else %}
         await grpc_app.run()
@@ -96,12 +96,27 @@ async def run_kafka_consumer() -> None:
     """Запускает Kafka consumer"""
     log.info("Starting Kafka consumer...")
     try:
-        from generated.kafka.consumer import run_consumer
+        from generated.kafka.consumer import run_consumer  # type: ignore
         await run_consumer()
     except Exception as e:
         log.error(f"Kafka consumer failed: {e}")
         raise
+{% endif %}{% if manifest.service.scheduler.enabled %}
+
+
+async def run_scheduler() -> None:
+    """Starts the background task scheduler."""
+    log.info("Starting scheduler...")
+    try:
+        from generated.scheduler.scheduler import SchedulerService  # type: ignore
+        scheduler = SchedulerService(Path(__file__).parent.parent)
+        await scheduler.discover_and_start()
+        await asyncio.Event().wait()
+    except Exception as e:
+        log.error(f"Scheduler failed: {e}")
+        raise
 {% endif %}
+
 
 {% if manifest.service.main.enabled %}
 
@@ -152,6 +167,9 @@ async def main():
     {% if manifest.service.kafka_consumer.enabled %}
     tasks.append(run_kafka_consumer())
     {% endif %}
+    {% if manifest.service.scheduler.enabled %}
+    tasks.append(run_scheduler())
+    {% endif %}
     {% if manifest.service.main.enabled %}
     tasks.append(run_main())
     {% endif %}
@@ -168,7 +186,7 @@ async def main():
     {% if service.logging.loki.enabled %}
     finally:
         try:
-            from generated.logger import flush_loki_agent, shutdown_loki_agent
+            from generated.logger import flush_loki_agent, shutdown_loki_agent  # type: ignore
             await flush_loki_agent()
             await shutdown_loki_agent()
         except Exception:

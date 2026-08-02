@@ -184,6 +184,12 @@ class MigrationRenderer:
             sa_type = self.type_normalizer.get_sa_type(col.type)
             col_str = f"sa.Column('{col.name}', {sa_type}"
 
+            if col.primary_key:
+                col_str += ", primary_key=True"
+
+            if col.autoincrement and col.primary_key:
+                col_str += ", autoincrement=True"
+
             if not col.nullable:
                 col_str += ", nullable=False"
 
@@ -216,6 +222,12 @@ class MigrationRenderer:
     
     def _format_column_definition(self, col_name: str, col_info: Dict) -> str:
         col_def = f"sa.Column('{col_name}', {col_info['type']}"
+
+        if col_info.get('primary_key'):
+            col_def += ", primary_key=True"
+
+        if col_info.get('autoincrement') and col_info.get('primary_key'):
+            col_def += ", autoincrement=True"
 
         if not col_info['nullable']:
             col_def += ", nullable=False"

@@ -19,7 +19,7 @@ def get_engine() -> AsyncEngine:
         _engine = create_async_engine(
             s.database.url,
             pool_size=s.database.pool_size,
-            pool_max_overflow=s.database.pool_max_overflow,
+            max_overflow=s.database.pool_max_overflow,
             pool_pre_ping=True,
             echo=False,
         )

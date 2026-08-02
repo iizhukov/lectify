@@ -105,6 +105,11 @@ class ObservabilityConfig(BaseModel):
 #     flags: list[FeatureFlag] = Field(default_factory=list)
 
 
+class SchedulerConfig(BaseModel):
+    enabled: bool = False
+    storage: Literal["memory", "database"] = "memory"
+
+
 class Service(BaseModel):
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
     version: str = Field(default="0.1.0", pattern=r"^\d+\.\d+\.\d+$")
@@ -122,6 +127,7 @@ class Service(BaseModel):
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     minio: MinioConfig = Field(default_factory=MinioConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 

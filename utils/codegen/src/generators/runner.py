@@ -17,6 +17,7 @@ from generators.services.s3 import S3Generator
 from generators.services.grpc_server import GrpcServerGenerator
 from generators.services.grpc_client import GrpcClientGenerator
 from generators.services.kafka_consumer import KafkaConsumerGenerator
+from generators.services.scheduler import SchedulerGenerator
 from generators.services.kafka_producer import KafkaProducerGenerator
 # from generators.config_client import ConfigClientGenerator
 # from generators.prometheus_scrape import PrometheusScrapeGenerator
@@ -48,6 +49,7 @@ def run_service(manifest: ServiceManifest, output_path: Path) -> None:
         GrpcClientGenerator(manifest, output_path),
         KafkaConsumerGenerator(manifest, output_path),
         KafkaProducerGenerator(manifest, output_path),
+        SchedulerGenerator(manifest, output_path),
         # ConfigClientGenerator(manifest, output_path),
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),

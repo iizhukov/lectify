@@ -37,7 +37,9 @@ class SchemaBuilder:
                     name=col.name,
                     type=self.type_normalizer.normalize_type(str(col.type)),
                     nullable=col.nullable,
-                    default=self._extract_default(col)
+                    default=self._extract_default(col),
+                    primary_key=col.primary_key,
+                    autoincrement=col.autoincrement if col.autoincrement is True else False,
                 )
                 columns.append(col_info)
             schema[table_name] = TableSchema(columns=columns)

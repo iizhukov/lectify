@@ -8,13 +8,17 @@ class ColumnInfo:
     type: str
     nullable: bool = True
     default: Optional[str] = None
+    primary_key: bool = False
+    autoincrement: bool = False
     
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "type": self.type,
             "nullable": self.nullable,
-            "default": self.default
+            "default": self.default,
+            "primary_key": self.primary_key,
+            "autoincrement": self.autoincrement,
         }
     
     @classmethod
@@ -23,7 +27,9 @@ class ColumnInfo:
             name=data["name"],
             type=data["type"],
             nullable=data.get("nullable", True),
-            default=data.get("default")
+            default=data.get("default"),
+            primary_key=data.get("primary_key", False),
+            autoincrement=data.get("autoincrement", False),
         )
 
 

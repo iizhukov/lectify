@@ -67,6 +67,10 @@ service:
     enabled: false
     vars: []
 
+  scheduler:
+    enabled: false
+    storage: "memory"
+
   logging:
     file:
         level: DEBUG
