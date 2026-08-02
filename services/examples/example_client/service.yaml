@@ -1,0 +1,83 @@
+service:
+  name: example_client
+  version: 0.1.0
+  description: ""
+
+  # Enable service in project generation
+  active: true
+
+  # Python version
+  python:
+    major: 3
+    minor: 12
+
+  # User main.py
+  main:
+    enabled: true
+
+  # gRPC server
+  grpc:
+    enabled: false
+    port: 8080
+
+  # gRPC client (call other services)
+  grpc_client:
+    enabled: true
+    services:
+      - example_server
+
+  # Kafka
+  kafka_producer:
+    enabled: true
+    topics:
+      - example
+
+  kafka_consumer:
+    enabled: false
+    topics: []
+    group_id: null
+    auto_offset_reset: "earliest"
+    max_poll_records: 100
+    max_poll_interval_ms: 300000
+
+  # Infrastructure
+  postgres:
+    enabled: false
+    pool_size: 10
+    pool_max_overflow: 5
+    pool_mode: "transaction"
+    migration_dir: "migrations"
+
+  minio:
+    enabled: false
+    buckets: []
+
+  vault:
+    enabled: false
+    vars: []
+
+  scheduler:
+    enabled: false
+    storage: "memory"
+
+  logging:
+    file:
+        level: INFO
+        path: logs/app.log
+        max_bytes: 10485760  # 10MB
+        backup_count: 5
+    loki:
+        enabled: false
+        level: INFO
+        batch_size: 100
+        flush_interval: 5
+        max_retries: 3
+        timeout: 10
+
+  # Observability
+  observability:
+    enabled: false
+    log_level: INFO
+    trace_sampling_rate: 1.0
+    metrics_enabled: true
+    service_name: null

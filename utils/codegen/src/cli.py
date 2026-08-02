@@ -22,7 +22,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 0
 
     service_yaml.write_text(
-        f"""
+        f"""\
 service:
   name: {name}
   version: 0.1.0
@@ -35,9 +35,6 @@ service:
   python:
     major: 3
     minor: 12
-
-  # Custom requirements file (relative to service root)
-  requirements: null
 
   # User main.py
   main:
@@ -100,27 +97,13 @@ service:
         max_retries: 3
         timeout: 10
 
-  # Observability (metrics exported via OTLP gRPC)
+  # Observability
   observability:
     enabled: true
     log_level: INFO
     trace_sampling_rate: 1.0
     metrics_enabled: true
     service_name: null
-
-#   # Auth (ticket-based inter-service auth)
-#   auth:
-#     enabled: true
-#     require_ticket: true
-#     allowed_services: []
-
-#   # Feature flags client
-#   config_client:
-#     enabled: false
-#     flags:
-#       - key: "example_feature"
-#         default_value: false
-#         description: ""
 """,
         encoding="utf-8",
     )

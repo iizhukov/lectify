@@ -40,7 +40,11 @@ def get_service_path(service_name: str) -> Path:
     repo_root = get_repo_root()
     
     for manifest_path in repo_root.rglob("service.yaml"):
-        manifest = get_service_manifest(manifest_path)
+        try:
+            manifest = get_service_manifest(manifest_path)
+        except ServiceManifestError:
+            print(f"[codegen] WARNING: {manifest_path} is invalid")
+            continue
 
         if manifest.service.name == service_name:
             return manifest_path.parent
@@ -116,7 +120,11 @@ def load_valid_services() -> list[ServiceManifest]:
             print(f"[codegen] WARNING: {manifest_path} is invalid")
             continue
 
-        manifest = load_manifest(manifest_path)
+        try:
+            manifest = load_manifest(manifest_path)
+        except ServiceManifestError as e:
+            print(f"[codegen] WARNING: {e} is invalid")
+            continue
 
         if not manifest.service.active:
             continue

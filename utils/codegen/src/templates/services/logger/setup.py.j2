@@ -228,10 +228,10 @@ def log_logging_ready():
         file_level="{{ service.logging.file.level }}",
         loki_enabled={{ service.logging.loki.enabled | lower | title }},
     )
+{% if service.logging.loki.enabled %}
 
 
 def start_loki_agent():
-    {% if service.logging.loki.enabled %}
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -242,4 +242,4 @@ def start_loki_agent():
 
     queue = get_loki_queue()
     init_loki_agent(queue)
-    {% endif %}
+{% endif %}

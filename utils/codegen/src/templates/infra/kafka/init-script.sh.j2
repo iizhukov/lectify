@@ -11,10 +11,9 @@ echo "📨 Initializing Kafka..."
 # ============================================
 # Configuration
 # ============================================
-BOOTSTRAP_SERVER="localhost:{{ settings.KAFKA_PORT | default("9092") }}"
-KAFKA_HOME="${KAFKA_HOME:-/opt/kafka}"
-KAFKA_TOPICS="$KAFKA_HOME/bin/kafka-topics.sh"
-KAFKA_CONFIGS="$KAFKA_HOME/bin/kafka-configs.sh"
+BOOTSTRAP_SERVER="kafka:{{ settings.KAFKA_INTERNAL_PORT | default("29092") }}"
+KAFKA_TOPICS="kafka-topics"
+KAFKA_CONFIGS="kafka-configs"
 
 # ============================================
 # Wait for Kafka to be ready

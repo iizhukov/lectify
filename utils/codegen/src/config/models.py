@@ -115,7 +115,6 @@ class Service(BaseModel):
     version: str = Field(default="0.1.0", pattern=r"^\d+\.\d+\.\d+$")
     python: PythonVersion = Field(default_factory=lambda: PythonVersion(major=3, minor=12))
     description: str = ""
-    requirements: str | None = None  # path to user requirements file (relative to service root)
     active: bool = False
 
     main: MainConfig = Field(default_factory=MainConfig)
