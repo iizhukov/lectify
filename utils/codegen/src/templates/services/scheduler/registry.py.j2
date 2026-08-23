@@ -41,6 +41,14 @@ def get_registry() -> dict[str, _ScheduledTask]:
     return _registry
 
 
+{% if manifest.service.config.enabled %}
+try:
+    import generated.config.tasks  # noqa: F401
+except Exception:
+    pass
+{% endif %}
+
+
 def collect_from_src(service_root: Path) -> None:
     src_dir = service_root / "src"
     if not src_dir.exists():

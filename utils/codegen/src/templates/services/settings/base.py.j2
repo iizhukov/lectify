@@ -46,10 +46,13 @@ class MinioSettings(BaseSettings):
 #     ticket_ttl_seconds: int = Field(default=60)
 
 
-# class ConfigServiceSettings(BaseSettings):
-#     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_CONFIG_", extra="ignore")
+class ConfigSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_CONFIG_", extra="ignore")
 
-#     addr: str = Field(default="http://localhost:9002")
+    enabled: bool = Field(default={{ service.config.enabled }})
+    config_service: str = Field(default="{{ service.config.config_service }}")
+    config_address: str = Field(default="localhost:10011")
+    update_interval_seconds: int = Field(default={{ service.config.update_interval_seconds if service.config.update_interval_seconds is defined else 30 }})
 
 
 class TicketAuthSettings(BaseSettings):

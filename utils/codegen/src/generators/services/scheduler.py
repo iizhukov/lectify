@@ -3,7 +3,7 @@ from generators.services.base import BaseGenerator
 
 class SchedulerGenerator(BaseGenerator):
     def generate(self) -> None:
-        if not self.svc.scheduler.enabled:
+        if not self.svc.scheduler.enabled and not self.svc.config.enabled:
             return
 
         self.write("scheduler/__init__.py", self.render("services/scheduler/__init__.py.j2"))

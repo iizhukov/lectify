@@ -22,9 +22,8 @@ service:
 
   # gRPC client (call other services)
   grpc_client:
-    enabled: true
-    services:
-      - infra_tas
+    enabled: false
+    services: []
 
   # Kafka
   kafka_producer:
@@ -82,6 +81,10 @@ service:
     enabled: true
     tas_service: "infra_tas"
     ticket_ttl: 60
+
+  # Feature flags
+  config:
+    enabled: true
 
   # Observability
   observability:

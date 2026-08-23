@@ -60,9 +60,11 @@ infra/tempo_data/
 infra/grafana_data/
 infra/alertmanager_data/
 
+.agents/
+.claude/
 CLAUDE.md
 
 proto/temp
 services/temp
 
-.codegen/context.json
+.codegen/

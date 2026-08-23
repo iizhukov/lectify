@@ -8,17 +8,25 @@ from generated.db.connection import get_session_factory
 
 from src.metrics import USERS_CREATED, USER_CREATION_DURATION
 from src.models import User
+from src.flags import ServerFeatureFlags
 
 
 log = get_logger("service")
+flags = ServerFeatureFlags()
 
 
 class ExampleServiceImpl(ExampleServiceBase):
     async def Ping(self, request, context):
-        log.info("ping", message=request.message)
+        is_new_logic = flags.use_new_logic
+        log.info("ping", message=request.message, use_new_logic=is_new_logic)
+
+        if is_new_logic:
+            reply_msg = f"[NEW LOGIC] pong: {request.message}"
+        else:
+            reply_msg = f"pong: {request.message}"
 
         return index_pb2.PingResponse(
-            message=f"pong: {request.message}",
+            message=reply_msg,
             timestamp=int(time.time()),
         )
 

@@ -61,15 +61,27 @@ def _parse_service_yaml(path: Path) -> tuple[str, list[str]] | None:
             return None
         
         grpc_client = svc.get("grpc_client", {})
-        if not isinstance(grpc_client, dict):
-            return None
-        
-        targets = grpc_client.get("services", [])
-        if not isinstance(targets, list):
-            return None
-        
+        targets: list[str] = []
+        if isinstance(grpc_client, dict):
+            raw_targets = grpc_client.get("services", [])
+            if isinstance(raw_targets, list):
+                targets.extend(raw_targets)
+
+        ticket_auth = svc.get("ticket_auth", {})
+        if isinstance(ticket_auth, dict) and ticket_auth.get("enabled"):
+            tas_svc = ticket_auth.get("tas_service", "infra_tas")
+            if tas_svc not in targets:
+                targets.append(tas_svc)
+
+        config = svc.get("config", {})
+        if isinstance(config, dict) and config.get("enabled"):
+            if "infra_config" not in targets:
+                targets.append("infra_config")
+            if "infra_tas" not in targets:
+                targets.append("infra_tas")
+
         return source_name, targets
-    except ImportError:
+    except Exception:
         pass
 
     try:

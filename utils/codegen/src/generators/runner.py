@@ -20,7 +20,7 @@ from generators.services.kafka_consumer import KafkaConsumerGenerator
 from generators.services.scheduler import SchedulerGenerator
 from generators.services.ticket_auth import TicketAuthGenerator
 from generators.services.kafka_producer import KafkaProducerGenerator
-# from generators.config_client import ConfigClientGenerator
+from generators.services.config import ConfigGenerator
 # from generators.prometheus_scrape import PrometheusScrapeGenerator
 from generators.services.requirements import RequirementsGenerator
 from generators.services.main import MainGenerator
@@ -52,7 +52,7 @@ def run_service(manifest: ServiceManifest, output_path: Path, docker: bool = Fal
         KafkaProducerGenerator(manifest, output_path),
         SchedulerGenerator(manifest, output_path),
         TicketAuthGenerator(manifest, output_path, docker=docker),
-        # ConfigClientGenerator(manifest, output_path),
+        ConfigGenerator(manifest, output_path, docker=docker),
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
         DockerfileGenerator(manifest, output_path),

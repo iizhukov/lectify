@@ -83,7 +83,7 @@ async def run_grpc() -> None:
     log.info("Starting gRPC server...")
     try:
         from generated.grpc_server import grpc_app  # type: ignore
-        {% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled %}
+        {% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled or manifest.service.config.enabled %}
         interceptors = []
         {% if manifest.service.observability.enabled %}
         from generated.observability.middleware import TracingInterceptor  # type: ignore
@@ -94,6 +94,12 @@ async def run_grpc() -> None:
         from generated.settings import get_settings  # type: ignore
         _s = get_settings()
         interceptors.append(TicketAuthServerInterceptor(target_service=_s.service_name))
+        {% endif %}
+        {% if manifest.service.config.enabled %}
+        from generated.config.interceptor import ConfigServerInterceptor  # type: ignore
+        from generated.settings import get_settings  # type: ignore
+        _s = get_settings()
+        interceptors.append(ConfigServerInterceptor(target_service=_s.service_name))
         {% endif %}
         await grpc_app.run(interceptors=interceptors)
         {% else %}
@@ -114,7 +120,7 @@ async def run_kafka_consumer() -> None:
     except Exception as e:
         log.error(f"Kafka consumer failed: {e}")
         raise
-{% endif %}{% if manifest.service.scheduler.enabled %}
+{% endif %}{% if manifest.service.scheduler.enabled or manifest.service.config.enabled %}
 
 
 async def run_scheduler() -> None:
@@ -177,7 +183,7 @@ async def main():
     {% if manifest.service.kafka_consumer.enabled %}
     tasks.append(run_kafka_consumer())
     {% endif %}
-    {% if manifest.service.scheduler.enabled %}
+    {% if manifest.service.scheduler.enabled or manifest.service.config.enabled %}
     tasks.append(run_scheduler())
     {% endif %}
     {% if manifest.service.main.enabled %}

@@ -95,6 +95,11 @@ class ObservabilityConfig(BaseModel):
 #     description: str = ""
 
 
+class ConfigConfig(BaseModel):
+    enabled: bool = False
+    update_interval_seconds: int = Field(default=30, ge=1)
+
+
 # class ConfigClientConfig(BaseModel):
 #     enabled: bool = False
 #     flags: list[FeatureFlag] = Field(default_factory=list)
@@ -131,6 +136,7 @@ class Service(BaseModel):
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    config: ConfigConfig = Field(default_factory=ConfigConfig)
 
     # config_client: ConfigClientConfig = Field(default_factory=ConfigClientConfig)
 

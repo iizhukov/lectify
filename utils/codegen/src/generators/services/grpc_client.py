@@ -12,7 +12,7 @@ from utils import get_service_proto, get_service_path, get_service_manifest, get
 
 class GrpcClientGenerator(BaseGenerator):
     def generate(self) -> None:
-        if not self.svc.grpc_client.enabled:
+        if not self.svc.grpc_client.enabled and not self.svc.ticket_auth.enabled and not self.svc.config.enabled:
             return
 
         client_services = self._build_service_list()
@@ -40,6 +40,9 @@ class GrpcClientGenerator(BaseGenerator):
 
         if self.svc.ticket_auth.enabled and "infra_tas" not in services:
             services.append("infra_tas")
+
+        if self.svc.config.enabled and "infra_config" not in services:
+            services.append("infra_config")
 
         for svc_name in services:
             svc_path = get_service_path(svc_name)

@@ -89,6 +89,10 @@ service:
     tas_service: "infra_tas"
     ticket_ttl: 60
 
+  # Feature flags
+  config:
+    enabled: false
+
   logging:
     file:
         level: DEBUG

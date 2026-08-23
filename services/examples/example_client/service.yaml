@@ -25,7 +25,7 @@ service:
     enabled: true
     services:
       - example_server
-      - infra_tas
+      - infra_config
 
   # Kafka
   kafka_producer:
@@ -58,7 +58,7 @@ service:
     vars: []
 
   scheduler:
-    enabled: false
+    enabled: true
     storage: "memory"
 
   ticket_auth:
@@ -79,6 +79,10 @@ service:
         flush_interval: 5
         max_retries: 3
         timeout: 10
+
+  # Feature flags
+  config:
+    enabled: false
 
   # Observability
   observability:

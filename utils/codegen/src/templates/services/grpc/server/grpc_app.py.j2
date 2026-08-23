@@ -39,7 +39,7 @@ class {{ proto.service_name }}Base:
 def find_service_yaml(start_path: Optional[Path] = None) -> Optional[Path]:
     """Находит ближайший service.yaml вверх по дереву директорий."""
     if start_path is None:
-        start_path = Path.cwd()
+        start_path = Path(__file__).resolve().parent
     
     start_path = start_path.resolve()
     
