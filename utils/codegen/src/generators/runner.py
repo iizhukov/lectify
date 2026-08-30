@@ -25,6 +25,7 @@ from generators.services.config import ConfigGenerator
 from generators.services.requirements import RequirementsGenerator
 from generators.services.main import MainGenerator
 from generators.services.dockerfile import DockerfileGenerator
+from generators.services.testing import TestingGenerator
 
 from generators.infra.base import BaseGenerator as InfraBaseGenerator
 from generators.infra.minio import MinioGenerator
@@ -56,6 +57,7 @@ def run_service(manifest: ServiceManifest, output_path: Path, docker: bool = Fal
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
         DockerfileGenerator(manifest, output_path),
+        TestingGenerator(manifest, output_path),
     ]
 
     for gen in gens:

@@ -164,6 +164,44 @@ class TestMainGenerator:
         assert (tmp_path / "generated" / "main.py").exists()
 
 
+from generators.services.testing import TestingGenerator
+
+
+class TestTestingGenerator:
+    def test_testing_generator_with_all_modules(self, tmp_path):
+        manifest = ServiceManifest.model_validate({
+            "service": {
+                "name": "full_test_svc",
+                "config": {"enabled": True},
+                "postgres": {"enabled": True},
+                "kafka_producer": {"enabled": True, "topics": ["test.topic"]},
+            }
+        })
+        gen = TestingGenerator(manifest, tmp_path / "generated", docker=False)
+        gen.generate()
+
+        assert (tmp_path / "generated" / "testing" / "__init__.py").exists()
+        assert (tmp_path / "generated" / "testing" / "context.py").exists()
+        assert (tmp_path / "generated" / "testing" / "fixtures.py").exists()
+        assert (tmp_path / "generated" / "testing" / "flags.py").exists()
+        assert (tmp_path / "generated" / "testing" / "db.py").exists()
+        assert (tmp_path / "generated" / "testing" / "kafka.py").exists()
+        assert (tmp_path / "pytest.ini").exists()
+        assert (tmp_path / "tests" / "conftest.py").exists()
+
+    def test_testing_generator_minimal(self, tmp_path):
+        manifest = ServiceManifest.model_validate({"service": {"name": "minimal_svc"}})
+        gen = TestingGenerator(manifest, tmp_path / "generated", docker=False)
+        gen.generate()
+
+        assert (tmp_path / "generated" / "testing" / "__init__.py").exists()
+        assert (tmp_path / "generated" / "testing" / "context.py").exists()
+        assert (tmp_path / "generated" / "testing" / "fixtures.py").exists()
+        assert not (tmp_path / "generated" / "testing" / "flags.py").exists()
+        assert not (tmp_path / "generated" / "testing" / "db.py").exists()
+        assert not (tmp_path / "generated" / "testing" / "kafka.py").exists()
+
+
 class TestDockerfileGenerator:
     def test_dockerfile_generation(self, tmp_path):
         manifest = ServiceManifest.model_validate({

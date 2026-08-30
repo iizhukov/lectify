@@ -1,10 +1,18 @@
 import argparse
 import asyncio
+import os
 import sys
 
 from pathlib import Path
 
-from utils import ServiceManifestError, load_manifest, validate_manifest, load_valid_services
+from utils import (
+    ServiceManifestError,
+    load_manifest,
+    validate_manifest,
+    load_valid_services,
+    get_repo_root,
+    get_service_path,
+)
 from generators.runner import run_service, run_infra, run_plugins, run_project
 from migrations import get_migrations_manager
 
@@ -123,6 +131,25 @@ service:
         src_dir.mkdir()
 
     (src_dir / "__init__.py").write_text("")
+
+    tests_dir = service_path / "tests"
+    if not tests_dir.exists():
+        tests_dir.mkdir()
+        (tests_dir / "conftest.py").write_text(
+            f"# pytest fixtures for {name}\nfrom generated.testing.fixtures import *  # noqa: F401, F403\n",
+            encoding="utf-8",
+        )
+        (tests_dir / "test_service.py").write_text(
+            "import pytest\nimport grpc\n\n\n@pytest.mark.asyncio\nasync def test_service_initialization(mock_context):\n    assert mock_context.code == grpc.StatusCode.OK\n",
+            encoding="utf-8",
+        )
+
+    pytest_ini = service_path / "pytest.ini"
+    if not pytest_ini.exists():
+        pytest_ini.write_text(
+            "[pytest]\ntestpaths = tests\npython_files = test_*.py\nasyncio_mode = auto\npythonpath = . generated src\n",
+            encoding="utf-8",
+        )
 
     print(f"[codegen] Initialized {service_path / 'service.yaml'}")
     return 0
@@ -289,6 +316,59 @@ def cmd_migrations_make(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_test(args: argparse.Namespace) -> int:
+    import subprocess
+
+    repo_root = get_repo_root()
+    service_name = getattr(args, "service_name", None)
+
+    if service_name:
+        try:
+            svc_path = get_service_path(service_name)
+        except Exception as e:
+            print(f"[codegen] ERROR: {e}", file=sys.stderr)
+            return 1
+
+        tests_dir = svc_path / "tests"
+        if not tests_dir.exists():
+            print(f"[codegen] No tests directory found in {svc_path}")
+            return 0
+
+        print(f"[codegen] Running tests for {service_name}...")
+        env = dict(os.environ)
+        env["LECTIFY_ROOT"] = str(repo_root)
+        res = subprocess.run(["pytest", "tests"], cwd=str(svc_path), env=env)
+        return res.returncode
+
+    # Run tests for all active services
+    manifests = load_valid_services()
+    active_manifests = [m for m in manifests if m.service.active]
+
+    total_code = 0
+    for manifest in active_manifests:
+        svc_name = manifest.service.name
+        try:
+            svc_path = get_service_path(svc_name)
+        except Exception:
+            continue
+
+        tests_dir = svc_path / "tests"
+        if not tests_dir.exists():
+            continue
+
+        print(f"\n[codegen] ========================================")
+        print(f"[codegen] Running tests for: {svc_name}")
+        print(f"[codegen] ========================================")
+        env = dict(os.environ)
+        env["LECTIFY_ROOT"] = str(repo_root)
+        res = subprocess.run(["pytest", "tests"], cwd=str(svc_path), env=env)
+        # Exit code 5 means no tests were found/collected
+        if res.returncode not in (0, 5):
+            total_code = res.returncode
+
+    return total_code
+
+
 def _dispatch_migration(args: argparse.Namespace) -> int:
     commands = {
         "status": cmd_migrations_status,
@@ -324,6 +404,10 @@ def main(argv: list[str] | None = None) -> int:
     p_gen = sub.add_parser("project", help="generate all project files")
     p_gen.add_argument("--docker", action="store_true", help="Use Docker service names as addresses instead of localhost")
     p_gen.set_defaults(func=cmd_project)
+
+    p_test = sub.add_parser("test", help="Run pytest for a service or all active services")
+    p_test.add_argument("service_name", nargs="?", default=None, help="Optional service name")
+    p_test.set_defaults(func=cmd_test)
 
     p_mig = sub.add_parser("migrations", help="Database migrations: make, migrate, status, rollback")
     p_mig.add_argument("command", choices=["make", "migrate", "status", "rollback"], help="Migration command")

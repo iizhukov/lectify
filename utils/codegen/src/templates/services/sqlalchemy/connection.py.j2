@@ -10,6 +10,18 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def set_engine(engine: AsyncEngine | None) -> None:
+    """Explicitly set or override the async database engine (used in tests)."""
+    global _engine
+    _engine = engine
+
+
+def set_session_factory(factory: async_sessionmaker[AsyncSession] | None) -> None:
+    """Explicitly set or override the async session factory (used in tests)."""
+    global _session_factory
+    _session_factory = factory
+
+
 def get_engine() -> AsyncEngine:
     global _engine
 

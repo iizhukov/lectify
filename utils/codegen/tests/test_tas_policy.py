@@ -1,7 +1,7 @@
+"""Tests for TAS policy loader and automatic permission extraction from service.yaml."""
+
 import sys
-
 from pathlib import Path
-
 
 codegen_dir = Path(__file__).resolve().parent.parent
 repo_root = codegen_dir.parent.parent

@@ -96,7 +96,6 @@ class VaultGenerator(BaseGenerator):
             for field_name in settings.__class__.model_fields.keys():
                 value = getattr(settings, field_name)
                 
-                if hasattr(value, "model_fields"):
                 if isinstance(value, BaseModel):
                     sub_prefix = ""
                     if hasattr(value, "model_config") and "env_prefix" in value.model_config:

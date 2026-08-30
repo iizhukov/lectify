@@ -1,0 +1,13 @@
+import pytest
+import grpc
+
+
+{% if manifest.service.grpc.enabled %}
+@pytest.mark.asyncio
+async def test_service_initialization(mock_context):
+    assert mock_context.code == grpc.StatusCode.OK
+{% else %}
+def test_placeholder():
+    assert True
+{% endif %}
+

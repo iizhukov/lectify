@@ -10,6 +10,8 @@ def _base_requirements(svc) -> list[str]:
         "python-dateutil>=2.8.2",
         "pydantic>=2.0.0",
         "pydantic-settings>=2.0.0",
+        "pytest>=8.0.0",
+        "pytest-asyncio>=0.23.0",
     ]
     if svc.grpc.enabled or svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled:
         deps += [
@@ -25,6 +27,7 @@ def _base_requirements(svc) -> list[str]:
             "sqlalchemy[asyncio]>=2.0",
             "asyncpg>=0.29.0",
             "alembic>=1.13.0",
+            "aiosqlite>=0.20.0",
         ]
     if svc.minio.enabled:
         deps.append("minio>=7.2.0")

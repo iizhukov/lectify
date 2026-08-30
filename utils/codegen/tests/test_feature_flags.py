@@ -1,7 +1,6 @@
 import sys
-import pytest
-
 from pathlib import Path
+import pytest
 
 
 codegen_dir = Path(__file__).resolve().parent.parent
@@ -15,7 +14,6 @@ from generated.config.flags import (
     BaseFeatureFlag,
     BaseFeatureFlags,
     feature_flag,
-    FeatureFlagField,
 )
 from generated.config.client import ConfigClient
 
@@ -28,9 +26,16 @@ def clean_flags_cache():
 
 
 class SampleFeatureFlags(BaseFeatureFlag):
+    # 1. Direct assignment of helper
     use_new_logic = feature_flag
+
+    # 2. Assignment with default=True
     enable_feature_x = feature_flag(default=True)
+
+    # 3. Typed assignment with description
     custom_timeout: bool = feature_flag(default=False, description="Custom timeout flag")
+
+    # 4. Standard bool field
     standard_flag: bool = True
 
 
@@ -43,6 +48,7 @@ class TestBaseFeatureFlag:
         assert flags.standard_flag is True
 
     def test_cached_value_takes_precedence(self):
+        # Mock cached flags from infra_config
         ConfigClient._flags_cache["example_server"] = (
             {"use_new_logic": True, "enable_feature_x": False},
             1000.0,
@@ -51,6 +57,7 @@ class TestBaseFeatureFlag:
         flags = SampleFeatureFlags(service_name="example_server")
         assert flags.use_new_logic is True
         assert flags.enable_feature_x is False
+        # Not in cache -> falls back to default
         assert flags.custom_timeout is False
 
     def test_local_override_on_instance(self):
@@ -102,3 +109,4 @@ class TestConfigClientSyncCache:
         assert ConfigClient.get_cached_flag_sync("enable_stripe_v2", service_name="billing") is True
         assert ConfigClient.get_cached_flag_sync("unknown_flag", default=False, service_name="billing") is False
         assert ConfigClient.get_cached_flag_sync("enable_stripe_v2", default=False, service_name="other_svc") is False
+

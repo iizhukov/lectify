@@ -257,3 +257,31 @@ class TestProjectCommand:
         assert rc == 0
         assert (svc1 / "generated" / "main.py").exists()
         assert not (svc2_inactive / "generated").exists()
+
+
+class TestTestCommand:
+    def test_test_command_runs_service_tests(self, tmp_path, monkeypatch):
+        repo_root = tmp_path
+        svc = repo_root / "services" / "examples" / "test_runner_svc"
+        svc.mkdir(parents=True)
+        (svc / "service.yaml").write_text(
+            "service:\n"
+            "  name: test_runner_svc\n"
+            "  active: true\n"
+        )
+        tests_dir = svc / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_sample.py").write_text("def test_ok(): assert True\n")
+
+        monkeypatch.setenv("LECTIFY_ROOT", str(repo_root))
+        monkeypatch.chdir(repo_root)
+
+        rc = main(["test", "test_runner_svc"])
+        assert rc == 0
+
+    def test_test_command_missing_service(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("LECTIFY_ROOT", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        rc = main(["test", "non_existent_service"])
+        assert rc == 1
