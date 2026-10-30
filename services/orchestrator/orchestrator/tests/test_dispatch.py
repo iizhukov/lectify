@@ -114,6 +114,7 @@ async def test_two_service_instances_only_one_starts_claimed_pipeline(test_sessi
     assert calls == ['two-workers']
     release.set()
     await asyncio.wait_for(task, 2)
+    assert not first._active_routers and not second._active_routers
 
 
 @pytest.mark.asyncio

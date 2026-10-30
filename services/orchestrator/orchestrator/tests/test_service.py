@@ -1,9 +1,47 @@
 import pytest
 import grpc
+import asyncio
 from generated.protos.server import index_pb2 as pb
 from src.service import OrchestratorServiceImpl
 from src.engine.dag import WorkflowDAG, DAGValidationError
 from src.engine.stream_router import StreamRouter, StreamChunkData
+
+
+class WaitingRunner:
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def start_plugin_node(self, **kwargs):
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_cancel_atomically_updates_unfinished_nodes_and_preserves_completed(test_session, mock_context):
+    from sqlalchemy import select
+    from src.models import WorkflowExecutionModel, WorkflowNodeExecutionModel
+    execution = WorkflowExecutionModel(id='cancel-node-states', workflow_id='workflow', user_id='user_1', state='RUNNING')
+    test_session.add(execution)
+    await test_session.flush()
+    states = ('PENDING','PROVISIONING','BUFFERING','PROCESSING','COMPLETED','FAILED')
+    test_session.add_all([WorkflowNodeExecutionModel(execution_id=execution.id,node_id=state,
+        plugin_id='plugin',state=state,output_artifacts={'saved':'file'} if state=='COMPLETED' else {}) for state in states])
+    await test_session.commit()
+    service = OrchestratorServiceImpl()
+    for _ in range(2):
+        result = await service.CancelExecution(pb.CancelExecutionRequest(execution_id=execution.id,reason='stop'), mock_context)
+        assert result.success
+    await test_session.refresh(execution)
+    assert execution.state == 'CANCELLED'
+    rows = list(await test_session.scalars(select(WorkflowNodeExecutionModel).where(
+        WorkflowNodeExecutionModel.execution_id == execution.id)))
+    for row in rows:
+        if row.node_id in ('COMPLETED','FAILED'):
+            assert row.state == row.node_id
+        else:
+            assert row.state == 'CANCELLED' and row.error_message == 'stop'
+        if row.node_id == 'COMPLETED':
+            assert row.output_artifacts == {'saved':'file'}
 
 
 @pytest.mark.asyncio
@@ -65,7 +103,8 @@ async def test_stream_router_buffering():
 
 @pytest.mark.asyncio
 async def test_orchestrator_start_and_get_status(test_session, mock_context):
-    service = OrchestratorServiceImpl()
+    runner = WaitingRunner()
+    service = OrchestratorServiceImpl(container_manager=runner)
 
     graph = pb.WorkflowGraph(
         nodes=[
@@ -87,6 +126,7 @@ async def test_orchestrator_start_and_get_status(test_session, mock_context):
     res = await service.StartExecution(req, mock_context)
     assert res.execution_id != ""
     assert res.state == pb.EXECUTION_STATE_RUNNING
+    await asyncio.wait_for(runner.started.wait(), 2)
 
     status_req = pb.GetExecutionStatusRequest(execution_id=res.execution_id)
     status_res = await service.GetExecutionStatus(status_req, mock_context)
@@ -99,7 +139,8 @@ async def test_orchestrator_start_and_get_status(test_session, mock_context):
 
 @pytest.mark.asyncio
 async def test_orchestrator_cancel_execution(test_session, mock_context):
-    service = OrchestratorServiceImpl()
+    runner = WaitingRunner()
+    service = OrchestratorServiceImpl(container_manager=runner)
 
     graph = pb.WorkflowGraph(
         nodes=[pb.WorkflowNode(id="node_single", plugin_id="speech_to_text")],
@@ -107,6 +148,7 @@ async def test_orchestrator_cancel_execution(test_session, mock_context):
     )
     start_req = pb.StartExecutionRequest(workflow_id="wf_cancel", graph=graph)
     start_res = await service.StartExecution(start_req, mock_context)
+    await asyncio.wait_for(runner.started.wait(), 2)
 
     cancel_req = pb.CancelExecutionRequest(execution_id=start_res.execution_id, reason="User stop")
     cancel_res = await service.CancelExecution(cancel_req, mock_context)
@@ -203,7 +245,8 @@ async def test_concurrent_cancel_is_idempotent(test_session, mock_context, monke
             async def synchronized_execute(statement, *args, **kwargs):
                 nonlocal reads
                 result = await execute(statement, *args, **kwargs)
-                if isinstance(statement, Select):
+                if isinstance(statement, Select) and any(
+                        item.get('name') == 'WorkflowExecutionModel' for item in statement.column_descriptions):
                     reads += 1
                     if reads <= 2:
                         if reads == 2:

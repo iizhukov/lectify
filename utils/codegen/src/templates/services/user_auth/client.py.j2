@@ -7,6 +7,19 @@ from generated.protos.clients.{{ service.user_auth.auth_service }} import index_
 from generated.protos.clients.{{ service.user_auth.auth_service }} import index_pb2_grpc as rpc
 
 
+def delegated_metadata(context):
+    """Forward only the credential attached to an already verified principal."""
+    principal = getattr(context, 'lectify_principal', None)
+    if not getattr(principal, 'user_id', None):
+        raise PermissionError('Verified user identity required')
+    values = [value for key, value in context.invocation_metadata() if key == 'x-user-authorization']
+    if (len(values) != 1 or not isinstance(values[0], str) or not values[0].startswith('Bearer ')
+            or not 7 < len(values[0]) <= 4103
+            or any(ord(char) <= 32 or ord(char) >= 127 for char in values[0][7:])):
+        raise PermissionError('Delegated user credential required')
+    return (('x-user-authorization', values[0]),)
+
+
 class UserAuthClient:
     """No positive caching: each RPC checks revocable session state."""
 

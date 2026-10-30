@@ -1,0 +1,13 @@
+service:
+  name: api_execution
+  version: 0.1.0
+  description: Authenticated execution API over immutable workflow snapshots
+  active: true
+  grpc: {enabled: true, port: 10025}
+  grpc_client:
+    enabled: true
+    services: [api_workflow, orchestrator]
+  user_auth: {enabled: true, auth_service: api_auth}
+  ticket_auth: {enabled: true, tas_service: infra_tas}
+  observability: {enabled: true}
+  testing: {generated_fixtures: false}

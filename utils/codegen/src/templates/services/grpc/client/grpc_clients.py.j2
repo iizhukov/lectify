@@ -27,6 +27,8 @@ class GrpcClients:
     def __init__(self, source_service: str | None = None) -> None:
         self._channels: dict[str, grpc.aio.Channel] = {}
         self._interceptor_resources = []
+        self._close_task = None
+        self._closed = False
         self._source_service = source_service
         self._defaults = {
             {% for svc in client_services %}
@@ -44,6 +46,8 @@ class GrpcClients:
     {% endfor %}
 
     def channel(self, service_name: str, addr: str | None = None) -> grpc.aio.Channel:
+        if self._closed:
+            raise RuntimeError('gRPC clients are closed')
         target = addr or self._defaults.get(service_name)
 
         if target is None:
@@ -79,16 +83,31 @@ class GrpcClients:
         return self._channels[service_name]
 
     async def close_all(self) -> None:
-        channels, self._channels = list(self._channels.values()), {}
-        resources, self._interceptor_resources = self._interceptor_resources, []
-        results = await asyncio.gather(
-            *(channel.close() for channel in channels),
-            *(resource.close() for resource in resources),
-            return_exceptions=True,
-        )
+        if self._close_task is None:
+            self._closed = True
+            channels, self._channels = list(self._channels.values()), {}
+            resources, self._interceptor_resources = self._interceptor_resources, []
+            async def close():
+                return await asyncio.gather(
+                    *(channel.close() for channel in channels),
+                    *(resource.close() for resource in resources),
+                    return_exceptions=True,
+                )
+            self._close_task = asyncio.create_task(close())
+        cancelled = False
+        while True:
+            try:
+                results = await asyncio.shield(self._close_task)
+                break
+            except asyncio.CancelledError:
+                if self._close_task.cancelled():
+                    raise
+                cancelled = True
         for result in results:
             if isinstance(result, BaseException):
                 raise result
+        if cancelled:
+            raise asyncio.CancelledError()
 
 
 def get_grpc_clients() -> GrpcClients:

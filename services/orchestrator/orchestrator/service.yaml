@@ -7,6 +7,9 @@ service:
   active: true
   plugin_runtime_client:
     enabled: true
+  user_auth:
+    enabled: true
+    auth_service: api_auth
 
   # Python version
   python:

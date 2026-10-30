@@ -13,10 +13,10 @@ from generated.db.connection import set_engine, set_session_factory  # type: ign
 
 
 @pytest_asyncio.fixture
-async def test_db_engine() -> AsyncGenerator[AsyncEngine, None]:
-    """In-memory SQLite async engine for tests."""
+async def test_db_engine(tmp_path) -> AsyncGenerator[AsyncEngine, None]:
+    """Per-test SQLite database supporting independent concurrent sessions."""
     engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
+        "sqlite+aiosqlite:///" + str(tmp_path / "test.sqlite3"),
         echo=False,
     )
     async with engine.begin() as conn:
@@ -24,9 +24,8 @@ async def test_db_engine() -> AsyncGenerator[AsyncEngine, None]:
 
     yield engine
 
-    async with engine.begin() as conn:
-        await conn.run_sync(BaseModel.metadata.drop_all)
-
+    # The file belongs to tmp_path and is unique to this test. No schema DROP
+    # is needed; dispose connections before pytest removes the temporary file.
     await engine.dispose()
 
 

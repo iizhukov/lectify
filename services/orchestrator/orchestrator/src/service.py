@@ -1,14 +1,19 @@
 import asyncio
 import time
 import uuid
+import re
+import json
+from contextlib import aclosing
 from typing import Any, AsyncIterator, Dict, List, Optional
 import grpc
 from google.protobuf.json_format import MessageToDict
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from generated.grpc_server.grpc_app import OrchestratorServiceBase
 from generated.protos.server import index_pb2 as pb
 from generated.db.connection import get_session_factory
+from generated.db.transactions import run_transaction
 from generated.logger import get_logger
 
 from src.models import (
@@ -20,12 +25,54 @@ from src.models import (
 )
 from src.engine.dispatch import claim, renew, guard_execution_write, pending_executions
 from src.node_events import report_node_event
+from src.execution_events import stream_events, epoch
 from src.engine.dag import WorkflowDAG, DAGValidationError
 from src.engine.stream_router import StreamRouter
 from src.engine.docker_runner import ContainerLifecycleManager
+from generated.stream_pipeline import run_streaming_graph
 from src.flags import flags
 
 log = get_logger("orchestrator_service")
+
+
+def _json_pairs(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('Duplicate JSON key')
+        value[key] = item
+    return value
+
+
+def _invalid_number(value):
+    raise ValueError('Non-finite JSON value')
+
+
+def _node_data(node):
+    if node.parameters_json and node.parameters:
+        raise ValueError('Specify either typed JSON or legacy parameters')
+    for raw in (node.parameters_json, node.input_mapping_json):
+        if len(raw.encode('utf-8')) > 65536:
+            raise ValueError('Node JSON exceeds limit')
+    parameters = json.loads(node.parameters_json, object_pairs_hook=_json_pairs,
+        parse_constant=_invalid_number) if node.parameters_json else dict(node.parameters)
+    mappings = json.loads(node.input_mapping_json, object_pairs_hook=_json_pairs,
+        parse_constant=_invalid_number) if node.input_mapping_json else []
+    if not isinstance(parameters, dict) or not isinstance(mappings, list) or len(mappings) > 128:
+        raise ValueError('Invalid node parameters or input mappings')
+    if len(json.dumps(parameters, ensure_ascii=False, allow_nan=False).encode('utf-8')) > 65536:
+        raise ValueError('Node parameters exceed limit')
+    for mapping in mappings:
+        if (not isinstance(mapping, dict) or set(mapping) != {'target_field','source','transform'}
+                or any(not isinstance(value, str) or len(value) > 4096 for value in mapping.values())):
+            raise ValueError('Invalid frozen input mapping')
+    result = {'id':node.id,'plugin_id':node.plugin_id,'plugin_version':node.plugin_version or '0.1.0',
+        'parameters':parameters,'input_bindings':dict(node.input_bindings)}
+    if mappings:
+        result['input_mapping'] = mappings
+    if node.prompt_id:
+        result['prompt_id'] = node.prompt_id
+    return result
 
 
 class OrchestratorServiceImpl(OrchestratorServiceBase):
@@ -36,31 +83,47 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         self._execution_tasks: Dict[str, asyncio.Task] = {}
         self._event_subscribers: Dict[str, List[asyncio.Queue]] = {}
 
+    async def _principal(self, context):
+        principal = getattr(context, 'lectify_principal', None)
+        user_id = getattr(principal, 'user_id', None)
+        if not isinstance(user_id, str) or not user_id or len(user_id) > 64:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Verified user identity required')
+        return user_id, getattr(principal, 'is_admin', False) is True
+
+    async def _authorize_execution(self, context, execution_id):
+        user_id, admin = await self._principal(context)
+        async with get_session_factory()() as session:
+            owner = (await session.execute(select(WorkflowExecutionModel.user_id).where(
+                WorkflowExecutionModel.id == execution_id))).one_or_none()
+            if owner is None or (not admin and owner[0] != user_id):
+                await context.abort(grpc.StatusCode.NOT_FOUND, 'Execution not found')
+
     async def StartExecution(
         self,
         request: pb.StartExecutionRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.StartExecutionResponse:
+        user_id, _ = await self._principal(context)
+        if request.user_id and request.user_id != user_id:
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, 'Execution owner must match authenticated user')
+        if not 1 <= len(request.graph.nodes) <= 256 or len(request.graph.edges) > 1024:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Execution graph exceeds limits')
         execution_id = request.execution_id or str(uuid.uuid4())
         workflow_id = request.workflow_id or "default_workflow"
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,35}', execution_id) or len(workflow_id) > 64:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Invalid execution or workflow identifier')
 
         log.info(
             "start_execution_received",
             execution_id=execution_id,
             workflow_id=workflow_id,
-            user_id=request.user_id,
+            user_id=user_id,
         )
 
-        nodes_data = [
-            {
-                "id": node.id,
-                "plugin_id": node.plugin_id,
-                "plugin_version": node.plugin_version or "0.1.0",
-                "parameters": dict(node.parameters),
-                "input_bindings": dict(node.input_bindings),
-            }
-            for node in request.graph.nodes
-        ]
+        try:
+            nodes_data = [_node_data(node) for node in request.graph.nodes]
+        except (ValueError, TypeError, RecursionError, UnicodeError):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Invalid typed node configuration')
         edges_data = [
             {
                 "from_node_id": edge.from_node_id,
@@ -78,19 +141,41 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
             return pb.StartExecutionResponse()
 
-        # Persist execution & node records to database
+        graph_json = {"nodes": nodes_data, "edges": edges_data}
+        initial_inputs = dict(request.initial_inputs)
+        async def reuse(saved):
+            if saved.user_id != user_id:
+                await context.abort(grpc.StatusCode.NOT_FOUND, 'Execution not found')
+            if (saved.workflow_id != workflow_id or saved.graph_json != graph_json
+                    or saved.initial_inputs != initial_inputs):
+                await context.abort(grpc.StatusCode.ALREADY_EXISTS, 'Execution ID is bound to another request')
+            return pb.StartExecutionResponse(execution_id=saved.id,
+                state=getattr(pb, 'EXECUTION_STATE_' + saved.state, pb.EXECUTION_STATE_UNSPECIFIED),
+                started_at=epoch(saved.created_at)), False
+
+        # Commit execution, dispatch and nodes together before external work.
         session_factory = get_session_factory()
-        async with session_factory() as session:
+        async def persist(session):
+            existing = await session.get(WorkflowExecutionModel, execution_id)
+            if existing is not None:
+                return await reuse(existing)
             exec_model = WorkflowExecutionModel(
                 id=execution_id,
                 workflow_id=workflow_id,
-                user_id=request.user_id,
+                user_id=user_id,
                 state="RUNNING",
-                graph_json={"nodes": nodes_data, "edges": edges_data},
-                initial_inputs=dict(request.initial_inputs),
+                graph_json=graph_json,
+                initial_inputs=initial_inputs,
             )
             session.add(exec_model)
-            await session.flush()
+            try:
+                await session.flush()
+            except IntegrityError:
+                await session.rollback()
+                existing = await session.get(WorkflowExecutionModel, execution_id)
+                if existing is None:
+                    raise
+                return await reuse(existing)
             session.add(WorkflowDispatchModel(execution_id=execution_id))
 
             for node in sorted_nodes:
@@ -104,7 +189,11 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 )
                 session.add(node_model)
 
-            await session.commit()
+            return pb.StartExecutionResponse(execution_id=execution_id,
+                state=pb.EXECUTION_STATE_RUNNING, started_at=epoch(exec_model.created_at)), True
+        response, created = await run_transaction(session_factory, persist)
+        if not created:
+            return response
 
         # Launch execution background task
         task = asyncio.create_task(self._run_owned_pipeline(
@@ -113,12 +202,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         self._execution_tasks[execution_id] = task
         task.add_done_callback(lambda completed, key=execution_id: self._execution_finished(key, completed))
 
-        started_at = int(time.time())
-        return pb.StartExecutionResponse(
-            execution_id=execution_id,
-            state=pb.EXECUTION_STATE_RUNNING,
-            started_at=started_at,
-        )
+        return response
 
     def _execution_finished(self, execution_id, task):
         if self._execution_tasks.get(execution_id) is task:
@@ -171,7 +255,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         if fence is None:
             return
 
-        self._active_routers.setdefault(execution_id, StreamRouter(execution_id=execution_id))
+        router = self._active_routers.setdefault(execution_id, StreamRouter(execution_id=execution_id))
 
         async def heartbeat():
             while True:
@@ -195,6 +279,9 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 if not task.done() and not task.cancelling():
                     task.cancel()
             await asyncio.gather(pipeline, lease, return_exceptions=True)
+            await router.close_all()
+            if self._active_routers.get(execution_id) is router:
+                self._active_routers.pop(execution_id, None)
 
     async def _run_execution_pipeline(
         self,
@@ -208,6 +295,9 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         session_factory = get_session_factory()
 
         try:
+            if getattr(self.container_manager, 'supports_streaming', False):
+                await self._run_stream_nodes(execution_id, sorted_nodes, dag, initial_inputs, ownership)
+                sorted_nodes = []
             for idx, node_def in enumerate(sorted_nodes):
                 async with session_factory() as session:
                     if not await guard_execution_write(session, execution_id, ownership):
@@ -332,6 +422,37 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
             )
 
 
+    async def _run_stream_nodes(self, execution_id, nodes, dag, initial_inputs, ownership):
+        factory = get_session_factory()
+        async def run_node(node, inputs):
+            async def begin(session):
+                if not await guard_execution_write(session, execution_id, ownership):
+                    raise RuntimeError('Execution stream lease was lost')
+                model = await session.scalar(select(WorkflowNodeExecutionModel).where(
+                    WorkflowNodeExecutionModel.execution_id == execution_id,
+                    WorkflowNodeExecutionModel.node_id == node['id']))
+                if model is None:
+                    raise RuntimeError('Execution node is not persisted')
+                if model.state == 'COMPLETED':
+                    raise RuntimeError('Completed stream node requires durable output replay')
+                model.state, model.progress_percent = 'PROCESSING', 0
+            await run_transaction(factory, begin)
+            async with aclosing(self.container_manager.stream_node(execution_id=execution_id, node=node,
+                    inputs=inputs, ownership=ownership, initial_inputs=initial_inputs)) as output:
+                async for frame in output:
+                    yield frame
+        async def complete(node):
+            async def persist(session):
+                if not await guard_execution_write(session, execution_id, ownership):
+                    raise RuntimeError('Execution stream lease was lost')
+                await session.execute(update(WorkflowNodeExecutionModel).where(
+                    WorkflowNodeExecutionModel.execution_id == execution_id,
+                    WorkflowNodeExecutionModel.node_id == node['id'],
+                    WorkflowNodeExecutionModel.state == 'PROCESSING',
+                ).values(state='COMPLETED', progress_percent=100))
+            await run_transaction(factory, persist)
+        await run_streaming_graph(execution_id, nodes, dag.edges, run_node, on_node_complete=complete)
+
     async def _broadcast_event(
         self,
         execution_id: str,
@@ -357,8 +478,9 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         request: pb.CancelExecutionRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.CancelExecutionResponse:
+        await self._authorize_execution(context, request.execution_id)
         session_factory = get_session_factory()
-        async with session_factory() as session:
+        async def persist(session):
             stmt = select(WorkflowExecutionModel).where(WorkflowExecutionModel.id == request.execution_id)
             res = await session.execute(stmt)
             exec_model = res.scalar_one_or_none()
@@ -378,8 +500,11 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                     ))
                     if current_state != "CANCELLED":
                         await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Execution is already terminal")
-                else:
-                    await session.commit()
+            await session.execute(update(WorkflowNodeExecutionModel).where(
+                WorkflowNodeExecutionModel.execution_id == request.execution_id,
+                WorkflowNodeExecutionModel.state.in_(("PENDING", "PROVISIONING", "BUFFERING", "PROCESSING")),
+            ).values(state="CANCELLED", error_message=request.reason or "Cancelled by user"))
+        await run_transaction(session_factory, persist)
 
         task = self._execution_tasks.get(request.execution_id)
         if task is not None and task is not asyncio.current_task():
@@ -402,6 +527,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         request: pb.GetExecutionStatusRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.GetExecutionStatusResponse:
+        await self._authorize_execution(context, request.execution_id)
         session_factory = get_session_factory()
         async with session_factory() as session:
             stmt = select(WorkflowExecutionModel).where(WorkflowExecutionModel.id == request.execution_id)
@@ -466,47 +592,44 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         request: pb.StreamExecutionEventsRequest,
         context: grpc.aio.ServicerContext,
     ) -> AsyncIterator[pb.ExecutionEvent]:
-        q: asyncio.Queue = asyncio.Queue()
-        if request.execution_id not in self._event_subscribers:
-            self._event_subscribers[request.execution_id] = []
-        self._event_subscribers[request.execution_id].append(q)
-
-        try:
-            while True:
-                event = await q.get()
+        user_id, admin = await self._principal(context)
+        async with aclosing(stream_events(get_session_factory(), request.execution_id,
+                request.after_sequence, context, user_id, admin)) as events:
+            async for event in events:
                 yield event
-                if event.event_type == pb.EVENT_TYPE_STATE_CHANGED and "completed" in event.message.lower():
-                    break
-        finally:
-            if request.execution_id in self._event_subscribers:
-                self._event_subscribers[request.execution_id].remove(q)
 
     async def PauseExecution(
         self,
         request: pb.PauseExecutionRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.PauseExecutionResponse:
-        return pb.PauseExecutionResponse(success=True, state=pb.EXECUTION_STATE_PAUSED)
+        await self._authorize_execution(context, request.execution_id)
+        await context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Durable stream pause is not implemented')
 
     async def ResumeExecution(
         self,
         request: pb.ResumeExecutionRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.ResumeExecutionResponse:
-        return pb.ResumeExecutionResponse(success=True, state=pb.EXECUTION_STATE_RUNNING)
+        await self._authorize_execution(context, request.execution_id)
+        await context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Durable stream resume is not implemented')
 
     async def RetryNode(
         self,
         request: pb.RetryNodeRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.RetryNodeResponse:
-        return pb.RetryNodeResponse(success=True, state=pb.NODE_STATE_PROCESSING)
+        await self._authorize_execution(context, request.execution_id)
+        await context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Durable stream retry is not implemented')
 
     async def RegisterPluginManifest(
         self,
         request: pb.RegisterPluginManifestRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.RegisterPluginManifestResponse:
+        _, admin = await self._principal(context)
+        if not admin:
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, 'Plugin registration requires administrator access')
         session_factory = get_session_factory()
         async with session_factory() as session:
             model = PluginRegistryModel(
@@ -528,6 +651,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         request: pb.ListRegisteredPluginsRequest,
         context: grpc.aio.ServicerContext,
     ) -> pb.ListRegisteredPluginsResponse:
+        await self._principal(context)
         session_factory = get_session_factory()
         async with session_factory() as session:
             stmt = select(PluginRegistryModel)

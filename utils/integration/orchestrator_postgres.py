@@ -17,6 +17,41 @@ from src.engine.dispatch import claim, renew, guard_execution_write
 from src.engine.launch import prepare_launch, begin_launch
 
 
+async def verify_start_idempotency(factory):
+    from types import SimpleNamespace
+    from generated.db.connection import set_session_factory
+    from generated.protos.server import index_pb2 as pb
+    from src.service import OrchestratorServiceImpl
+    class Context:
+        lectify_principal = SimpleNamespace(user_id='integration-user',is_admin=False)
+        async def abort(self, code, details):
+            raise RuntimeError('Unexpected RPC rejection: '+code.name)
+    class Runner:
+        def __init__(self):
+            self.started, self.calls = asyncio.Event(), 0
+        async def start_plugin_node(self, **scope):
+            self.calls += 1
+            self.started.set()
+            await asyncio.Event().wait()
+    runner = Runner()
+    services = [OrchestratorServiceImpl(container_manager=runner) for _ in range(2)]
+    request = pb.StartExecutionRequest(execution_id='integration-start',workflow_id='workflow',
+        graph=pb.WorkflowGraph(nodes=[pb.WorkflowNode(id='node',plugin_id='plugin')]))
+    set_session_factory(factory)
+    try:
+        responses = await asyncio.wait_for(asyncio.gather(*(
+            service.StartExecution(request,Context()) for service in services)),15)
+        await asyncio.wait_for(runner.started.wait(),5)
+        assert responses[0].execution_id == responses[1].execution_id
+        assert responses[0].started_at == responses[1].started_at
+        assert runner.calls == 1
+    finally:
+        for service in services:
+            await service.CancelExecution(pb.CancelExecutionRequest(execution_id=request.execution_id),Context())
+            await asyncio.gather(*list(service._execution_tasks.values()),return_exceptions=True)
+        set_session_factory(None)
+
+
 def docker(*args):
     return subprocess.check_output(['docker', *args], text=True, stderr=subprocess.STDOUT).strip()
 
@@ -88,7 +123,8 @@ async def verify(port, password):
             await session.commit()
             assert await claim(session, 'integration', 'late', now=9999999999) is None
             await session.commit()
-        print('PostgreSQL: 12 concurrent lease claimants, 12 launch claimants, fencing replacement and cancellation checks passed.')
+        await verify_start_idempotency(factory)
+        print('PostgreSQL: concurrent lease/launch claims, fencing, cancellation and two-replica StartExecution idempotency passed.')
     finally:
         await engine.dispose()
 

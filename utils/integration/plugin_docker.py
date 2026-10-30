@@ -41,6 +41,7 @@ def main():
         context = Path(directory)
         files = [
             'utils/integration/plugin_stream.py',
+            'utils/integration/plugin_processes.py',
             'services/orchestrator/agent/src/policy.py',
             'services/orchestrator/agent/generated/plugin_agent/proxy.py',
             'services/orchestrator/orchestrator/generated/plugin_runtime_client.py',
@@ -59,7 +60,7 @@ RUN pip install --disable-pip-version-check --timeout 15 --retries 1 --no-cache-
 COPY . /app
 ENV PYTHONDONTWRITEBYTECODE=1
 USER 1000:1000
-ENTRYPOINT ["python", "utils/integration/plugin_stream.py"]
+ENTRYPOINT ["python", "utils/integration/plugin_processes.py"]
 ''' + 'LABEL lectify.integration-build="' + uuid.uuid4().hex + '"\n')
         try:
             subprocess.run(['docker','build','--pull=false','--progress=plain','--iidfile',str(context / 'image.id'),

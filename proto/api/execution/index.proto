@@ -1,0 +1,42 @@
+syntax = "proto3";
+package execution.v1;
+
+service ExecutionService {
+  rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
+  rpc GetStatus(ExecutionRequest) returns (ExecutionStatus);
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  rpc StreamEvents(EventRequest) returns (stream ExecutionEvent);
+}
+message StartWorkflowRequest {
+  string workflow_id = 1;
+  int64 expected_version = 2;
+  string request_key = 3;
+  map<string,string> initial_inputs = 4;
+}
+message StartWorkflowResponse {
+  string execution_id = 1;
+  string snapshot_id = 2;
+  string snapshot_hash = 3;
+  string state = 4;
+  int64 started_at = 5;
+}
+message ExecutionRequest { string execution_id = 1; }
+message CancelRequest { string execution_id = 1; string reason = 2; }
+message CancelResponse { bool success = 1; string state = 2; }
+message NodeStatus {
+  string node_id = 1; string plugin_id = 2; string state = 3;
+  int32 progress_percent = 4; string progress_message = 5;
+  int64 bytes_streamed_in = 6; int64 bytes_streamed_out = 7;
+  int32 chunks_processed = 8; int64 execution_time_ms = 9;
+  string error_message = 10; map<string,string> output_artifacts = 11;
+}
+message ExecutionStatus {
+  string execution_id = 1; string state = 2; int32 total_progress_percent = 3;
+  repeated NodeStatus nodes = 4; int64 started_at = 5; int64 finished_at = 6; string error_message = 7;
+}
+message EventRequest { string execution_id = 1; int64 after_sequence = 2; }
+message ExecutionEvent {
+  string execution_id = 1; string node_id = 2; string event_type = 3;
+  int64 timestamp = 4; string message = 5; int32 progress_percent = 6;
+  map<string,string> metadata = 7; int64 sequence = 8;
+}

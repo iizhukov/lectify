@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import sys
+import signal
 from pathlib import Path
 
 from generated.models import PluginContext, PluginParameters, StreamChunk
@@ -13,12 +14,32 @@ from src.plugin import PluginHandler
 
 async def main() -> None:
     mode = os.environ.get("PLUGIN_MODE", "pipe")
+    if mode == "supervised":
+        from generated.process_supervisor import run_pair
+        command = json.loads(os.environ.get('LECTIFY_AGENT_COMMAND_JSON', 'null'))
+        if (not isinstance(command, list) or not 1 <= len(command) <= 32
+                or any(not isinstance(arg, str) or not arg or len(arg) > 4096 or '\x00' in arg for arg in command)):
+            raise ValueError('A trusted agent command argument vector is required')
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        previous = {}
+        try:
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                previous[signum] = signal.getsignal(signum)
+                loop.add_signal_handler(signum, stop.set)
+            await run_pair(command, [sys.executable, '-m', 'generated.main'], stop.wait,
+                environment=dict(os.environ, PLUGIN_MODE='server'))
+        finally:
+            for signum, handler in previous.items():
+                loop.remove_signal_handler(signum)
+                signal.signal(signum, handler)
+        return
     if mode == "server":
         from generated.server import run_server
         await run_server()
         return
     if mode != "pipe":
-        raise ValueError("PLUGIN_MODE must be server or pipe")
+        raise ValueError("PLUGIN_MODE must be supervised, server or pipe")
     execution_id = os.environ.get("EXECUTION_ID", "local_exec")
     node_id = os.environ.get("NODE_ID", "local_node")
     raw_params = os.environ.get("PLUGIN_PARAMETERS", "{}")

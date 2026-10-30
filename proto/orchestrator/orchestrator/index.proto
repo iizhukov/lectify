@@ -51,6 +51,9 @@ message WorkflowNode {
     string plugin_version = 3;
     map<string, string> parameters = 4;
     map<string, string> input_bindings = 5; // e.g. "audio_chunk" -> "source_node_id.output_stream"
+    string parameters_json = 6; // Preferred typed JSON object; mutually exclusive with parameters.
+    string input_mapping_json = 7; // Frozen workflow input mapping objects.
+    string prompt_id = 8;
 }
 
 message WorkflowEdge {
@@ -119,6 +122,7 @@ message GetExecutionStatusResponse {
 
 message StreamExecutionEventsRequest {
     string execution_id = 1;
+    int64 after_sequence = 2;
 }
 
 enum EventType {
@@ -131,6 +135,7 @@ enum EventType {
     EVENT_TYPE_NODE_FAILED = 6;
     EVENT_TYPE_ARTIFACT_SAVED = 7;
     EVENT_TYPE_LOG_EMITTED = 8;
+    EVENT_TYPE_METRICS_REPORTED = 9;
 }
 
 message ExecutionEvent {
@@ -141,6 +146,7 @@ message ExecutionEvent {
     string message = 5;
     int32 progress_percent = 6;
     map<string, string> metadata = 7;
+    int64 sequence = 8; // Durable node report cursor; state snapshots use zero.
 }
 
 message PauseExecutionRequest {
