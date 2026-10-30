@@ -1,0 +1,44 @@
+syntax = "proto3";
+package api.prompt.v1;
+service PromptService {
+  rpc CreatePrompt(CreatePromptRequest) returns (Prompt);
+  rpc GetPrompt(GetPromptRequest) returns (Prompt);
+  rpc ListPrompts(ListPromptsRequest) returns (ListPromptsResponse);
+  rpc UpdatePrompt(UpdatePromptRequest) returns (Prompt);
+  rpc DeletePrompt(DeletePromptRequest) returns (DeletePromptResponse);
+  rpc RenderPrompt(RenderPromptRequest) returns (RenderPromptResponse);
+}
+message Prompt {
+  string id = 1;
+  string owner_id = 2; // Empty means global; writable only by an administrator.
+  string name = 3;
+  string system_prompt = 4;
+  string user_prompt_template = 5;
+  repeated string variables = 6;
+  int64 version = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+message CreatePromptRequest {
+  string name = 1;
+  string system_prompt = 2;
+  string user_prompt_template = 3;
+  repeated string variables = 4;
+  bool global_prompt = 5;
+}
+message GetPromptRequest { string id = 1; }
+message ListPromptsRequest { int32 page_size = 1; int32 offset = 2; }
+message ListPromptsResponse { repeated Prompt prompts = 1; bool has_more = 2; }
+message VariableList { repeated string names = 1; }
+message UpdatePromptRequest {
+  string id = 1;
+  int64 expected_version = 2;
+  optional string name = 3;
+  optional string system_prompt = 4;
+  optional string user_prompt_template = 5;
+  VariableList variables = 6;
+}
+message DeletePromptRequest { string id = 1; int64 expected_version = 2; }
+message DeletePromptResponse { bool deleted = 1; }
+message RenderPromptRequest { string id = 1; map<string, string> variables = 2; }
+message RenderPromptResponse { string system_prompt = 1; string user_prompt = 2; }

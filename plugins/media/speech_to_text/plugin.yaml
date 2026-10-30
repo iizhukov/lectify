@@ -1,0 +1,57 @@
+plugin:
+  name: speech_to_text
+  version: 0.1.0
+  description: "Потоковая транскрибация аудио в текст с буферизацией чанков"
+  category: "media"
+  language: python
+  active: true
+
+  # Streaming inputs and buffer rules
+  inputs:
+    - name: audio_stream
+      type: stream/audio
+      required: true
+      buffer:
+        strategy: full
+        chunk_size_bytes: 5242880 # 5 MB
+        time_window_ms: 10000     # 10s
+        delimiter: null
+        overlap_bytes: 0
+
+  # Streaming outputs and artifacts
+  outputs:
+    - name: transcript_stream
+      type: stream/text
+    - name: transcript_file
+      type: artifact/file
+      filename: "transcript.txt"
+
+  # User parameters
+  parameters:
+    - name: model
+      type: string
+      default: "openai/gpt-4o-mini-transcribe"
+      description: "Модель транскрибации"
+    - name: language
+      type: string
+      default: "ru"
+      description: "Язык аудио"
+
+  # Platform permissions (zero raw secrets in container)
+  permissions:
+    llm:
+      enabled: true
+      allowed_purposes:
+        - "stt"
+        - "transcription"
+      allowed_models:
+        - "openai/gpt-4o-mini-transcribe"
+    storage:
+      enabled: true
+      upload_artifacts: true
+    database:
+      enabled: false
+      allowed_entities: []
+    network:
+      egress: false
+      allowed_hosts: []

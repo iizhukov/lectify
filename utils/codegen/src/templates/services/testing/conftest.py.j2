@@ -1,3 +1,6 @@
 # pytest fixtures for {{ service.name }}
+{% if service.testing.generated_fixtures %}
 from generated.testing.fixtures import *  # noqa: F401, F403
-
+{% else %}
+# Tests manage their own isolated generated dependencies.
+{% endif %}

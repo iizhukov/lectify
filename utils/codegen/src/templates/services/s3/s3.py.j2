@@ -23,7 +23,8 @@ class S3Client:
             endpoint_url=f"http://{s.minio.endpoint}",
             aws_access_key_id=s.minio.access_key,
             aws_secret_access_key=s.minio.secret_key,
-            config=BotoConfig(signature_version="s3v4"),
+            config=BotoConfig(signature_version="s3v4", connect_timeout=5, read_timeout=30,
+                retries={"total_max_attempts": 2, "mode": "standard"}),
         )
         self._bucket = bucket_name
 
@@ -44,8 +45,23 @@ class S3Client:
     def put(self, key: str, body: bytes, content_type: str = "application/octet-stream") -> None:
         self._client.put_object(Bucket=self._bucket, Key=key, Body=body, ContentType=content_type)
 
+    def put_stream(self, key: str, body, content_type: str = "application/octet-stream") -> None:
+        """Upload a seekable file-like body without materializing it in application memory."""
+        self._client.put_object(Bucket=self._bucket, Key=key, Body=body, ContentType=content_type)
+
+    def open(self, key: str):
+        """Caller owns bounded read(size) and close(); methods are synchronous."""
+        return self._client.get_object(Bucket=self._bucket, Key=key)["Body"]
+
+    def delete(self, key: str) -> None:
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+
     def get(self, key: str) -> bytes:
-        return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        response = self.open(key)
+        try:
+            return response.read()
+        finally:
+            response.close()
 {% for bucket in service.minio.buckets %}
 
 

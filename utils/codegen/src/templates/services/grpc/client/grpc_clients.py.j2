@@ -3,8 +3,12 @@
 # To regenerate: codegen generate
 # ---------------------------------------------------------------------------
 
+import asyncio
 import grpc
 import uuid
+{% if manifest.service.plugin_agent.enabled %}
+from generated.transport import TLSConfig, create_channel
+{% endif %}
 
 from structlog.contextvars import get_contextvars, bind_contextvars
 
@@ -22,6 +26,7 @@ from generated.protos.clients.{{ svc.name }} import {{ svc.proto_module }}_pb2_g
 class GrpcClients:
     def __init__(self, source_service: str | None = None) -> None:
         self._channels: dict[str, grpc.aio.Channel] = {}
+        self._interceptor_resources = []
         self._source_service = source_service
         self._defaults = {
             {% for svc in client_services %}
@@ -62,16 +67,28 @@ class GrpcClients:
                 target_service=service_name,
             ))
             {% endif %}
+            {% if manifest.service.plugin_agent.enabled %}
+            ch = create_channel(target, TLSConfig.from_env("LECTIFY_AGENT_BACKEND_TLS"),
+                                interceptors=_interceptors or None)
+            {% else %}
             ch = grpc.aio.insecure_channel(target, interceptors=_interceptors or None)
+            {% endif %}
+            self._interceptor_resources.extend(item for item in _interceptors if hasattr(item, "close"))
             self._channels[service_name] = ch
 
         return self._channels[service_name]
 
     async def close_all(self) -> None:
-        for ch in self._channels.values():
-            await ch.close()
-
-        self._channels.clear()
+        channels, self._channels = list(self._channels.values()), {}
+        resources, self._interceptor_resources = self._interceptor_resources, []
+        results = await asyncio.gather(
+            *(channel.close() for channel in channels),
+            *(resource.close() for resource in resources),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
 
 def get_grpc_clients() -> GrpcClients:

@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import List
 
 from config.models import ServiceManifest
-from utils import get_repo_root, get_service_path
+from config.plugin_models import PluginManifest
+from utils import get_repo_root, get_service_path, load_valid_plugins, get_plugin_path
 
 from generators.services.base import BaseGenerator as ServiceBaseGenerator
 from generators.services.settings import SettingsGenerator
@@ -21,11 +22,24 @@ from generators.services.scheduler import SchedulerGenerator
 from generators.services.ticket_auth import TicketAuthGenerator
 from generators.services.kafka_producer import KafkaProducerGenerator
 from generators.services.config import ConfigGenerator
+from generators.services.user_auth import UserAuthGenerator
+from generators.services.plugin_agent import PluginAgentGenerator
+from generators.services.workflow_validation import WorkflowValidationGenerator
+from generators.services.http import HttpGenerator
 # from generators.prometheus_scrape import PrometheusScrapeGenerator
 from generators.services.requirements import RequirementsGenerator
 from generators.services.main import MainGenerator
 from generators.services.dockerfile import DockerfileGenerator
 from generators.services.testing import TestingGenerator
+
+from generators.plugins.base import BasePluginGenerator
+from generators.plugins.models import ModelsGenerator
+from generators.plugins.protos import ProtosGenerator
+from generators.plugins.buffer import BufferGenerator
+from generators.plugins.sidecar_client import SidecarClientGenerator
+from generators.plugins.main import MainGenerator as PluginMainGenerator
+from generators.plugins.dockerfile import DockerfileGenerator as PluginDockerfileGenerator
+from generators.plugins.requirements import RequirementsGenerator as PluginRequirementsGenerator
 
 from generators.infra.base import BaseGenerator as InfraBaseGenerator
 from generators.infra.minio import MinioGenerator
@@ -54,6 +68,10 @@ def run_service(manifest: ServiceManifest, output_path: Path, docker: bool = Fal
         SchedulerGenerator(manifest, output_path),
         TicketAuthGenerator(manifest, output_path, docker=docker),
         ConfigGenerator(manifest, output_path, docker=docker),
+        UserAuthGenerator(manifest, output_path, docker=docker),
+        WorkflowValidationGenerator(manifest, output_path),
+        PluginAgentGenerator(manifest, output_path),
+        HttpGenerator(manifest, output_path),
         RequirementsGenerator(manifest, output_path),
         MainGenerator(manifest, output_path),
         DockerfileGenerator(manifest, output_path),
@@ -81,8 +99,33 @@ def run_infra(services: list[ServiceManifest]) -> None:
     print(f"[codegen] Generated {sum(g.files_written for g in gens)} files in {output_path}")
 
 
-def run_plugins() -> None:
-    ...
+def run_plugin(manifest: PluginManifest, output_path: Path, docker: bool = False) -> None:
+    if output_path.exists():
+        shutil.rmtree(output_path)
+
+    output_path.mkdir(parents=True)
+
+    gens: List[BasePluginGenerator] = [
+        ProtosGenerator(manifest, output_path, docker=docker),
+        ModelsGenerator(manifest, output_path, docker=docker),
+        BufferGenerator(manifest, output_path, docker=docker),
+        SidecarClientGenerator(manifest, output_path, docker=docker),
+        PluginMainGenerator(manifest, output_path, docker=docker),
+        PluginDockerfileGenerator(manifest, output_path, docker=docker),
+        PluginRequirementsGenerator(manifest, output_path, docker=docker),
+    ]
+
+    for gen in gens:
+        gen.generate()
+
+    print(f"[codegen] Generated {sum(g.files_written for g in gens)} files in {output_path}")
+
+
+def run_plugins(docker: bool = False) -> None:
+    plugins = load_valid_plugins()
+    for plugin in plugins:
+        plugin_path = get_plugin_path(plugin.plugin.name)
+        run_plugin(plugin, plugin_path / "generated/", docker=docker)
 
 
 def run_project(services: list[ServiceManifest], docker: bool = False) -> None:
@@ -92,4 +135,4 @@ def run_project(services: list[ServiceManifest], docker: bool = False) -> None:
         run_service(service, get_service_path(service.service.name) / "generated/", docker=docker)
 
     run_infra(services)
-    run_plugins()
+    run_plugins(docker=docker)

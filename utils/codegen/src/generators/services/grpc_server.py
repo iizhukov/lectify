@@ -18,8 +18,7 @@ class GrpcServerGenerator(BaseGenerator):
         protos_out.mkdir(parents=True, exist_ok=True)
 
         if not proto_path.exists():
-            print(f"[codegen] gRPC: proto file not found at {proto_path}, skipping")
-            return
+            raise FileNotFoundError(f"gRPC server protocol not found: {proto_path}")
 
         proto_info = self._parse_proto(proto_path)
         proto_info["pb2_grpc_module"] = proto_path.stem + "_pb2_grpc"
@@ -39,7 +38,7 @@ class GrpcServerGenerator(BaseGenerator):
         )
 
         if result.returncode != 0:
-            print(f"[codegen] gRPC: protoc failed:\n{result.stderr}", file=sys.stderr)
+            raise RuntimeError(f"gRPC server protocol compilation failed: {result.stderr}")
         else:
             self._fix_pb2_grpc_imports(protos_out)
             print(f"[codegen] gRPC: generated pb2 files in {protos_out}")

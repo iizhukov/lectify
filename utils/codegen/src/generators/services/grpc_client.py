@@ -12,7 +12,7 @@ from utils import get_service_proto, get_service_path, get_service_manifest, get
 
 class GrpcClientGenerator(BaseGenerator):
     def generate(self) -> None:
-        if not self.svc.grpc_client.enabled and not self.svc.ticket_auth.enabled and not self.svc.config.enabled:
+        if not self.svc.grpc_client.enabled and not self.svc.ticket_auth.enabled and not self.svc.config.enabled and not self.svc.user_auth.enabled and not self.svc.plugin_agent.enabled:
             return
 
         client_services = self._build_service_list()
@@ -44,14 +44,21 @@ class GrpcClientGenerator(BaseGenerator):
         if self.svc.config.enabled and "infra_config" not in services:
             services.append("infra_config")
 
+        if self.svc.user_auth.enabled and self.svc.user_auth.auth_service not in services:
+            services.append(self.svc.user_auth.auth_service)
+
+        if self.svc.plugin_agent.enabled:
+            for dependency in ("api_auth", "api_file", "api_prompt", "plugins_provider"):
+                if dependency not in services:
+                    services.append(dependency)
+
         for svc_name in services:
             svc_path = get_service_path(svc_name)
             svc_manifest = get_service_manifest(svc_path)
             proto_path = get_service_proto(svc_path)
 
             if not proto_path.exists():
-                print(f"[codegen] gRPC client: proto not found for service '{svc_name}' at {proto_path}, skipping")
-                continue
+                raise FileNotFoundError(f"gRPC client protocol not found for {svc_name}: {proto_path}")
 
             methods = self._parse_proto_methods(proto_path)
             pkg, svc_cls = self._parse_proto_package_and_service(proto_path)
@@ -89,8 +96,7 @@ class GrpcClientGenerator(BaseGenerator):
             text=True,
         )
         if result.returncode != 0:
-            print(f"[codegen] gRPC client: protoc failed for {svc['name']}:\n{result.stderr}", file=sys.stderr)
-            return
+            raise RuntimeError(f"gRPC client protocol compilation failed for {svc['name']}: {result.stderr}")
 
         # Fix imports in pb2_grpc
         for gf in protos_out.glob(f"{proto_path.stem}_pb2_grpc.py"):

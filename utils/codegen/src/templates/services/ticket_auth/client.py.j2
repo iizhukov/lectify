@@ -4,6 +4,10 @@
 # ---------------------------------------------------------------------------
 
 import time
+{% if manifest.service.plugin_agent.enabled %}
+import os
+from generated.transport import TLSConfig, create_channel
+{% endif %}
 import structlog
 import jwt
 
@@ -52,6 +56,7 @@ class TicketAuthClient:
         self._public_key_fetched_at: float = 0
         self._key_cache_ttl: float = 300.0
         self._tas_stub: Any | None = None
+        self._tas_channel: Any | None = None
         self._tas_pb2_module: Any = None
 
     async def _get_tas_stub(self) -> Any:
@@ -64,10 +69,21 @@ class TicketAuthClient:
 
         self._tas_pb2_module = pb2_mod
         tas_target = "{{ tas_address }}"
-        channel = grpc.aio.insecure_channel(tas_target)
-        self._tas_stub = pb2_grpc_mod.TicketServiceStub(channel)
+        {% if manifest.service.plugin_agent.enabled %}
+        tas_target = os.environ.get("LECTIFY_AGENT_TAS_ADDRESS", tas_target)
+        self._tas_channel = create_channel(tas_target, TLSConfig.from_env("LECTIFY_AGENT_BACKEND_TLS"))
+        {% else %}
+        self._tas_channel = grpc.aio.insecure_channel(tas_target)
+        {% endif %}
+        self._tas_stub = pb2_grpc_mod.TicketServiceStub(self._tas_channel)
 
         return self._tas_stub
+
+    async def close(self) -> None:
+        channel, self._tas_channel = self._tas_channel, None
+        self._tas_stub = None
+        if channel is not None:
+            await channel.close()
 
     async def request_ticket(self, source_service: str, target_service: str) -> Optional[str]:
         stub = await self._get_tas_stub()

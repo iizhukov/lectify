@@ -1,0 +1,13 @@
+service:
+  name: api_prompt
+  version: 0.1.0
+  description: User and global prompt templates with ownership and safe rendering
+  active: true
+  python: {major: 3, minor: 12}
+  grpc: {enabled: true, port: 10023}
+  postgres: {enabled: true, migration_dir: migrations}
+  user_auth: {enabled: true, auth_service: api_auth, timeout_seconds: 5}
+  ticket_auth: {enabled: true, tas_service: infra_tas, ticket_ttl: 60}
+  vault: {enabled: true, vars: [API_PROMPT_DB_URL]}
+  observability: {enabled: true}
+  testing: {generated_fixtures: false}

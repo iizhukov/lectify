@@ -5,6 +5,7 @@
 
 import sys
 import importlib
+import json
 
 from pathlib import Path
 from typing import Type, TypeVar, Optional, List
@@ -13,6 +14,7 @@ from pydantic import Field
 
 from generated.settings.base import (  # type: ignore
     DatabaseSettings,
+    HttpSettings,
     KafkaSettings,
     MinioSettings,
     ConfigSettings,
@@ -38,6 +40,12 @@ class Settings(BaseSettings):
     service_name: str = "{{ service.name }}"
     service_host: str = Field(default="0.0.0.0")
     service_port: int = Field(default={{ service.grpc.port }})
+
+    http: "HttpSettings" = Field(default_factory=lambda: _resolve(HttpSettings)(), repr=False)
+    extensions: dict[str, dict] = Field(
+        default_factory=lambda: json.loads({{ manifest.extensions | tojson | tojson }}),
+        validation_alias="{{ service.name | upper | replace("-", "_") }}_EXTENSIONS", repr=False,
+    )
 
     database: "DatabaseSettings" = Field(default_factory=lambda: _resolve(DatabaseSettings)())
     grpc: "GrpcServerSettings" = Field(default_factory=lambda: _resolve(GrpcServerSettings)())

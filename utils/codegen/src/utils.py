@@ -7,9 +7,14 @@ from pydantic import ValidationError
 from pathlib import Path
 
 from config.models import ServiceManifest
+from config.plugin_models import PluginManifest
 
 
 class ServiceManifestError(Exception):
+    pass
+
+
+class PluginManifestError(Exception):
     pass
 
 
@@ -132,3 +137,91 @@ def load_valid_services() -> list[ServiceManifest]:
         services.append(manifest)
     
     return services
+
+
+def load_plugin_manifest(path: str | Path) -> PluginManifest:
+    path = Path(path)
+    if not path.exists():
+        raise PluginManifestError(f"File not found: {path}")
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        raise PluginManifestError(f"Invalid YAML: {e}") from e
+
+    if not isinstance(data, dict):
+        raise PluginManifestError("plugin.yaml must be a dictionary at root")
+
+    try:
+        return PluginManifest.model_validate(data)
+    except ValidationError as e:
+        lines = [f"  {err['loc']}: {err['msg']}" for err in e.errors()]
+        raise PluginManifestError(f"plugin.yaml validation failed:\n" + "\n".join(lines)) from e
+
+
+def validate_plugin_manifest(path: Path) -> list[str]:
+    if path.parts[-1] != "plugin.yaml":
+        path /= "plugin.yaml"
+
+    manifest = load_plugin_manifest(path)
+    warnings: list[str] = []
+    plug = manifest.plugin
+
+    if not plug.inputs and not plug.outputs:
+        warnings.append(f"Plugin '{plug.name}' has no inputs or outputs configured")
+
+    return warnings
+
+
+def get_plugin_manifest(plugin_path: Path) -> PluginManifest:
+    manifest_path = plugin_path
+    if plugin_path.parts[-1] != "plugin.yaml":
+        manifest_path /= "plugin.yaml"
+
+    try:
+        return load_plugin_manifest(manifest_path)
+    except PluginManifestError as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        raise
+
+
+def get_plugin_path(plugin_name: str) -> Path:
+    repo_root = get_repo_root()
+    for manifest_path in (repo_root / "plugins").rglob("plugin.yaml"):
+        try:
+            manifest = get_plugin_manifest(manifest_path)
+        except PluginManifestError:
+            print(f"[codegen] WARNING: {manifest_path} is invalid")
+            continue
+
+        if manifest.plugin.name == plugin_name:
+            return manifest_path.parent
+
+    raise ValueError(f'Plugin "{plugin_name}" not found')
+
+
+def load_valid_plugins() -> list[PluginManifest]:
+    plugins = []
+    plugins_dir = get_repo_root() / "plugins"
+    if not plugins_dir.exists():
+        return plugins
+
+    for manifest_path in plugins_dir.rglob("plugin.yaml"):
+        try:
+            validate_plugin_manifest(manifest_path)
+        except PluginManifestError:
+            print(f"[codegen] WARNING: {manifest_path} is invalid")
+            continue
+
+        try:
+            manifest = load_plugin_manifest(manifest_path)
+        except PluginManifestError as e:
+            print(f"[codegen] WARNING: {e} is invalid")
+            continue
+
+        if not manifest.plugin.active:
+            continue
+
+        plugins.append(manifest)
+
+    return plugins

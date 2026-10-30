@@ -1,0 +1,17 @@
+service:
+  name: api_auth
+  version: 0.1.0
+  description: Persistent account authentication and rotating opaque sessions
+  active: true
+  grpc:
+    enabled: true
+    port: 10021
+  postgres:
+    enabled: true
+    migration_dir: migrations
+  vault:
+    enabled: true
+    vars:
+      - API_AUTH_DB_URL
+  observability:
+    enabled: true

@@ -7,13 +7,18 @@ from pathlib import Path
 
 from utils import (
     ServiceManifestError,
+    PluginManifestError,
     load_manifest,
     validate_manifest,
     load_valid_services,
+    load_plugin_manifest,
+    validate_plugin_manifest,
+    load_valid_plugins,
     get_repo_root,
     get_service_path,
+    get_plugin_path,
 )
-from generators.runner import run_service, run_infra, run_plugins, run_project
+from generators.runner import run_service, run_infra, run_plugins, run_plugin, run_project
 from migrations import get_migrations_manager
 
 
@@ -213,9 +218,189 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_plugins(_: argparse.Namespace) -> int:
+def cmd_plugin_init(args: argparse.Namespace) -> int:
+    plugin_path = Path(args.path)
+    name = plugin_path.name
+
+    if not plugin_path.exists():
+        plugin_path.mkdir(parents=True)
+
+    plugin_yaml = plugin_path / "plugin.yaml"
+    if plugin_yaml.exists():
+        print(f"[codegen] {plugin_yaml} already exists — skipping.")
+        return 0
+
+    plugin_yaml.write_text(
+        f"""\
+plugin:
+  name: {name}
+  version: 0.1.0
+  description: ""
+  category: "general"
+  language: python
+  active: true
+
+  # Streaming inputs and buffer rules
+  inputs:
+    - name: input_stream
+      type: stream/binary
+      required: true
+      buffer:
+        strategy: size
+        chunk_size_bytes: 5242880
+        time_window_ms: 10000
+        delimiter: null
+        overlap_bytes: 0
+
+  # Streaming outputs and artifacts
+  outputs:
+    - name: output_stream
+      type: stream/text
+    - name: result_file
+      type: artifact/file
+      filename: "result.txt"
+
+  # User parameters
+  parameters:
+    - name: example_param
+      type: string
+      default: "default_value"
+      description: "Example parameter"
+
+  # Platform permissions (zero secrets in container)
+  permissions:
+    llm:
+      enabled: false
+      allowed_purposes: []
+      allowed_models: []
+    storage:
+      enabled: true
+      upload_artifacts: true
+    database:
+      enabled: false
+      allowed_entities: []
+    network:
+      egress: false
+      allowed_hosts: []
+""",
+        encoding="utf-8",
+    )
+
+    src_dir = plugin_path / "src"
+    if not src_dir.exists():
+        src_dir.mkdir()
+
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "plugin.py").write_text(
+        """from generated.models import PluginContext
+from generated.sidecar_client import SidecarAgentClient
+
+
+class PluginHandler:
+    def __init__(self, context: PluginContext, sidecar: SidecarAgentClient) -> None:
+        self.context = context
+        self.sidecar = sidecar
+
+    async def on_start(self) -> None:
+        pass
+
+    async def process_buffer(self, buffer: bytes) -> None:
+        pass
+
+    async def on_finish(self) -> None:
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    req_file = plugin_path / "requirements.txt"
+    if not req_file.exists():
+        req_file.write_text("# Plugin custom dependencies\n", encoding="utf-8")
+
+    tests_dir = plugin_path / "tests"
+    if not tests_dir.exists():
+        tests_dir.mkdir()
+        (tests_dir / "conftest.py").write_text("# pytest fixtures for plugin\n", encoding="utf-8")
+        (tests_dir / "test_plugin.py").write_text(
+            """import pytest
+
+
+@pytest.mark.asyncio
+async def test_plugin_structure():
+    assert True
+""",
+            encoding="utf-8",
+        )
+
+    pytest_ini = plugin_path / "pytest.ini"
+    if not pytest_ini.exists():
+        pytest_ini.write_text(
+            "[pytest]\ntestpaths = tests\npython_files = test_*.py\nasyncio_mode = auto\npythonpath = . generated src\n",
+            encoding="utf-8",
+        )
+
+    print(f"[codegen] Initialized {plugin_path / 'plugin.yaml'}")
+    return 0
+
+
+def cmd_plugin_validate(args: argparse.Namespace) -> int:
+    path = Path(getattr(args, "path", ".")).resolve()
+    if path.is_dir() and (path / "plugin.yaml").exists():
+        path = path / "plugin.yaml"
+
     try:
-        run_plugins()
+        warnings = validate_plugin_manifest(path)
+    except PluginManifestError as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        return 1
+
+    print(f"[codegen] {path} is valid")
+    if warnings:
+        for w in warnings:
+            print(f"[codegen] WARNING: {w}")
+
+    return 0
+
+
+def cmd_plugin_generate(args: argparse.Namespace) -> int:
+    plugin_name = getattr(args, "plugin_name", None)
+    if plugin_name:
+        try:
+            plugin_path = get_plugin_path(plugin_name)
+            manifest = load_plugin_manifest(plugin_path / "plugin.yaml")
+            run_plugin(manifest, plugin_path / "generated/", docker=getattr(args, "docker", False))
+            return 0
+        except Exception as e:
+            print(f"[codegen] ERROR: {e}", file=sys.stderr)
+            return 1
+
+    manifest_path = Path.cwd() / "plugin.yaml"
+    output_path = Path.cwd() / "generated/"
+
+    try:
+        manifest = load_plugin_manifest(manifest_path)
+    except PluginManifestError as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        run_plugin(manifest, output_path, docker=getattr(args, "docker", False))
+    except Exception as e:
+        print(f"[codegen] ERROR: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def cmd_plugins(args: argparse.Namespace) -> int:
+    try:
+        plugin_name = getattr(args, "plugin_name", None)
+        if plugin_name:
+            plugin_path = get_plugin_path(plugin_name)
+            manifest = load_plugin_manifest(plugin_path / "plugin.yaml")
+            run_plugin(manifest, plugin_path / "generated/", docker=getattr(args, "docker", False))
+        else:
+            run_plugins(docker=getattr(args, "docker", False))
     except Exception as e:
         print(f"[codegen] ERROR: {e}", file=sys.stderr)
         return 1
@@ -398,8 +583,27 @@ def main(argv: list[str] | None = None) -> int:
     p_gen = sub.add_parser("infra", help="Generate init scripts for infra/")
     p_gen.set_defaults(func=cmd_infra)
 
-    p_gen = sub.add_parser("plugins", help="Generate for plugins/")
-    p_gen.set_defaults(func=cmd_plugins)
+    p_plugins = sub.add_parser("plugins", help="Generate code for plugins/ (all active or specific plugin)")
+    p_plugins.add_argument("plugin_name", nargs="?", default=None, help="Optional plugin name")
+    p_plugins.add_argument("--docker", action="store_true", help="Use Docker network addresses")
+    p_plugins.set_defaults(func=cmd_plugins)
+
+    # Sub-command: plugin
+    p_plugin = sub.add_parser("plugin", help="Plugin management: init, validate, generate")
+    p_plugin_sub = p_plugin.add_subparsers(required=True)
+
+    p_pinit = p_plugin_sub.add_parser("init", help="Scaffold a new plugin directory with plugin.yaml")
+    p_pinit.add_argument("path", help="Plugin directory path, e.g. plugins/media/speech_to_text")
+    p_pinit.set_defaults(func=cmd_plugin_init)
+
+    p_pval = p_plugin_sub.add_parser("validate", help="Validate plugin.yaml in current or target directory")
+    p_pval.add_argument("path", nargs="?", default=".", help="Target path")
+    p_pval.set_defaults(func=cmd_plugin_validate)
+
+    p_pgen = p_plugin_sub.add_parser("generate", help="Generate code from plugin.yaml")
+    p_pgen.add_argument("plugin_name", nargs="?", default=None, help="Optional plugin name")
+    p_pgen.add_argument("--docker", action="store_true", help="Use Docker network addresses")
+    p_pgen.set_defaults(func=cmd_plugin_generate)
 
     p_gen = sub.add_parser("project", help="generate all project files")
     p_gen.add_argument("--docker", action="store_true", help="Use Docker service names as addresses instead of localhost")

@@ -1,0 +1,77 @@
+syntax = "proto3";
+package workflow.v1;
+
+service WorkflowService {
+  rpc CreateWorkflow(CreateWorkflowRequest) returns (Workflow);
+  rpc GetWorkflow(IdRequest) returns (Workflow);
+  rpc ListWorkflows(ListRequest) returns (WorkflowList);
+  rpc UpdateWorkflow(UpdateWorkflowRequest) returns (Workflow);
+  rpc DeleteWorkflow(DeleteRequest) returns (OperationResponse);
+  rpc CreateNodeTemplate(CreateNodeTemplateRequest) returns (NodeTemplate);
+  rpc GetNodeTemplate(IdRequest) returns (NodeTemplate);
+  rpc ListNodeTemplates(ListRequest) returns (NodeTemplateList);
+  rpc UpdateNodeTemplate(UpdateNodeTemplateRequest) returns (NodeTemplate);
+  rpc DeleteNodeTemplate(DeleteRequest) returns (OperationResponse);
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (WorkflowSnapshot);
+  rpc GetSnapshot(IdRequest) returns (WorkflowSnapshot);
+  rpc ForkWorkflow(ForkWorkflowRequest) returns (Workflow);
+}
+message InputMapping { string target_field = 1; string source = 2; string transform = 3; }
+message GraphNode {
+  string id = 1;
+  string plugin_id = 2;
+  string plugin_version = 3;
+  string name = 4;
+  string description = 5;
+  // A bounded JSON object, not executable code or an arbitrary YAML document.
+  string parameters_json = 6;
+  repeated InputMapping input_mapping = 7;
+  string prompt_id = 8;
+}
+message GraphEdge { string from_node_id = 1; string from_output = 2; string to_node_id = 3; string to_input = 4; }
+message WorkflowGraph { repeated GraphNode nodes = 1; repeated GraphEdge edges = 2; }
+message Workflow {
+  string id = 1; string owner_id = 2; string name = 3; string description = 4;
+  WorkflowGraph graph = 5; bool is_public = 6; int64 version = 7;
+  int64 created_at = 8; int64 updated_at = 9;
+}
+message NodeTemplate {
+  string id = 1; string owner_id = 2; string plugin_id = 3; string plugin_version = 4;
+  string name = 5; string description = 6; string parameters_json = 7;
+  repeated InputMapping input_mapping = 8; string prompt_id = 9;
+  int64 version = 10; int64 created_at = 11; int64 updated_at = 12;
+}
+message IdRequest { string id = 1; }
+// Includes public/global and caller-owned resources. No caller-controlled owner_id.
+message ListRequest { int32 page_size = 1; int32 offset = 2; bool own_only = 3; }
+message WorkflowList { repeated Workflow workflows = 1; int32 next_offset = 2; }
+message NodeTemplateList { repeated NodeTemplate nodes = 1; int32 next_offset = 2; }
+message CreateWorkflowRequest {
+  string name = 1; string description = 2; WorkflowGraph graph = 3;
+  bool is_public = 4; bool global_workflow = 5;
+}
+message UpdateWorkflowRequest {
+  string id = 1; int64 expected_version = 2; string name = 3;
+  string description = 4; WorkflowGraph graph = 5; bool is_public = 6;
+}
+message DeleteRequest { string id = 1; int64 expected_version = 2; }
+message OperationResponse { bool accepted = 1; }
+message CreateNodeTemplateRequest {
+  string plugin_id = 1; string plugin_version = 2; string name = 3;
+  string description = 4; string parameters_json = 5;
+  repeated InputMapping input_mapping = 6; string prompt_id = 7; bool global_node = 8;
+}
+message UpdateNodeTemplateRequest {
+  string id = 1; int64 expected_version = 2; string plugin_id = 3;
+  string plugin_version = 4; string name = 5; string description = 6;
+  string parameters_json = 7; repeated InputMapping input_mapping = 8; string prompt_id = 9;
+}
+// Snapshot creation does not queue or start an execution. Caller owns the immutable
+// snapshot; request_key is idempotent within that caller's namespace.
+message CreateSnapshotRequest { string workflow_id = 1; int64 expected_version = 2; string request_key = 3; }
+message WorkflowSnapshot {
+  string id = 1; string workflow_id = 2; int64 workflow_version = 3;
+  string created_by = 4; string name = 5; string description = 6;
+  WorkflowGraph graph = 7; string content_hash = 8; int64 created_at = 9;
+}
+message ForkWorkflowRequest { string id = 1; int64 expected_version = 2; string name = 3; }

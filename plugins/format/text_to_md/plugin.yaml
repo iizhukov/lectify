@@ -1,0 +1,40 @@
+plugin:
+  name: text_to_md
+  version: 0.1.0
+  description: "Форматирование текста в Markdown документ"
+  category: "format"
+  language: python
+  active: true
+
+  inputs:
+    - name: text_stream
+      type: stream/text
+      required: true
+      buffer:
+        strategy: delimiter
+        delimiter: "\n"
+        chunk_size_bytes: 4096
+
+  outputs:
+    - name: md_stream
+      type: stream/text
+    - name: md_file
+      type: artifact/file
+      filename: "notes.md"
+
+  parameters:
+    - name: title
+      type: string
+      default: "Lecture Summary"
+      description: "Заголовок документа"
+
+  permissions:
+    llm:
+      enabled: false
+    storage:
+      enabled: true
+      upload_artifacts: true
+    database:
+      enabled: false
+    network:
+      egress: false

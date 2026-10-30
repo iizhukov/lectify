@@ -179,6 +179,10 @@ class TicketAuthClientInterceptor(grpc.aio.UnaryUnaryClientInterceptor,
         self._client = TicketAuthClient()
         self._ticket_cache: dict[str, tuple[str, float]] = {}
 
+    async def close(self) -> None:
+        self._ticket_cache.clear()
+        await self._client.close()
+
     async def intercept_unary_unary(
         self,
         continuation: Callable[

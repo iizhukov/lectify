@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package orchestrator.v1;
+
+service OrchestratorService {
+    // Workflow Execution Management
+    rpc StartExecution(StartExecutionRequest) returns (StartExecutionResponse);
+    rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
+    rpc GetExecutionStatus(GetExecutionStatusRequest) returns (GetExecutionStatusResponse);
+    rpc StreamExecutionEvents(StreamExecutionEventsRequest) returns (stream ExecutionEvent);
+
+    // Node & Stream Control
+    rpc PauseExecution(PauseExecutionRequest) returns (PauseExecutionResponse);
+    rpc ResumeExecution(ResumeExecutionRequest) returns (ResumeExecutionResponse);
+    rpc RetryNode(RetryNodeRequest) returns (RetryNodeResponse);
+
+    // Plugin Registry within Orchestrator
+    rpc RegisterPluginManifest(RegisterPluginManifestRequest) returns (RegisterPluginManifestResponse);
+    rpc ListRegisteredPlugins(ListRegisteredPluginsRequest) returns (ListRegisteredPluginsResponse);
+}
+
+enum ExecutionState {
+    EXECUTION_STATE_UNSPECIFIED = 0;
+    EXECUTION_STATE_PENDING = 1;
+    EXECUTION_STATE_PROVISIONING = 2;
+    EXECUTION_STATE_RUNNING = 3;
+    EXECUTION_STATE_PAUSED = 4;
+    EXECUTION_STATE_COMPLETED = 5;
+    EXECUTION_STATE_FAILED = 6;
+    EXECUTION_STATE_CANCELLED = 7;
+}
+
+enum NodeState {
+    NODE_STATE_UNSPECIFIED = 0;
+    NODE_STATE_PENDING = 1;
+    NODE_STATE_PROVISIONING = 2;
+    NODE_STATE_BUFFERING = 3;
+    NODE_STATE_PROCESSING = 4;
+    NODE_STATE_COMPLETED = 5;
+    NODE_STATE_FAILED = 6;
+    NODE_STATE_CANCELLED = 7;
+    NODE_STATE_SKIPPED = 8;
+}
+
+message WorkflowNode {
+    string id = 1;
+    string plugin_id = 2;
+    string plugin_version = 3;
+    map<string, string> parameters = 4;
+    map<string, string> input_bindings = 5; // e.g. "audio_chunk" -> "source_node_id.output_stream"
+}
+
+message WorkflowEdge {
+    string from_node_id = 1;
+    string from_output = 2;
+    string to_node_id = 3;
+    string to_input = 4;
+}
+
+message WorkflowGraph {
+    repeated WorkflowNode nodes = 1;
+    repeated WorkflowEdge edges = 2;
+}
+
+message StartExecutionRequest {
+    string workflow_id = 1;
+    string execution_id = 2; // optional, generated if empty
+    WorkflowGraph graph = 3;
+    map<string, string> initial_inputs = 4; // e.g. "file_id", "media_url", "text"
+    string user_id = 5;
+}
+
+message StartExecutionResponse {
+    string execution_id = 1;
+    ExecutionState state = 2;
+    int64 started_at = 3;
+}
+
+message CancelExecutionRequest {
+    string execution_id = 1;
+    string reason = 2;
+}
+
+message CancelExecutionResponse {
+    bool success = 1;
+    ExecutionState state = 2;
+}
+
+message GetExecutionStatusRequest {
+    string execution_id = 1;
+}
+
+message NodeExecutionStatus {
+    string node_id = 1;
+    string plugin_id = 2;
+    NodeState state = 3;
+    int32 progress_percent = 4;
+    string progress_message = 5;
+    int64 bytes_streamed_in = 6;
+    int64 bytes_streamed_out = 7;
+    int32 chunks_processed = 8;
+    int64 execution_time_ms = 9;
+    string error_message = 10;
+    map<string, string> output_artifacts = 11;
+}
+
+message GetExecutionStatusResponse {
+    string execution_id = 1;
+    ExecutionState state = 2;
+    int32 total_progress_percent = 3;
+    repeated NodeExecutionStatus nodes = 4;
+    int64 started_at = 5;
+    int64 finished_at = 6;
+    string error_message = 7;
+}
+
+message StreamExecutionEventsRequest {
+    string execution_id = 1;
+}
+
+enum EventType {
+    EVENT_TYPE_UNSPECIFIED = 0;
+    EVENT_TYPE_STATE_CHANGED = 1;
+    EVENT_TYPE_NODE_PROGRESS = 2;
+    EVENT_TYPE_CHUNK_STREAMED = 3;
+    EVENT_TYPE_BUFFER_TRIGGERED = 4;
+    EVENT_TYPE_NODE_COMPLETED = 5;
+    EVENT_TYPE_NODE_FAILED = 6;
+    EVENT_TYPE_ARTIFACT_SAVED = 7;
+    EVENT_TYPE_LOG_EMITTED = 8;
+}
+
+message ExecutionEvent {
+    string execution_id = 1;
+    string node_id = 2;
+    EventType event_type = 3;
+    int64 timestamp = 4;
+    string message = 5;
+    int32 progress_percent = 6;
+    map<string, string> metadata = 7;
+}
+
+message PauseExecutionRequest {
+    string execution_id = 1;
+}
+
+message PauseExecutionResponse {
+    bool success = 1;
+    ExecutionState state = 2;
+}
+
+message ResumeExecutionRequest {
+    string execution_id = 1;
+}
+
+message ResumeExecutionResponse {
+    bool success = 1;
+    ExecutionState state = 2;
+}
+
+message RetryNodeRequest {
+    string execution_id = 1;
+    string node_id = 2;
+}
+
+message RetryNodeResponse {
+    bool success = 1;
+    NodeState state = 2;
+}
+
+message RegisterPluginManifestRequest {
+    string plugin_id = 1;
+    string version = 2;
+    string manifest_yaml = 3;
+}
+
+message RegisterPluginManifestResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ListRegisteredPluginsRequest {
+    string category = 1;
+}
+
+message PluginSummary {
+    string plugin_id = 1;
+    string name = 2;
+    string version = 3;
+    string category = 4;
+    string description = 5;
+    repeated string supported_inputs = 6;
+    repeated string supported_outputs = 7;
+}
+
+message ListRegisteredPluginsResponse {
+    repeated PluginSummary plugins = 1;
+}

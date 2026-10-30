@@ -1,0 +1,12 @@
+from generators.plugins.base import BasePluginGenerator
+
+
+class MainGenerator(BasePluginGenerator):
+    def generate(self) -> None:
+        self.write("runtime.py", self.render("plugins/runtime.py.j2"))
+        self.write("scoped_server.py", self.render("plugins/scoped_server.py.j2"))
+        self.write("server.py", self.render("plugins/server.py.j2"))
+        self.write(
+            "main.py",
+            self.render("plugins/main.py.j2"),
+        )

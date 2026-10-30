@@ -1,0 +1,2 @@
+# Reset delivery ciphertext uses a key injected separately from the database.
+cryptography>=44.0.0

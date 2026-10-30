@@ -83,7 +83,7 @@ async def run_grpc() -> None:
     log.info("Starting gRPC server...")
     try:
         from generated.grpc_server import grpc_app  # type: ignore
-        {% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled or manifest.service.config.enabled %}
+        {% if manifest.service.observability.enabled or manifest.service.ticket_auth.enabled or manifest.service.config.enabled or manifest.service.user_auth.enabled %}
         interceptors = []
         {% if manifest.service.observability.enabled %}
         from generated.observability.middleware import TracingInterceptor  # type: ignore
@@ -100,6 +100,10 @@ async def run_grpc() -> None:
         from generated.settings import get_settings  # type: ignore
         _s = get_settings()
         interceptors.append(ConfigServerInterceptor(target_service=_s.service_name))
+        {% endif %}
+        {% if manifest.service.user_auth.enabled %}
+        from generated.user_auth.interceptor import UserAuthServerInterceptor
+        interceptors.append(UserAuthServerInterceptor())
         {% endif %}
         await grpc_app.run(interceptors=interceptors)
         {% else %}
@@ -167,7 +171,13 @@ async def run_main() -> None:
 {% endif %}
 
 
-async def main():
+{% if manifest.service.plugin_agent.enabled %}
+async def run_plugin_agent() -> None:
+    from generated.plugin_agent.server import run_server
+    await run_server()
+
+
+{% endif %}async def main():
     {% if service.logging.loki.enabled %}
     # Запускаем Loki агента (в event loop)
     start_loki_agent()
@@ -177,6 +187,9 @@ async def main():
     log.info("service_starting", service="{{ service.name }}")
     
     tasks = []
+    {% if manifest.service.plugin_agent.enabled %}
+    tasks.append(run_plugin_agent())
+    {% endif %}
     {% if manifest.service.grpc.enabled %}
     tasks.append(run_grpc())
     {% endif %}
@@ -208,14 +221,20 @@ async def main():
     except Exception as e:
         log.error(f"Error in main: {e}")
         raise
-    {% if service.logging.loki.enabled %}
+    {% if service.logging.loki.enabled or service.http.enabled %}
     finally:
+        {% if service.http.enabled %}
+        from generated.http.client import close_http_client
+        await close_http_client()
+        {% endif %}
+        {% if service.logging.loki.enabled %}
         try:
             from generated.logger import flush_loki_agent, shutdown_loki_agent  # type: ignore
             await flush_loki_agent()
             await shutdown_loki_agent()
         except Exception:
             pass
+        {% endif %}
     {% endif %}
 
 

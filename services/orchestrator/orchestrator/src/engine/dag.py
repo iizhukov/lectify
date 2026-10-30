@@ -1,0 +1,74 @@
+from collections import defaultdict, deque
+from typing import Any, Dict, List, Set
+
+
+class DAGValidationError(Exception):
+    pass
+
+
+class WorkflowDAG:
+    def __init__(self, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> None:
+        self.nodes = nodes
+        self.edges = edges
+        if not nodes:
+            raise DAGValidationError("Workflow must contain at least one node")
+        ids = [node.get("id") for node in nodes]
+        if any(not isinstance(node_id, str) or not node_id.strip() for node_id in ids):
+            raise DAGValidationError("Every node must have a nonempty string id")
+        if len(ids) != len(set(ids)):
+            raise DAGValidationError("Workflow node ids must be unique")
+        self.node_map = {n["id"]: n for n in nodes}
+        self.adj = defaultdict(list)
+        self.in_degree = {n["id"]: 0 for n in nodes}
+        self.deps = defaultdict(list)
+
+        seen_edges = set()
+        for edge in edges:
+            from_node = edge.get("from_node_id")
+            to_node = edge.get("to_node_id")
+            if not isinstance(from_node, str) or not isinstance(to_node, str):
+                raise DAGValidationError("Edge endpoints must be node ids")
+
+            if from_node not in self.node_map:
+                raise DAGValidationError(f"Edge references unknown source node '{from_node}'")
+            if to_node not in self.node_map:
+                raise DAGValidationError(f"Edge references unknown target node '{to_node}'")
+
+            ports = (edge.get("from_output"), edge.get("to_input"))
+            if any(not isinstance(port, str) or not port.strip() for port in ports):
+                raise DAGValidationError("Edge ports must be nonempty strings")
+            identity = (from_node, ports[0], to_node, ports[1])
+            if identity in seen_edges:
+                raise DAGValidationError("Duplicate workflow edge")
+            seen_edges.add(identity)
+            self.adj[from_node].append(to_node)
+            self.in_degree[to_node] += 1
+            self.deps[to_node].append(edge)
+
+    def topological_sort(self) -> List[Dict[str, Any]]:
+        """
+        Returns nodes in topological order. Raises DAGValidationError if cycle detected.
+        """
+        in_deg = dict(self.in_degree)
+        queue = deque([nid for nid, deg in in_deg.items() if deg == 0])
+        sorted_ids: List[str] = []
+
+        while queue:
+            node_id = queue.popleft()
+            sorted_ids.append(node_id)
+
+            for neighbor in self.adj[node_id]:
+                in_deg[neighbor] -= 1
+                if in_deg[neighbor] == 0:
+                    queue.append(neighbor)
+
+        if len(sorted_ids) != len(self.nodes):
+            raise DAGValidationError("Workflow graph contains cycles")
+
+        return [self.node_map[nid] for nid in sorted_ids]
+
+    def get_dependencies(self, node_id: str) -> List[Dict[str, Any]]:
+        return self.deps.get(node_id, [])
+
+    def get_initial_nodes(self) -> List[Dict[str, Any]]:
+        return [self.node_map[nid] for nid, deg in self.in_degree.items() if deg == 0]

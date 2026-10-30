@@ -1,0 +1,14 @@
+service:
+  name: orchestrator_agent
+  version: 0.1.0
+  description: Assignment-scoped plugin infrastructure agent
+  active: true
+  ticket_auth:
+    enabled: true
+    tas_service: infra_tas
+  plugin_agent:
+    enabled: true
+  vault:
+    enabled: true
+  observability:
+    enabled: true

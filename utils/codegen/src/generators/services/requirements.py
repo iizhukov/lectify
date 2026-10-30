@@ -1,4 +1,5 @@
 import re
+from importlib.metadata import version
 from pathlib import Path
 
 from generators.services.base import BaseGenerator
@@ -13,12 +14,12 @@ def _base_requirements(svc) -> list[str]:
         "pytest>=8.0.0",
         "pytest-asyncio>=0.23.0",
     ]
-    if svc.grpc.enabled or svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled:
+    if svc.grpc.enabled or svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled or svc.user_auth.enabled or svc.plugin_agent.enabled:
         deps += [
-            "grpcio>=1.60.0",
-            "grpcio-tools>=1.60.0",
+            f"grpcio>={version('grpcio-tools')}",
+            f"grpcio-tools>={version('grpcio-tools')}",
             "grpcio-reflection>=1.60.0",
-            "protobuf>=4.25.0",
+            f"protobuf>={version('protobuf')}",
             "mypy-protobuf>=3.5.0",
         ]
 
@@ -29,8 +30,11 @@ def _base_requirements(svc) -> list[str]:
             "alembic>=1.13.0",
             "aiosqlite>=0.20.0",
         ]
+    if svc.http.enabled:
+        deps.append("httpx>=0.27.0")
     if svc.minio.enabled:
         deps.append("minio>=7.2.0")
+        deps.append("boto3>=1.34.0")
 
     if svc.vault.enabled:
         deps.append("hvac>=2.0.0")
@@ -38,7 +42,7 @@ def _base_requirements(svc) -> list[str]:
     if svc.kafka_producer.enabled or svc.kafka_consumer.enabled:
         deps.append("aiokafka>=0.10.0")
 
-    if svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled:
+    if svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled or svc.user_auth.enabled or svc.plugin_agent.enabled:
         deps += [
             "opentelemetry-api>=1.22.0",
             "opentelemetry-instrumentation-grpc>=0.43b0",

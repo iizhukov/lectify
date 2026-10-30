@@ -1,0 +1,156 @@
+syntax = "proto3";
+
+package plugins.v1;
+
+// PluginAgentService is hosted by the Plugin Infra Sidecar inside the container sandbox.
+// Polyglot plugins connect to this service via local IPC / Unix Socket / gRPC.
+service PluginAgentService {
+    // LLM Gateway with TAS auth, tenant quotas, and prompt injection
+    rpc CallLLM(LLMRequest) returns (stream LLMResponse);
+
+    // First frame is metadata; remaining frames are bounded audio bytes.
+    // The agent must enforce stt/model permissions and the total audio limit.
+    rpc Transcribe(stream TranscriptionChunk) returns (TranscriptionResponse);
+
+    // Agent authorizes the opaque file ID and streams ordered chunks with terminal EOF.
+    rpc ReadFile(ReadFileRequest) returns (stream DataChunk);
+
+    // Prompt template fetching with scoped permissions
+    rpc FetchPrompt(FetchPromptRequest) returns (FetchPromptResponse);
+
+    // Artifact persistence (streams file chunks into Lectify api_file storage)
+    rpc SaveArtifact(stream SaveArtifactChunk) returns (SaveArtifactResponse);
+
+    // Observability & lifecycle reporting
+    rpc ReportProgress(ReportProgressRequest) returns (ReportProgressResponse);
+    rpc ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse);
+    rpc ReportLog(ReportLogRequest) returns (ReportLogResponse);
+}
+
+// PluginRuntimeService is implemented by the generated plugin runtime to process incoming data
+service PluginRuntimeService {
+    // Bidirectional or incoming data streaming
+    rpc ProcessStream(stream DataChunk) returns (stream DataChunk);
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message DataChunk {
+    string stream_name = 1;
+    int64 sequence_number = 2;
+    bytes payload = 3;
+    bool is_last = 4;
+    map<string, string> metadata = 5;
+}
+
+message LLMMessage {
+    string role = 1; // "system", "user", "assistant"
+    string content = 2;
+}
+
+message LLMRequest {
+    string model = 1;
+    repeated LLMMessage messages = 2;
+    float temperature = 3;
+    int32 max_tokens = 4;
+    string purpose = 5; // e.g. "stt", "summary", "translation"
+    map<string, string> extra_params = 6;
+}
+
+message LLMResponse {
+    string delta_content = 1;
+    // Exactly one final response must set is_finished=true, including empty
+    // completions. EOF without this frame is an incomplete generation.
+    bool is_finished = 2;
+    string finish_reason = 3;
+    int32 tokens_used = 4;
+    int64 latency_ms = 5;
+}
+
+message FetchPromptRequest {
+    string prompt_id = 1;
+    map<string, string> variables = 2;
+}
+
+message FetchPromptResponse {
+    string prompt_id = 1;
+    string system_prompt = 2;
+    string user_prompt_template = 3;
+    string rendered_user_prompt = 4;
+}
+
+message SaveArtifactChunk {
+    oneof data {
+        ArtifactMetadata metadata = 1;
+        bytes chunk = 2;
+    }
+}
+
+message ArtifactMetadata {
+    string artifact_name = 1;
+    string filename = 2;
+    string content_type = 3;
+    string target_field = 4;
+}
+
+message SaveArtifactResponse {
+    string file_id = 1;
+    string minio_path = 2;
+    int64 size_bytes = 3;
+    bool success = 4;
+}
+
+message ReportProgressRequest {
+    int32 percent = 1; // 0 to 100
+    string message = 2;
+}
+
+message ReportProgressResponse {
+    bool acknowledged = 1;
+}
+
+message ReportMetricsRequest {
+    map<string, double> gauges = 1;
+    map<string, double> counters = 2;
+}
+
+message ReportMetricsResponse {
+    bool acknowledged = 1;
+}
+
+message ReportLogRequest {
+    string level = 1; // "DEBUG", "INFO", "WARNING", "ERROR"
+    string message = 2;
+    map<string, string> fields = 3;
+}
+
+message ReportLogResponse {
+    bool acknowledged = 1;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+    bool healthy = 1;
+    string status = 2;
+}
+
+message TranscriptionMetadata {
+    string model = 1;
+    string language = 2;
+    string content_type = 3;
+}
+message TranscriptionChunk {
+    oneof data {
+        TranscriptionMetadata metadata = 1;
+        bytes audio = 2;
+    }
+}
+message TranscriptionResponse {
+    string text = 1;
+    string language = 2;
+}
+
+message ReadFileRequest {
+    string file_id = 1;
+    int32 chunk_size_bytes = 2;
+}

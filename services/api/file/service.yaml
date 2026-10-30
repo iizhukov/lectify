@@ -1,0 +1,13 @@
+service:
+  name: api_file
+  version: 0.1.0
+  description: Owner-scoped file metadata and bounded object streams
+  active: true
+  grpc: {enabled: true, port: 10024}
+  postgres: {enabled: true, migration_dir: migrations}
+  minio: {enabled: true, buckets: [user-files]}
+  user_auth: {enabled: true, auth_service: api_auth, timeout_seconds: 5}
+  ticket_auth: {enabled: true, tas_service: infra_tas, ticket_ttl: 60}
+  vault: {enabled: true, vars: [API_FILE_DB_URL]}
+  observability: {enabled: true}
+  testing: {generated_fixtures: false}

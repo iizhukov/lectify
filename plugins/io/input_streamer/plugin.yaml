@@ -1,0 +1,35 @@
+plugin:
+  name: input_streamer
+  version: 0.1.0
+  description: "Потоковое чтение и нарезка исходных файлов в pipeline"
+  category: "io"
+  language: python
+  active: true
+
+  inputs: []
+
+  outputs:
+    - name: data_stream
+      type: stream/binary
+
+  parameters:
+    - name: file_id
+      type: string
+      default: ""
+      description: "ID входного файла"
+    - name: chunk_size_bytes
+      type: int
+      default: 1048576 # 1 MB
+      description: "Размер чанка для потоковой передачи"
+
+  permissions:
+    llm:
+      enabled: false
+    storage:
+      enabled: true
+      upload_artifacts: false
+    database:
+      enabled: true
+      allowed_entities: ["file_metadata"]
+    network:
+      egress: false

@@ -116,13 +116,42 @@ class TicketAuthConfig(BaseModel):
     ticket_ttl: int = 60
 
 
+class HttpConfig(BaseModel):
+    enabled: bool = False
+    timeout_seconds: float = Field(default=60, gt=0, le=600, allow_inf_nan=False)
+    connect_timeout_seconds: float = Field(default=5, gt=0, le=60, allow_inf_nan=False)
+    max_connections: int = Field(default=100, ge=1, le=1000)
+    max_keepalive_connections: int = Field(default=20, ge=0, le=1000)
+
+
+class UserAuthConfig(BaseModel):
+    enabled: bool = False
+    auth_service: str = Field(default="api_auth", pattern=r"^[a-z][a-z0-9_]*$")
+    timeout_seconds: float = Field(default=5.0, gt=0, le=30, allow_inf_nan=False)
+
+
+class TestingConfig(BaseModel):
+    generated_fixtures: bool = True
+
+
+class WorkflowValidationConfig(BaseModel):
+    enabled: bool = False
+
+
+class PluginAgentConfig(BaseModel):
+    enabled: bool = False
+
+
 class Service(BaseModel):
+    model_config = {"extra": "forbid"}
+
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
     version: str = Field(default="0.1.0", pattern=r"^\d+\.\d+\.\d+$")
     python: PythonVersion = Field(default_factory=lambda: PythonVersion(major=3, minor=12))
     description: str = ""
     active: bool = False
 
+    testing: TestingConfig = Field(default_factory=TestingConfig)
     main: MainConfig = Field(default_factory=MainConfig)
     grpc: GrpcServerConfig = Field(default_factory=GrpcServerConfig)
     grpc_client: GrpcClientConfig = Field(default_factory=GrpcClientConfig)
@@ -133,6 +162,10 @@ class Service(BaseModel):
     minio: MinioConfig = Field(default_factory=MinioConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
     ticket_auth: TicketAuthConfig = Field(default_factory=TicketAuthConfig)
+    user_auth: UserAuthConfig = Field(default_factory=UserAuthConfig)
+    plugin_agent: PluginAgentConfig = Field(default_factory=PluginAgentConfig)
+    workflow_validation: WorkflowValidationConfig = Field(default_factory=WorkflowValidationConfig)
+    http: HttpConfig = Field(default_factory=HttpConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
@@ -143,5 +176,6 @@ class Service(BaseModel):
 
 class ServiceManifest(BaseModel):
     """Root model for service.yaml"""
+    model_config = {"extra": "forbid"}
     service: Service
     extensions: dict[str, dict] = Field(default_factory=dict)

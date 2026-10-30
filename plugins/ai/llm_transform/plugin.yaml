@@ -1,0 +1,58 @@
+plugin:
+  name: llm_transform
+  version: 0.1.0
+  description: "Потоковая обработка текста через LLM с буферизацией по разделителям"
+  category: "ai"
+  language: python
+  active: true
+
+  inputs:
+    - name: text_stream
+      type: stream/text
+      required: true
+      buffer:
+        strategy: delimiter
+        delimiter: "\n\n"
+        chunk_size_bytes: 4096
+        time_window_ms: 5000
+
+  outputs:
+    - name: transformed_stream
+      type: stream/text
+    - name: result_file
+      type: artifact/file
+      filename: "result.md"
+
+  parameters:
+    - name: model
+      type: string
+      default: "openai/gpt-4o-mini"
+      description: "LLM модель"
+    - name: prompt_template
+      type: string
+      default: "Summarize and structure the following lecture notes:"
+      description: "Инструкция для преобразования"
+    - name: temperature
+      type: float
+      default: 0.7
+      description: "Температура генерации"
+
+  permissions:
+    llm:
+      enabled: true
+      allowed_purposes:
+        - "transform"
+        - "summarization"
+      allowed_models:
+        - "gpt-4o"
+        - "openai/gpt-4o-mini"
+        - "deepseek-chat"
+    storage:
+      enabled: true
+      upload_artifacts: true
+    database:
+      enabled: false
+      allowed_entities: []
+    network:
+      egress: false
+      allowed_hosts: []

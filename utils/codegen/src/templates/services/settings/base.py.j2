@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, SecretStr
 
 
 class DatabaseSettings(BaseSettings):
@@ -79,3 +79,12 @@ class GrpcServerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_GRPC_", extra="ignore")
 
     port: int = Field(default={{ service.grpc.port }})
+
+
+class HttpSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_HTTP_", extra="ignore")
+    bearer_token: SecretStr = Field(default=SecretStr(""), repr=False)
+    timeout_seconds: float = Field(default={{ service.http.timeout_seconds }}, gt=0, le=600, allow_inf_nan=False)
+    connect_timeout_seconds: float = Field(default={{ service.http.connect_timeout_seconds }}, gt=0, le=60, allow_inf_nan=False)
+    max_connections: int = Field(default={{ service.http.max_connections }}, ge=1, le=1000)
+    max_keepalive_connections: int = Field(default={{ service.http.max_keepalive_connections }}, ge=0, le=1000)
