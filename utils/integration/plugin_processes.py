@@ -6,10 +6,17 @@ from pathlib import Path
 import signal
 import sys
 import tempfile
+from contextlib import AsyncExitStack
 
 from plugin_stream import Client, Policy, Proxy, StorageBackend, create_scoped_server, create_server, rpc, pb
 from generated.scoped_server import ServerConfig
 from generated.transport import create_channel
+from plugin_stream import load, ROOT
+
+Controller = load('integration_controller',
+    'services/orchestrator/agent/generated/plugin_agent/controller.py').PluginController
+ControlClient = load('integration_control_client',
+    'services/orchestrator/orchestrator/generated/plugin_control_client.py').PluginControlClient
 
 
 class ArtifactBackend(StorageBackend):
@@ -21,11 +28,23 @@ class ArtifactBackend(StorageBackend):
 
 async def child(role):
     token = os.environ['LECTIFY_AGENT_TOKEN']
+    controller = None
     if role == 'agent':
         policy = Policy(execution_id='execution', node_id='node', owner_id='owner',
             plugin_name='text_to_md', storage_enabled=True, artifact_names=frozenset({'md_file'}))
-        server, _ = create_scoped_server(rpc.add_PluginAgentServiceServicer_to_server,
-            Proxy(policy, ArtifactBackend()), ServerConfig(token,'execution','node','127.0.0.1:50055'))
+        if os.environ.get('LECTIFY_TEST_CONTROLLED') == '1':
+            environment = {key:os.environ[key] for key in (
+                'LECTIFY_AGENT_TOKEN','LECTIFY_AGENT_ENDPOINT','LECTIFY_RUNTIME_TOKEN',
+                'LECTIFY_RUNTIME_ENDPOINT','PLUGIN_PARAMETERS')}
+            controller = Controller('execution','node',[sys.executable,'-m','generated.main'],
+                environment,str(ROOT/'plugins/format/text_to_md'))
+        def register(proxy, server):
+            rpc.add_PluginAgentServiceServicer_to_server(proxy,server)
+            if controller:
+                rpc.add_PluginControlServiceServicer_to_server(controller,server)
+        server, _ = create_scoped_server(register,
+            Proxy(policy, ArtifactBackend()), ServerConfig(token,'execution','node','127.0.0.1:50055',
+                control_token=os.environ.get('LECTIFY_AGENT_CONTROL_TOKEN')))
     elif role == 'plugin':
         server, _ = create_server(ServerConfig(token,'execution','node','127.0.0.1:50056'))
     else:
@@ -36,10 +55,12 @@ async def child(role):
         await server.start()
         await stop.wait()
     finally:
+        if controller:
+            await controller.close()
         await server.stop(0)
 
 
-async def main():
+async def main(controlled=False):
     token = 'a'*48
     with tempfile.TemporaryDirectory(prefix='lectify-process-smoke-') as directory:
         artifact = Path(directory) / 'artifact.md'
@@ -64,11 +85,29 @@ async def main():
             assert artifact.read_bytes() == result
         environment.update(PLUGIN_MODE='supervised', LECTIFY_AGENT_COMMAND_JSON=json.dumps(
             [sys.executable, str(Path(__file__).resolve()), 'agent']))
+        if controlled:
+            environment.update(LECTIFY_TEST_CONTROLLED='1',LECTIFY_AGENT_CONTROL_TOKEN='c'*48)
         plugin_root = Path(__file__).resolve().parents[2] / 'plugins/format/text_to_md'
-        process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'generated.main',
+        command = ([sys.executable,str(Path(__file__).resolve()),'agent'] if controlled
+            else [sys.executable,'-m','generated.main'])
+        process = await asyncio.create_subprocess_exec(*command,
             cwd=plugin_root, env=environment)
         try:
-            await operation()
+            async with AsyncExitStack() as lifecycle:
+                if controlled:
+                    channel = create_channel('127.0.0.1:50055')
+                    try:
+                        await asyncio.wait_for(channel.channel_ready(),10)
+                    finally:
+                        await channel.close()
+                    control = await lifecycle.enter_async_context(ControlClient(
+                        '127.0.0.1:50055','execution','node','c'*48))
+                    assert (await control.status()).state == 'READY'
+                    await lifecycle.enter_async_context(control.running('integration-start'))
+                await operation()
+            if controlled:
+                async with ControlClient('127.0.0.1:50055','execution','node','c'*48) as control:
+                    assert (await control.status()).state == 'STOPPED'
         finally:
             if process.returncode is None:
                 process.terminate()
@@ -83,4 +122,5 @@ async def main():
 
 
 if __name__ == '__main__':
-    asyncio.run(child(sys.argv[1]) if len(sys.argv) == 2 else main())
+    asyncio.run(main(True) if sys.argv[1:] == ['--controlled'] else
+        child(sys.argv[1]) if len(sys.argv) == 2 else main())

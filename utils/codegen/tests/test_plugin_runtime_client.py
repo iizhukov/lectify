@@ -66,6 +66,7 @@ async def test_runtime_client_scopes_stream_and_closes_resources(client_factory)
         result = [item async for item in client.process(None, ['output'])]
     assert len(result) == 1
     call, options = calls[0]
+    assert options['wait_for_ready'] is True and options['timeout'] == 300
     assert dict(options['metadata']) == {'authorization':'Bearer '+'a'*48,
         'x-execution-id':'execution','x-node-id':'node'}
     assert call.cancelled and channel.closed

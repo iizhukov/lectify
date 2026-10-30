@@ -38,7 +38,9 @@ class PluginRuntimeClient:
             raise ValueError('Invalid output port contract')
         sequences = dict.fromkeys(names, 0)
         ended = set()
-        call = self._stub.ProcessStream(inputs, timeout=self.timeout, metadata=self._metadata)
+        # Control Start confirms process allocation; its listener may still be booting.
+        call = self._stub.ProcessStream(inputs, timeout=self.timeout, metadata=self._metadata,
+            wait_for_ready=True)
         try:
             async for frame in call:
                 name = frame.stream_name

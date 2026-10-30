@@ -95,6 +95,58 @@ async def shutdown_cancellation():
 
 asyncio.run(main())
 asyncio.run(shutdown_cancellation())
+
+async def lost_start_response():
+    entered, release = asyncio.Event(), asyncio.Event()
+    class Client:
+        stops = 0
+        async def start(self, command): raise RuntimeError('response lost')
+        async def stop(self, command):
+            self.stops += 1
+            entered.set()
+            await release.wait()
+    client = Client()
+    async def run():
+        async with PluginControlClient.running(client,'attempt'):
+            raise AssertionError('Start failed')
+    task = asyncio.create_task(run())
+    await entered.wait()
+    for _ in range(2):
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    release.set()
+    try: await task
+    except asyncio.CancelledError: pass
+    else: raise AssertionError('Cancellation lost')
+    assert client.stops == 1
+asyncio.run(lost_start_response())
+
+async def delayed_runtime_listener():
+    from generated.plugin_runtime_client import PluginRuntimeClient
+    class Runtime(rpc.PluginRuntimeServiceServicer):
+        async def ProcessStream(self, requests, context):
+            assert dict(context.invocation_metadata())['authorization'] == 'Bearer '+'r'*48
+            yield pb.DataChunk(stream_name='out',sequence_number=0,is_last=True)
+    server = grpc.aio.server()
+    rpc.add_PluginRuntimeServiceServicer_to_server(Runtime(),server)
+    port = server.add_insecure_port('127.0.0.1:0')
+    async def inputs():
+        if False: yield
+    async def collect():
+        async with PluginRuntimeClient(f'127.0.0.1:{port}','execution','node','r'*48,timeout=5) as client:
+            return [frame async for frame in client.process(inputs(),['out'])]
+    task = asyncio.create_task(collect())
+    try:
+        await asyncio.sleep(0.15)
+        assert not task.done()
+        await server.start()
+        assert (await task)[0].is_last
+    finally:
+        task.cancel()
+        await asyncio.gather(task,return_exceptions=True)
+        await server.stop(0)
+asyncio.run(delayed_runtime_listener())
 '''
 
 
@@ -103,6 +155,7 @@ def test_generated_control_roles_and_process_lifecycle(tmp_path: Path):
     output = tmp_path/'generated'
     PluginAgentGenerator(manifest,output).generate()
     (output/'plugin_control_client.py').write_text(env.get_template('services/plugin_control_client.py.j2').render())
+    (output/'plugin_runtime_client.py').write_text(env.get_template('services/plugin_runtime_client.py.j2').render())
     result = subprocess.run([sys.executable,'-c',SCENARIO],cwd=tmp_path,
         env=dict(os.environ,PYTHONPATH=str(tmp_path)),capture_output=True,text=True,timeout=30)
     assert result.returncode == 0,result.stdout+result.stderr
