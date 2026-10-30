@@ -3,6 +3,8 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import os
+import json
+import uuid
 import re
 
 from generated.grpc_client.grpc_clients import GrpcClients
@@ -38,16 +40,22 @@ class RPCBackends:
     operation verifies that its live principal matches the immutable owner.
     Network/TLS/channel and protobuf boilerplate is generated, not business code.
     """
-    def __init__(self, access_token, *, event_sink=None, timeout=60):
+    def __init__(self, access_token, *, event_sink=None, lease_owner=None, fence=None, report_token=None, timeout=60):
         if not isinstance(access_token, str) or not 1 <= len(access_token) <= 512:
             raise ValueError('A delegated user credential is required')
+        if any(value is not None for value in (lease_owner, fence, report_token)):
+            if (not isinstance(lease_owner, str) or not lease_owner or len(lease_owner) > 128
+                    or isinstance(fence, bool) or not isinstance(fence, int) or fence < 1
+                    or not isinstance(report_token, str) or not 1 <= len(report_token) <= 512):
+                raise ValueError('A complete fenced report capability is required')
         self._access_token, self._event_sink, self.timeout = access_token, event_sink, timeout
+        self._report_capability = (lease_owner, fence, report_token)
 
     @staticmethod
     def _channel(clients, service):
         return clients.channel(service, addr=os.environ.get('LECTIFY_AGENT_' + {
             'api_auth': 'AUTH', 'api_file': 'FILE', 'api_prompt': 'PROMPT',
-            'plugins_provider': 'PROVIDER',
+            'plugins_provider': 'PROVIDER', 'orchestrator': 'ORCHESTRATOR',
         }[service] + '_ADDRESS'))
 
     @asynccontextmanager
@@ -166,11 +174,25 @@ class RPCBackends:
             return dict(file_id=result.id, size_bytes=result.size_bytes)
 
     async def _emit(self, *, owner_id, execution_id, node_id, event_type, payload):
-        if self._event_sink is None:
-            raise LookupError('Durable orchestration event sink is not configured')
-        async with self._verified(owner_id):
-            await self._event_sink(owner_id=owner_id, execution_id=execution_id,
-                                   node_id=node_id, event_type=event_type, payload=payload)
+        async with self._verified(owner_id) as (clients, metadata):
+            if self._event_sink is not None:
+                await self._event_sink(owner_id=owner_id, execution_id=execution_id,
+                                       node_id=node_id, event_type=event_type, payload=payload)
+                return
+            lease_owner, fence, report_token = self._report_capability
+            if report_token is None:
+                raise LookupError('Durable orchestration report capability is not configured')
+            from generated.protos.clients.orchestrator import index_pb2 as orchestration_pb
+            from generated.protos.clients.orchestrator import index_pb2_grpc as orchestration_rpc
+            stub = orchestration_rpc.OrchestratorServiceStub(self._channel(clients, 'orchestrator'))
+            event_id = str(uuid.uuid4())
+            result = await stub.ReportNodeEvent(orchestration_pb.ReportNodeEventRequest(
+                execution_id=execution_id, node_id=node_id, owner=lease_owner,
+                fence=fence, event_id=event_id, kind=event_type,
+                payload_json=json.dumps(payload, ensure_ascii=False, allow_nan=False), report_token=report_token,
+            ), timeout=self.timeout, metadata=metadata)
+            if not result.accepted or result.event_id != event_id:
+                raise RuntimeError('Orchestrator did not confirm durable event acceptance')
 
     async def report_progress(self, *, percent, message, **scope):
         await self._emit(**scope, event_type='progress', payload=dict(percent=percent, message=message))

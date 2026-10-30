@@ -124,3 +124,93 @@ StartExecution сохраняет dispatch в одной транзакции с
 ## Fenced pipeline writes
 
 Root передаёт owner/fence из lease wrapper в pipeline. guard_execution_write перед pipeline DB transactions locks matching current/notexpired dispatch row, затем RUNNING execution row, удерживая lock до commit. Старый/expired worker не получает write gate, cancelled execution отклоняется.41 orchestrator tests pass incl stale fence guard. Первоначальный прогон выявил старый teardown race: тест оставлял worker живым до drop tables; тест теперь явно CancelExecution+await cleanup, повторный gate прошёл. PostgreSQL race/deadlock verification и remote side-effect fencing через event/control plane остаются открыты. Runtime автор выполняет read-only audit.
+
+## Единые часы lease
+
+Production claim/renew/write guards теперь используют SQL clock expression БД (PostgreSQL clock_timestamp, SQLite current_timestamp), не time.time отдельного worker. Explicit now сохранён для deterministic tests.42 orchestrator tests pass including claim/renew/guard with native DB time. ReportNodeEvent реализует auth/workflow автор, scoped agent event_sink будет подключаться после закрепления контракта. Реальные PostgreSQL concurrency/clockwait semantics остаются отдельным gate.
+
+## Recovery poller и Docker
+
+Добавлен dispatch_pending: новая service replica читает persisted eligible jobs, восстанавливает DAG/inputs и запускает owned pipeline с leaseclaim; scheduler вызывает polling каждые5сек. Recovery test подтверждает запуск сохранённого задания новым экземпляром, activelease не планируется повторно. Предыдущий focused43tests прошёл. Новые claims сбрасывают reporttokenhash/fence, чтобы oldworker не могпереназначитьcapability на новыйfence. Pipeline artifactprojection теперь merge вместо overwrite (durableartifactReport в реализации peer). Docker Desktop был установлен, root запустил его; escalated dockerinfo подтвердил daemon27.4.0. Настоящие container gates теперь доступны и должны быть выполнены, прежний unavailable больше не blocker.
+
+## Durable node reports: проверка контракта
+
+После регенерации проекта orchestrator suite: 50 passed. Новые тесты проверяют durable ReportNodeEvent, повторную доставку с тем же sequence, конфликт event ID, неверный capability, старый fence, монотонность progress и запрет записи после отмены. Миграции 0001→0002→downgrade проходят на SQLite. Исправлен import pending_executions из dispatch вместо node_events. Отдельные codegen descriptor/workflow validation regression tests: 19 passed. Выдача capability при реальном запуске контейнера, полный agent→orchestrator путь и PostgreSQL concurrency остаются открыты.
+
+Первый запуск disposable PostgreSQL завершился до проверок из-за гонки readiness: pg_isready увидел временный Unix server image entrypoint. Контейнер удалён в finally. Добавлено ожидание SELECT 1 через фактический опубликованный TCP endpoint; синтаксис проверен. Повторный Docker запуск не выполнен: automatic approval review исчерпал usage limit (сбой проверки разрешения, не unsafe verdict). PostgreSQL gate не считается пройденным. Последний Telegram poll также не удался из-за connectivity; пустой pending не подтверждает отсутствие новых входящих.
+
+## Выдача reporting capability
+
+Добавлен issue_report_capability: DB-clock lease guard блокирует dispatch и RUNNING execution до commit, затем сохраняется только SHA-256 случайного 256-bit bearer token. Повторная выдача ротирует токен, новый claim сбрасывает hash/fence, чужой или expired claim не может выпустить токен. Проверены ротация, новый владелец, отказ старому владельцу и точная граница expiry. Node event integration test теперь использует настоящий issuer вместо ручного заполнения hash. Orchestrator suite: 51 passed; focused node-event/dispatch повторный прогон: 15 passed. Helper пока не вызывается из production container launch: этот путь ещё требует реализации и сквозной проверки.
+
+## Изоляция повреждённых заданий recovery
+
+dispatch_pending теперь отклоняет неверную форму сохранённого графа/inputs и помечает такое execution FAILED только после успешного claim и write guard. Обработка остальных строк batch продолжается. WorkflowDAG валидирует списки объектов до обращения к полям. Четыре regression cases подтверждают запуск здорового задания рядом с повреждённым, включая null/array graph и неверные nodes/edges. Orchestrator suite: 55 passed. ContainerLifecycleManager всё ещё симулирует выполнение; его замена реальным generated container/agent transport остаётся обязательным незавершённым пунктом.
+
+## Удаление ложного успеха container dispatcher
+
+Обнаружено: use_mock игнорировался менеджером, а production service всегда включал симуляцию. Теперь OrchestratorServiceImpl по умолчанию создаёт менеджер без симуляции; незаданный container dispatcher выдаёт явную ошибку до progress callback и fake artifact. Симуляция доступна только через явно переданную тестовую зависимость. Проверено сохранение FAILED вместо COMPLETED в pipeline без dispatcher. Suite до последнего regression: 57 passed; новый focused dispatcher suite: 3 passed. Реальный запуск контейнеров пока не реализован; это исправление убирает ложную готовность, но не закрывает требование Docker/cluster execution.
+
+## Согласованные состояния при сбое pipeline
+
+Обработчик ошибки теперь в той же lease/fence-guarded транзакции переводит активные PROVISIONING/BUFFERING/PROCESSING nodes в FAILED вместе с execution. Завершённые узлы и их артефакты сохраняются. Full orchestrator suite: 58 passed; после усиления regression проверки сохранности completed node focused dispatcher/service: 17 passed. Независимый read-only аудит dispatch/report/recovery передан существующему audit agent; результат на момент записи ещё не получен.
+
+Audit agent подтвердил P1: recovery повторно запускал COMPLETED nodes. Pipeline теперь проверяет durable node state под lease guard и пропускает такие узлы до external launch; regression подтверждает запуск только pending node и сохранность артефакта completed node. Это устраняет подтверждённый повтор после durable completion, но не закрывает crash-window между внешним side effect и записью результата: launch idempotency и durable stream replay ещё необходимы.
+
+## Generated plugin runtime client
+
+Добавлен manifest flag plugin_runtime_client.enabled и генерация PluginRuntimeClient со shared plugins protobuf/transport без включения agent server. Orchestrator manifest включает клиент. Клиент передаёт bearer+execution/node metadata, использует существующий remote-mTLS transport, ограниченный deadline, проверяет declared output ports, последовательности, EOF каждого выхода и chunk limit; закрывает RPC в finally и channel через async context manager. Восемь focused tests прошли, включая отдельную генерацию и повреждённые/оборванные output streams; совместный descriptor/workflow regression до добавления generation case: 26 passed. Project regenerated, generated client импортируется. Некоторые исходные service.yaml ещё пусты и сообщают warnings при project generation — оставшиеся сервисы не считаются реализованными. Подключение клиента к container dispatcher и реальный gRPC/Docker end-to-end gate остаются открыты.
+
+## Generated Docker transport
+
+При plugin_runtime_client.enabled также генерируется DockerSandbox: async argv-only Docker CLI, digest-pinned image, deterministic execution/node/fence name, no host bind mounts, no host networking, user1000, read-only root, dropped capabilities, no-new-privileges, pids/memory/cpu/tmpfs limits. Создание/запуск/state/removal и async context cleanup реализованы как транспорт, без plugin business policy. Совместные client/sandbox tests: 14 passed с fake runner; project regenerated, оба generated modules импортируются. Реальный Docker запуск и подключение к ContainerLifecycleManager ещё не выполнены. Crash/cancellation window во время create до получения container ID требует reconciliation по доверенной assignment identity; независимый audit запрошен, результат пока ожидается.
+
+Audit подтвердил create-cancellation orphan и прерывание cleanup повторной отменой. launched теперь ожидает защищённое завершение create, при отмене не запускает полученный контейнер и удаляет его; cleanup выдерживает повторные cancel. Новый regression моделирует отмену до получения ID и два cancel во время rm: 7 sandbox tests passed. Не закрыт отдельный неопределённый исход timeout/crash Docker CLI: если daemon создал контейнер, но ID окончательно потерян, нужна reconciliation по проверенным ownership labels. Это остаётся обязательным пунктом перед production integration.
+
+## Docker attempt identity и reconciliation primitive
+
+create теперь требует attempt_id (32 hex), который caller должен durable сохранить до запуска; метка включается в container create. При timeout/invalid response reconciliation делает inspect только identity+managed+attempt labels и удаляет по полному container ID исключительно при совпадении попытки. Чужая метка/ошибка inspect не трактуются как отсутствие контейнера и не приводят к удалению. Public reconcile позволяет повторить очистку по durable assignment. Tests моделируют потерянный create response и несовпадающую попытку; Docker/runtime-client focused: 17 passed. Сохранение attempt_id и фоновой cleanup job в БД, защита от конкурентного повторного launch одной попытки, real Docker semantics и production dispatcher integration ещё не реализованы; primitive не доказывает crash recovery всего приложения.
+
+## Durable launch intent
+
+Добавлены workflow_container_attempts и миграция 0003. prepare_launch под dispatch/execution guard проверяет active node, фиксирует immutable image и отдельный attempt_id для execution/node/fence/role; повтор подготовки возвращает существующий ID, смена image отклоняется, новый fence получает новую попытку. Caller обязан commit до Docker create. Plugin/agent роли разделены также в Docker container name. Orchestrator: 60 passed включая миграции upgrade/downgrade; client/sandbox: 17 passed. Таблица пока хранит подготовку: lifecycle state transitions, cleanup scheduler и вызов из production pipeline ещё предстоят. Сохранение intent само по себе не предотвращает два конкурентных external create и не доказывает cluster exactly-once.
+
+## Launch state transitions
+
+begin_launch делает guarded CAS PREPARED→CREATING; caller обязан commit до external create. Повторный вызов получает False, неопределённый CREATING не сбрасывается в PREPARED. record_container принимает только полный Docker ID, текущий owner/fence и CREATING с пустым ID, затем CAS→CREATED; повторная подмена ID отклоняется. Regression проверяет повтор, stale owner и cancelled execution; full orchestrator: 60 passed, после усиления cancellation assertion focused launch повторно прошёл. Независимый read-only аудит запрошен. Wiring в production dispatcher, cleanup transitions/scheduler и настоящая PostgreSQL конкуренция остаются открытыми.
+
+Audit завершён: подтверждённых дефектов в launch preparation/CAS/model/migration не найдено; отмечен единый lock order dispatch→execution→attempt. Audit не подтверждает real lifecycle и обязанность caller commit до Docker по-прежнему требует проверки при wiring.
+
+## Durable launch coordinator
+
+launch_container связывает prepare/commit, begin/commit, Docker allocation, record ID/commit и start. DockerSandbox разделён на allocated (create/cleanup) и launched (allocated+start), чтобы ID сохранялся до старта. Independent-session regression проверяет видимость CREATING перед create и CREATED+container ID перед start, затем remove и CLEANED. При неопределённой ошибке попытка остаётся для reconciliation; фонового обработчика пока нет. Focused launch: 2 passed, Docker transport: 9 passed. Production pipeline ещё не вызывает координатор; pairing agent/plugin, endpoint discovery и stream routing остаются незавершёнными.
+
+## Scheduled cleanup подтверждённых контейнеров
+
+cleanup_stale_executions вызывает cleanup_created_containers: bounded batch CREATED с сохранённым ID, execution terminal либо dispatch fence новее попытки. Current assignment не выбирается. Ошибка daemon/ownership сохраняет durable запись для повтора; успешный reconcile (включая доказанное отсутствие) переводит CREATED→CLEANED. Docker reconcile сначала выполняет exact-name container ls: пустой успешный ответ означает отсутствие, ошибка daemon распространяется; найденный полный ID дополнительно проходит проверку labels перед rm. Focused launch tests: 4 passed; Docker transport: 10 passed. Uncertain CREATING намеренно не подтверждается отсутствующим по одному snapshot — late daemon completion может создать контейнер позже. Полное crash recovery и production launch wiring всё ещё открыты.
+
+## Реальные PostgreSQL и Docker gates
+
+После истечения прежнего usage ограничения automatic approval разрешил изолированные проверки. utils/integration/orchestrator_postgres.py прошёл на PostgreSQL16: 12 конкурентных lease claims дают одного победителя; 12 begin_launch одного current owner дают один True; renew, новый fence, stale write rejection и cancellation rejection проходят. Используются отдельные async sessions; одноразовый tmpfs container удалён в finally.
+
+utils/integration/docker_sandbox.py прошёл на настоящем Docker с cached digest-pinned Python image: generated create/start, read-only root, network none, memory512MiB/pids128, dropped ALL caps и no-new-privileges проверены через inspect; removal и repeat reconciliation подтверждены. Добавлен --pull=never: runtime не скачивает отсутствующий image. Скрипты не используют project volumes и paid provider. Project regenerated. Эти gates не доказывают full workflow/agent/plugin stream execution, container cluster scheduling или crash recovery uncertain CREATING.
+
+## Реальный gRPC plugin stream gate
+
+utils/integration/plugin_stream.py прошёл: generated PluginRuntimeClient → actual generated text_to_md runtime + business handler → generated scoped PluginAgentProxy с AssignmentPolicy. Передаётся текст с пустой строкой; проверяются точные Markdown bytes, EOF обоих declared outputs и совпадение artifact body. Backend artifact persistence явно тестовый in-memory (не file service). Negative calls с чужим node и неверным token отклоняются PERMISSION_DENIED/UNAUTHENTICATED до side effects; artifact count остаётся один. Проверка использует loopback, без Polza и project credentials. Docker pairing, production pipeline wiring, durable output/replay и реальное file-service хранилище этим gate не подтверждаются.
+
+## Containerized plugin smoke: незавершённый запуск
+
+Добавлен utils/integration/plugin_docker.py: explicit-file-only temporary build context (без secrets/project data), контейнер с actual runtime/client/scoped agent из plugin_stream, network none/read-only/nonroot. Backend artifact остаётся test-only in-memory. Docker transport и launch image validation допускают immutable local sha256 image ID наряду с repository@sha256 digest. Docker transport focused: 11 passed; launch focused: 4 passed. Запущен реальный build+smoke, unified exec session 11390; последняя проверка подтверждает, что процесс ещё жив, результата нет. Не перезапускать до terminal state/явного решения об ограничении времени. Изменение script timeout/log output относится только к следующим запускам, текущий процесс использует прежний quiet build. Container gate не заявлен пройденным. Telegram poll снова завершился connectivity error; pending_count=0 не доказывает отсутствие входящих.
+
+## Audit: daemon routing и start authority
+
+Audit выявил P1: глобальный cleanup на другой Docker replica мог увидеть absence на чужом daemon и потерять job. Попытка теперь хранит daemon_id (модель + ещё не выпущенная миграция0003), prepare запрещает смену daemon, cleanup фильтрует текущий Docker info.ID. Регрессия подтверждает сохранность foreign-daemon attempt. P2: cancellation между record commit и start; start теперь выполняется под повторным dispatch/execution guard с удержанием lock во время bounded Docker start. Regression инъецирует cancel после record commit и подтверждает create/remove без start. Focused launch: 5 passed; предыдущий full orchestrator до последней assertion:63 passed; реальный PostgreSQL lease/launch concurrency gate повторно прошёл с daemon scope.
+
+Старый quiet build остановлен по explicit 600-second budget после620сек; подтверждён terminal exit1/context canceled в session11390, временный context очищен родительским finally. Ни готовый образ, ни runtime container этим build не получены. Причина задержки пока не диагностирована; следующие build используют plain progress и timeout600. Containerized plugin gate остаётся непройденным.
+
+## Container plugin smoke прошёл
+
+Последующая диагностическая сборка session15033 остановлена после наблюдения base resolve; отложенный вывод показал успешное разрешение за54сек и переход к pip. Причина исходного долгого quiet build достоверно не установлена. Следующий запуск session87767 с plain progress и pip timeout15/retries1 завершился exit0: зависимости установлены, отдельный образ собран, настоящий runtime-client→text_to_md→scoped agent smoke внутри Docker прошёл с network none/read-only/nonroot. Runtime container и собственный образ удалены finally. Содержимое артефакта проверено тестовым in-memory backend; production file-service storage, отдельные agent/plugin процессы и workflow dispatcher этим smoke не подтверждены. Общий runner --no-generate запущен на текущем дереве; результат ожидается.
+
+Общий runner завершился exit0:16/16 suites passed, codegen193 tests, orchestrator64 tests. Staged diff credential-pattern и whitespace checks прошли. Это промежуточный checkpoint, не release/full-parity claim: остаются production dispatcher, agent command plane/container pairing, durable stream routing/replay, оставшиеся API/UI/monolith plugins и полный deployment gate.

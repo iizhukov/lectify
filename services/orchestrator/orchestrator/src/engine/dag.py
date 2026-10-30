@@ -10,6 +10,10 @@ class WorkflowDAG:
     def __init__(self, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> None:
         self.nodes = nodes
         self.edges = edges
+        if (not isinstance(nodes, list) or not isinstance(edges, list)
+                or any(not isinstance(node, dict) for node in nodes)
+                or any(not isinstance(edge, dict) for edge in edges)):
+            raise DAGValidationError("Workflow nodes and edges must be lists of objects")
         if not nodes:
             raise DAGValidationError("Workflow must contain at least one node")
         ids = [node.get("id") for node in nodes]

@@ -14,6 +14,9 @@ service OrchestratorService {
     rpc ResumeExecution(ResumeExecutionRequest) returns (ResumeExecutionResponse);
     rpc RetryNode(RetryNodeRequest) returns (RetryNodeResponse);
 
+    // Execution-scoped agent reports, persisted before acknowledgement.
+    rpc ReportNodeEvent(ReportNodeEventRequest) returns (ReportNodeEventResponse);
+
     // Plugin Registry within Orchestrator
     rpc RegisterPluginManifest(RegisterPluginManifestRequest) returns (RegisterPluginManifestResponse);
     rpc ListRegisteredPlugins(ListRegisteredPluginsRequest) returns (ListRegisteredPluginsResponse);
@@ -195,4 +198,20 @@ message PluginSummary {
 
 message ListRegisteredPluginsResponse {
     repeated PluginSummary plugins = 1;
+}
+
+message ReportNodeEventRequest {
+    string execution_id = 1;
+    string node_id = 2;
+    string owner = 3; // Dispatch worker owner, not an end-user claim.
+    int64 fence = 4;
+    string event_id = 5;
+    string kind = 6; // progress, log, metrics, artifact
+    string payload_json = 7;
+    string report_token = 8;
+}
+message ReportNodeEventResponse {
+    bool accepted = 1;
+    string event_id = 2;
+    int64 sequence = 3;
 }

@@ -11,5 +11,6 @@ def create_agent(assignment, backends=None):
     )
     if backends is None:
         from generated.plugin_agent.backends import RPCBackends
-        backends = RPCBackends(assignment['user_access_token'])
+        backends = RPCBackends(assignment['user_access_token'], lease_owner=assignment['lease_owner'],
+                               fence=assignment['fence'], report_token=assignment['report_token'])
     return PluginAgentProxy(policy, backends)

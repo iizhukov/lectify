@@ -18,7 +18,8 @@ from src.models import (
     PluginRegistryModel,
     utc_now,
 )
-from src.engine.dispatch import claim, renew, guard_execution_write
+from src.engine.dispatch import claim, renew, guard_execution_write, pending_executions
+from src.node_events import report_node_event
 from src.engine.dag import WorkflowDAG, DAGValidationError
 from src.engine.stream_router import StreamRouter
 from src.engine.docker_runner import ContainerLifecycleManager
@@ -28,9 +29,9 @@ log = get_logger("orchestrator_service")
 
 
 class OrchestratorServiceImpl(OrchestratorServiceBase):
-    def __init__(self) -> None:
+    def __init__(self, container_manager=None) -> None:
         self.worker_id = str(uuid.uuid4())
-        self.container_manager = ContainerLifecycleManager(use_mock=True)
+        self.container_manager = container_manager if container_manager is not None else ContainerLifecycleManager()
         self._active_routers: Dict[str, StreamRouter] = {}
         self._execution_tasks: Dict[str, asyncio.Task] = {}
         self._event_subscribers: Dict[str, List[asyncio.Queue]] = {}
@@ -105,10 +106,6 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
             await session.commit()
 
-        # Initialize StreamRouter for execution
-        router = StreamRouter(execution_id=execution_id)
-        self._active_routers[execution_id] = router
-
         # Launch execution background task
         task = asyncio.create_task(self._run_owned_pipeline(
             execution_id, sorted_nodes, dag, dict(request.initial_inputs),
@@ -131,19 +128,56 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
             if error is not None:
                 log.error("execution_task_failed", execution_id=execution_id)
 
+    async def dispatch_pending(self, limit=100):
+        factory = get_session_factory()
+        async with factory() as session:
+            rows = await pending_executions(session, limit)
+        scheduled = 0
+        for row in rows:
+            if row.id in self._execution_tasks:
+                continue
+            graph = row.graph_json
+            try:
+                if not isinstance(graph, dict):
+                    raise DAGValidationError('Saved workflow graph must be an object')
+                dag = WorkflowDAG(graph.get("nodes", []), graph.get("edges", []))
+                nodes = dag.topological_sort()
+                if not isinstance(row.initial_inputs, dict):
+                    raise DAGValidationError('Saved workflow inputs must be an object')
+            except DAGValidationError:
+                # Compete for this row before declaring it failed. A different
+                # replica may have claimed it since the batch was selected.
+                async with factory() as session:
+                    fence = await claim(session, row.id, self.worker_id)
+                    if fence is not None and await guard_execution_write(
+                            session, row.id, (self.worker_id, fence)):
+                        await session.execute(update(WorkflowExecutionModel).where(
+                            WorkflowExecutionModel.id == row.id,
+                        ).values(state='FAILED', error_message='Invalid persisted workflow', finished_at=utc_now()))
+                    await session.commit()
+                log.error('invalid_persisted_workflow', execution_id=row.id)
+                continue
+            task = asyncio.create_task(self._run_owned_pipeline(row.id, nodes, dag, row.initial_inputs))
+            self._execution_tasks[row.id] = task
+            task.add_done_callback(lambda completed, key=row.id: self._execution_finished(key, completed))
+            scheduled += 1
+        return scheduled
+
     async def _run_owned_pipeline(self, execution_id, sorted_nodes, dag, initial_inputs):
         factory = get_session_factory()
         async with factory() as session:
-            fence = await claim(session, execution_id, self.worker_id, int(time.time()))
+            fence = await claim(session, execution_id, self.worker_id)
             await session.commit()
         if fence is None:
             return
+
+        self._active_routers.setdefault(execution_id, StreamRouter(execution_id=execution_id))
 
         async def heartbeat():
             while True:
                 await asyncio.sleep(10)
                 async with factory() as session:
-                    owned = await renew(session, execution_id, self.worker_id, fence, int(time.time()))
+                    owned = await renew(session, execution_id, self.worker_id, fence)
                     await session.commit()
                 if not owned:
                     return
@@ -176,7 +210,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         try:
             for idx, node_def in enumerate(sorted_nodes):
                 async with session_factory() as session:
-                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                    if not await guard_execution_write(session, execution_id, ownership):
                         return
                     current_state = await session.scalar(select(WorkflowExecutionModel.state).where(
                         WorkflowExecutionModel.id == execution_id,
@@ -189,7 +223,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
                 # Update node state to RUNNING
                 async with session_factory() as session:
-                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                    if not await guard_execution_write(session, execution_id, ownership):
                         return
                     stmt = select(WorkflowNodeExecutionModel).where(
                         WorkflowNodeExecutionModel.execution_id == execution_id,
@@ -197,6 +231,10 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                     )
                     res = await session.execute(stmt)
                     node_model = res.scalar_one_or_none()
+                    if node_model and node_model.state == "COMPLETED":
+                        # A replacement owner resumes durable work; it must not
+                        # repeat a completed node's external side effects.
+                        continue
                     if node_model:
                         node_model.state = "PROCESSING"
                         node_model.progress_percent = 10
@@ -221,7 +259,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
                 # Update node state to COMPLETED
                 async with session_factory() as session:
-                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                    if not await guard_execution_write(session, execution_id, ownership):
                         return
                     stmt = select(WorkflowNodeExecutionModel).where(
                         WorkflowNodeExecutionModel.execution_id == execution_id,
@@ -232,13 +270,13 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                     if node_model:
                         node_model.state = "COMPLETED"
                         node_model.progress_percent = 100
-                        node_model.output_artifacts = result.get("artifacts", {})
+                        node_model.output_artifacts = {**(node_model.output_artifacts or {}), **result.get("artifacts", {})}
                         await session.commit()
 
                 # Update total execution progress
                 total_progress = int(((idx + 1) / len(sorted_nodes)) * 100)
                 async with session_factory() as session:
-                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                    if not await guard_execution_write(session, execution_id, ownership):
                         return
                     stmt = select(WorkflowExecutionModel).where(WorkflowExecutionModel.id == execution_id)
                     res = await session.execute(stmt)
@@ -249,7 +287,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
             # A late worker must not overwrite cancellation or another terminal state.
             async with session_factory() as session:
-                if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                if not await guard_execution_write(session, execution_id, ownership):
                     return
                 changed = await session.execute(update(WorkflowExecutionModel).where(
                     WorkflowExecutionModel.id == execution_id,
@@ -270,12 +308,17 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         except Exception as e:
             log.error("pipeline_failed", execution_id=execution_id, error=str(e))
             async with session_factory() as session:
-                if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                if not await guard_execution_write(session, execution_id, ownership):
                     return
                 changed = await session.execute(update(WorkflowExecutionModel).where(
                     WorkflowExecutionModel.id == execution_id,
                     WorkflowExecutionModel.state == "RUNNING",
                 ).values(state="FAILED", error_message=str(e), finished_at=utc_now()))
+                if changed.rowcount == 1:
+                    await session.execute(update(WorkflowNodeExecutionModel).where(
+                        WorkflowNodeExecutionModel.execution_id == execution_id,
+                        WorkflowNodeExecutionModel.state.in_(("PROVISIONING", "BUFFERING", "PROCESSING")),
+                    ).values(state="FAILED", error_message=str(e)))
                 await session.commit()
                 if changed.rowcount != 1:
                     return
@@ -505,3 +548,6 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 for m in models
             ]
         )
+
+    async def ReportNodeEvent(self, request, context):
+        return await report_node_event(get_session_factory(), request, context)

@@ -35,6 +35,8 @@ from generated.protos.clients.api_prompt import index_pb2 as prompt_pb
 from generated.protos.clients.api_prompt import index_pb2_grpc as prompt_rpc
 from generated.protos.clients.plugins_provider import index_pb2 as provider_pb
 from generated.protos.clients.plugins_provider import index_pb2_grpc as provider_rpc
+from generated.protos.clients.orchestrator import index_pb2 as orchestration_pb
+from generated.protos.clients.orchestrator import index_pb2_grpc as orchestration_rpc
 
 calls=[]
 def owner(context):
@@ -82,6 +84,16 @@ class Provider(provider_rpc.ProviderServiceServicer):
         assert b''.join(frame.chunk for frame in frames[1:])==b'RIFF0000WAVEaudio'
         return provider_pb.TranscribeResponse(text='Actual transcript')
 
+class Orchestrator(orchestration_rpc.OrchestratorServiceServicer):
+    reject=False
+    events=[]
+    async def ReportNodeEvent(self,request,context):
+        owner(context)
+        assert request.execution_id=='exec' and request.node_id=='node'
+        assert request.owner=='lease-worker' and request.fence==3 and request.report_token=='report-secret'
+        self.events.append(request.kind)
+        return orchestration_pb.ReportNodeEventResponse(accepted=not self.reject,event_id=request.event_id,sequence=1)
+
 async def reject(awaitable, code):
     try: await awaitable
     except grpc.aio.AioRpcError as error: assert error.code()==code,error
@@ -91,10 +103,12 @@ async def read(client): return [item async for item in client.read_file('owned-f
 async def main():
     servers=[]
     file=File()
+    orchestrator=Orchestrator()
     for name,servicer,register in [('AUTH',Auth(),auth_rpc.add_AuthServiceServicer_to_server),
         ('FILE',file,file_rpc.add_FileServiceServicer_to_server),
         ('PROMPT',Prompt(),prompt_rpc.add_PromptServiceServicer_to_server),
-        ('PROVIDER',Provider(),provider_rpc.add_ProviderServiceServicer_to_server)]:
+        ('PROVIDER',Provider(),provider_rpc.add_ProviderServiceServicer_to_server),
+        ('ORCHESTRATOR',orchestrator,orchestration_rpc.add_OrchestratorServiceServicer_to_server)]:
         server=grpc.aio.server();register(servicer,server)
         port=server.add_insecure_port('127.0.0.1:0');await server.start();servers.append(server)
         os.environ['LECTIFY_AGENT_'+name+'_ADDRESS']=f'127.0.0.1:{port}'
@@ -102,7 +116,7 @@ async def main():
     async def sink(**scope):
         assert scope['owner_id']=='owner' and scope['execution_id']=='exec'
         events.append(scope)
-    backends=RPCBackends('delegated-token',event_sink=sink)
+    backends=RPCBackends('delegated-token',lease_owner='lease-worker',fence=3,report_token='report-secret')
     policy=AssignmentPolicy(execution_id='exec',node_id='node',owner_id='owner',plugin_name='test',
         llm_enabled=True,storage_enabled=True,models=['small-model'],purposes=['transform','stt'],
         file_ids=['owned-file'],prompt_ids=['owned-prompt'],artifact_names=['result'])
@@ -117,7 +131,10 @@ async def main():
             assert (await client.save_artifact('result','empty.txt','text/plain',b''))['size_bytes']==0
             assert ''.join([item async for item in client.call_llm('small-model',[{'role':'user','content':'input'}],purpose='transform')])=='Actual model text'
             assert await client.transcribe(b'RIFF0000WAVEaudio',model='small-model',language='en')=='Actual transcript'
-            await client.report_progress(50,'working');assert len(events)==1
+            await client.report_progress(50,'working');assert 'progress' in orchestrator.events
+            orchestrator.reject=True
+            await reject(client.report_progress(60,'rejected'),grpc.StatusCode.UNAVAILABLE)
+            orchestrator.reject=False
             file.corrupt=True
             await reject(read(client),grpc.StatusCode.UNAVAILABLE)
             file.corrupt=False

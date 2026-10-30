@@ -1,8 +1,4 @@
 import asyncio
-import os
-import tempfile
-import time
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from generated.logger import get_logger
@@ -36,6 +32,9 @@ class ContainerLifecycleManager:
             node_id=node_id,
             plugin_id=plugin_id,
         )
+
+        if not self.use_mock:
+            raise RuntimeError('Plugin container dispatcher is not configured')
 
         if on_progress:
             on_progress(10, "Container initialized")

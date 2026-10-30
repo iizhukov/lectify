@@ -14,7 +14,7 @@ def _base_requirements(svc) -> list[str]:
         "pytest>=8.0.0",
         "pytest-asyncio>=0.23.0",
     ]
-    if svc.grpc.enabled or svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled or svc.user_auth.enabled or svc.plugin_agent.enabled:
+    if svc.grpc.enabled or svc.grpc_client.enabled or svc.ticket_auth.enabled or svc.config.enabled or svc.user_auth.enabled or svc.plugin_agent.enabled or svc.plugin_runtime_client.enabled:
         deps += [
             f"grpcio>={version('grpcio-tools')}",
             f"grpcio-tools>={version('grpcio-tools')}",

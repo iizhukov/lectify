@@ -1,3 +1,4 @@
+import ast
 import re
 import subprocess
 import sys
@@ -48,7 +49,7 @@ class GrpcClientGenerator(BaseGenerator):
             services.append(self.svc.user_auth.auth_service)
 
         if self.svc.plugin_agent.enabled:
-            for dependency in ("api_auth", "api_file", "api_prompt", "plugins_provider"):
+            for dependency in ("api_auth", "api_file", "api_prompt", "plugins_provider", "orchestrator"):
                 if dependency not in services:
                     services.append(dependency)
 
@@ -136,26 +137,22 @@ class GrpcClientGenerator(BaseGenerator):
 
         for pb2_file in protos_out.glob(f"{proto_path.stem}_pb2.py"):
             content = pb2_file.read_text(encoding="utf-8")
-            match = re.search(r"AddSerializedFile\(b'(.*?)'\)", content, re.DOTALL)
-            if not match:
-                continue
-
-            serialized_repr = match.group(1)
-            raw_bytes = serialized_repr.encode('latin1').decode('unicode_escape')
-
-            fdp = descriptor_pb2.FileDescriptorProto()
-            fdp.ParseFromString(raw_bytes.encode('latin1'))
-
-            if fdp.name != unique_name:
-                fdp.name = unique_name
-                new_serialized = fdp.SerializeToString()
-                new_escaped = new_serialized.decode('latin1').encode('unicode_escape').decode('latin1')
-                content = content.replace(
-                    f"AddSerializedFile(b'{serialized_repr}')",
-                    f"AddSerializedFile(b'{new_escaped}')",
-                )
-                pb2_file.write_text(content, encoding="utf-8")
-                print(f"[codegen] gRPC client: fixed descriptor name for {service_name}: {unique_name}")
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute)
+                        or node.func.attr != "AddSerializedFile" or len(node.args) != 1
+                        or not isinstance(node.args[0], ast.Constant)
+                        or not isinstance(node.args[0].value, bytes)):
+                    continue
+                fdp = descriptor_pb2.FileDescriptorProto()
+                fdp.ParseFromString(node.args[0].value)
+                if fdp.name != unique_name:
+                    fdp.name = unique_name
+                    literal = ast.get_source_segment(content, node.args[0])
+                    content = content.replace(literal, repr(fdp.SerializeToString()), 1)
+                    pb2_file.write_text(content, encoding="utf-8")
+                    print(f"[codegen] gRPC client: fixed descriptor name for {service_name}: {unique_name}")
+                break
 
 
     def _parse_proto_package_and_service(self, proto_path: Path) -> tuple[str, str]:

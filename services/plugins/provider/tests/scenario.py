@@ -36,15 +36,19 @@ from generated.protos.server import index_pb2_grpc as rpc
 from generated.http.client import get_http_client, close_http_client
 from generated.settings import get_settings
 from src.service import ProviderServiceImpl
-from src.adapter import PolzaAdapter
+from src.adapter import PolzaAdapter, ProviderFailure
 from src.policy import ProviderPolicy
 
 requests, connections, active = [], set(), set()
+connection_counter = 0
 mode = 'success'
 release, started = asyncio.Event(), asyncio.Event()
 
 
 async def http_fixture(reader, writer):
+    global connection_counter
+    connection_counter += 1
+    connection_id = connection_counter
     task = asyncio.current_task()
     active.add(task)
     try:
@@ -72,7 +76,7 @@ async def http_fixture(reader, writer):
                 body = b''.join(pieces)
             payload = json.loads(body)
             requests.append((path, payload))
-            connections.add(id(writer))
+            connections.add(connection_id)
             if mode in ('quota', 'redirect'):
                 status = b'429 Too Many Requests' if mode == 'quota' else b'302 Found'
                 writer.write(b'HTTP/1.1 ' + status + b'\r\nLocation: http://127.0.0.1:1/steal\r\nContent-Length: 0\r\n\r\n')
@@ -156,6 +160,26 @@ async def main():
     assert 'bearer_token' not in repr(get_settings().http)
     assert get_settings().extensions['provider']['max_tokens'] == 2048
     adapter = PolzaAdapter(client, 'test-only-provider-token', test_endpoint=f'http://127.0.0.1:{port}/api/v1')
+    for bad_token in ('has space', 'private-token\x00', 'private-token\x7f'):
+        try:
+            PolzaAdapter(client, bad_token)
+        except ProviderFailure as error:
+            assert error.kind == 'configuration' and bad_token not in str(error)
+        else:
+            raise AssertionError('Invalid header token was accepted')
+    class ClosingBackend:
+        closed = False
+        async def chat(self, payload, limits):
+            try:
+                yield 'first delta', False, '', 0
+                await asyncio.Event().wait()
+            finally:
+                self.closed = True
+    closing_backend = ClosingBackend()
+    outer = ProviderServiceImpl(closing_backend, policy).CallLLM(request(), None)
+    assert (await anext(outer)).delta_content == 'first delta'
+    await outer.aclose()
+    assert closing_backend.closed, 'HTTP/backend cleanup must complete before outer aclose returns'
     service = ProviderServiceImpl(adapter, policy)
     server = grpc.aio.server()
     rpc.add_ProviderServiceServicer_to_server(service, server)

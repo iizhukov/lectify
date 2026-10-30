@@ -5,6 +5,8 @@ service:
 
   # Enable service in project generation
   active: true
+  plugin_runtime_client:
+    enabled: true
 
   # Python version
   python:

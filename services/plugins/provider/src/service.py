@@ -1,5 +1,6 @@
 """Business policy and protocol adaptation; servers/HTTP clients are generated."""
 import asyncio
+from contextlib import aclosing
 import math
 import tempfile
 import time
@@ -62,9 +63,10 @@ class ProviderServiceImpl(ProviderServiceBase):
         try:
             async with asyncio.timeout(self.policy.timeout_seconds):
                 async with self._slots:
-                    async for delta, final, reason, usage in self._backend().chat(payload, self.policy):
-                        yield pb.LLMResponse(delta_content=delta, is_finished=final, finish_reason=reason,
-                            tokens_used=usage, latency_ms=int((time.monotonic() - started) * 1000))
+                    async with aclosing(self._backend().chat(payload, self.policy)) as stream:
+                        async for delta, final, reason, usage in stream:
+                            yield pb.LLMResponse(delta_content=delta, is_finished=final, finish_reason=reason,
+                                tokens_used=usage, latency_ms=int((time.monotonic() - started) * 1000))
         except (ProviderFailure, httpx.HTTPError, asyncio.TimeoutError) as error:
             await self._failure(error, context)
 

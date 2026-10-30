@@ -70,7 +70,7 @@ class PolzaAdapter:
             if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', '::1') or parsed.username or parsed.password or parsed.query or parsed.fragment:
                 raise ValueError('Test endpoint must be a numeric loopback HTTP URL')
             self.endpoint = test_endpoint.rstrip('/')
-        if not isinstance(token, str) or not token or not token.isascii() or any(char.isspace() for char in token):
+        if not isinstance(token, str) or not token or not token.isascii() or any(not 33 <= ord(char) <= 126 for char in token):
             raise ProviderFailure('configuration')
 
     def _headers(self):

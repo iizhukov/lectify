@@ -79,3 +79,14 @@ def test_registry_unavailable_and_corrupt_schema_fail_closed(validator):
     with pytest.raises(validator.RegistryUnavailableError): validator.validate_graph(graph(), None)
     bad = registry(); bad['text@1.0.0']['version'] = '2.0.0'
     with pytest.raises(validator.RegistryUnavailableError): validator.validate_graph(graph(), bad)
+
+
+def test_corrupt_registry_identifiers_are_backend_failures(validator):
+    bad = registry()
+    bad['text@1.0.0']['inputs'][0]['name'] = []
+    with pytest.raises(validator.RegistryUnavailableError):
+        validator.validate_graph(graph(), bad)
+    bad = registry()
+    bad['text@1.0.0']['parameters'][0]['name'] = ''
+    with pytest.raises(validator.RegistryUnavailableError):
+        validator.validate_graph(graph(), bad)

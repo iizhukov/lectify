@@ -25,6 +25,13 @@ def _identifier(value):
     return value
 
 
+def _registry_identifier(value):
+    try:
+        return _identifier(value)
+    except ValueError:
+        raise RegistryUnavailableError('Invalid registry identifier') from None
+
+
 def _json(value, depth=0):
     if depth > 12:
         raise ValueError('Parameter nesting exceeds limit')
@@ -61,7 +68,7 @@ def _ports(schema, direction):
     for port in schema[direction]:
         if not isinstance(port, dict) or not isinstance(port.get('type'), str):
             raise RegistryUnavailableError('Invalid registry port schema')
-        name = _identifier(port.get('name'))
+        name = _registry_identifier(port.get('name'))
         if name in result:
             raise RegistryUnavailableError('Duplicate registry port')
         result[name] = port['type']
@@ -80,7 +87,7 @@ def _parameters(values, schema):
     for spec in specs:
         if not isinstance(spec, dict) or spec.get('type') not in types:
             raise RegistryUnavailableError('Invalid registry parameter schema')
-        name = _identifier(spec.get('name'))
+        name = _registry_identifier(spec.get('name'))
         if name in known:
             raise RegistryUnavailableError('Duplicate registry parameter')
         known[name] = spec
@@ -143,6 +150,7 @@ def validate_graph(graph, registry_schemas):
             if not isinstance(mapping, dict) or set(mapping) - {'target_field', 'source', 'transform'}:
                 raise ValueError('Invalid input mapping')
             target, source = mapping.get('target_field'), mapping.get('source')
+            _identifier(target)
             if target not in inputs or target in mapped or not isinstance(source, str) or not source.startswith('input.'):
                 raise ValueError('Mappings must bind distinct named ports to external input names')
             _identifier(source[len('input.'):])

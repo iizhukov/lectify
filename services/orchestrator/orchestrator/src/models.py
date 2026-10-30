@@ -9,6 +9,8 @@ from sqlalchemy import (
     Text,
     JSON,
     ForeignKey,
+    UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,3 +94,39 @@ class WorkflowDispatchModel(BaseModel):
     owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
     lease_expires_at: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     fence: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    report_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    report_token_fence: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class NodeEventModel(BaseModel):
+    __tablename__ = 'workflow_node_events'
+    __table_args__ = (
+        UniqueConstraint('execution_id', 'event_id', name='uq_workflow_node_event_id'),
+        Index('ix_workflow_node_events_execution_sequence', 'execution_id', 'sequence'),
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True, autoincrement=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey('workflow_executions.id', ondelete='CASCADE'), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    fence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class ContainerAttemptModel(BaseModel):
+    __tablename__ = 'workflow_container_attempts'
+    __table_args__ = (UniqueConstraint('execution_id', 'node_id', 'fence', 'role',
+        name='uq_workflow_container_assignment'),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey('workflow_executions.id', ondelete='CASCADE'), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    fence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    image: Mapped[str] = mapped_column(String(512), nullable=False)
+    daemon_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), default='PREPARED', nullable=False)
+    container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

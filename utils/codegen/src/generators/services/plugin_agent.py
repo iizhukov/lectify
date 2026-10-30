@@ -5,12 +5,17 @@ from generators.services.base import BaseGenerator
 
 class PluginAgentGenerator(BaseGenerator):
     def generate(self) -> None:
-        if not self.svc.plugin_agent.enabled:
+        if not self.svc.plugin_agent.enabled and not self.svc.plugin_runtime_client.enabled:
             return
         shared = ProtosGenerator(PluginManifest(plugin=PluginConfig(name=self.svc.name)), self.output)
         shared.generate()
         self.files_written += shared.files_written
         self.write('transport.py', self.render('plugins/transport.py.j2'))
+        if self.svc.plugin_runtime_client.enabled:
+            self.write('plugin_runtime_client.py', self.render('services/plugin_runtime_client.py.j2'))
+            self.write('docker_sandbox.py', self.render('services/docker_sandbox.py.j2'))
+        if not self.svc.plugin_agent.enabled:
+            return
         self.write('scoped_server.py', self.render('plugins/scoped_server.py.j2'))
         self.write('plugin_agent/__init__.py', '')
         self.write('plugin_agent/proxy.py', self.render('services/plugin_agent/proxy.py.j2'))
