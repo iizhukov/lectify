@@ -163,6 +163,10 @@ def test_generated_agent_rpc(tmp_path: Path):
     assert result.returncode == 0, result.stdout + result.stderr
     dockerfile = (tmp_path / "generated/Dockerfile").read_text()
     assert "COPY generated/requirements.txt" in dockerfile
+    controlled = (tmp_path / 'generated/Dockerfile.controlled').read_text()
+    assert 'COPY --from=lectify_agent /generated/' in controlled
+    assert 'COPY src/ /runtime/src/' in controlled
+    assert 'WORKDIR /agent' in controlled and 'USER 1000:1000' in controlled
     requirements = (tmp_path / "generated/requirements.txt").read_text()
     assert "protobuf>=" in requirements
 

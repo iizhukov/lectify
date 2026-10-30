@@ -294,3 +294,9 @@ Audit control integration выявил spawn/readiness race: RUNNING подтв�
 Проверен utils/integration/plugin_processes.py --controlled: отдельный agent process в READY получает Control Start, создаёт отдельный generated text_to_md runtime process, реальный gRPC stream сохраняет Markdown artifact через scoped agent, running context отправляет Stop, status STOPPED подтверждён, agent завершается. Explicit in-memory/file test backend; Docker/production storage/cluster resolver этим gate не проверяются. Exit0.
 
 После readiness fix и controlled-process integration полный runner17/17 passed: codegen210, orchestrator90. Независимый audit подтвердил readiness fix, новых confirmed defects в просмотренном пути не нашёл.
+
+## Controlled plugin Docker packaging
+
+Codegen генерирует Dockerfile.controlled с named build context lectify_agent, отдельными /agent и /runtime import roots, объединённой установкой requirements и nonroot entrypoint прямо в agent run_server. Trusted runtime assignment должен задавать cwd=/runtime, absolute Python executable и явный child environment. Оба build contexts следует готовить из allowlisted generated/src файлов, не передавать весь repository с credentials. Generated controlled Dockerfile отдельно ещё не собран.
+
+utils/integration/plugin_docker.py обновлён на controlled mode: отдельный agent запускает runtime по Start, stream/artifact, Stop/STOPPED. Real Docker build/run exit0, network none/read-only/nonroot; temporary image/container удалены. Этот gate использует отдельный тестовый Dockerfile и не доказывает production image/credential provisioning. Focused plugin RPC9 passed.
