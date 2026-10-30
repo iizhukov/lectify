@@ -1,0 +1,25 @@
+service:
+  name: plugins_provider
+  version: 0.1.0
+  description: Bounded Polza chat and transcription adapter
+  active: true
+  python: {major: 3, minor: 12}
+  grpc: {enabled: true, port: 10032}
+  http: {enabled: true, timeout_seconds: 60, connect_timeout_seconds: 5, max_connections: 16, max_keepalive_connections: 8}
+  ticket_auth: {enabled: true, tas_service: infra_tas, ticket_ttl: 60}
+  vault: {enabled: true, vars: [PLUGINS_PROVIDER_HTTP_BEARER_TOKEN]}
+  observability: {enabled: true}
+  testing: {generated_fixtures: false}
+extensions:
+  provider:
+    allowed_chat_models: [openai/gpt-4o-mini]
+    allowed_audio_models: [openai/gpt-4o-mini-transcribe]
+    allowed_purposes: [transform, summarization, summary, stt]
+    default_chat_model: openai/gpt-4o-mini
+    default_audio_model: openai/gpt-4o-mini-transcribe
+    max_tokens: 2048
+    max_input_chars: 65536
+    max_output_bytes: 1048576
+    max_audio_bytes: 8388608
+    timeout_seconds: 60
+    max_concurrent: 4
