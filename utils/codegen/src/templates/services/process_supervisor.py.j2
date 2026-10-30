@@ -11,7 +11,7 @@ def _signal(process, sig):
         pass
 
 
-async def _cleanup(processes, tasks):
+async def stop_process_groups(processes, tasks=()):
     for task in tasks:
         if not task.done():
             task.cancel()
@@ -64,7 +64,7 @@ async def run_pair(agent_command, plugin_command, operation, *, cwd=None, enviro
             raise RuntimeError('Agent or plugin process exited before assignment completion')
         return await work
     finally:
-        cleanup = asyncio.create_task(_cleanup(processes, tasks))
+        cleanup = asyncio.create_task(stop_process_groups(processes, tasks))
         cancelled = False
         while True:
             try:

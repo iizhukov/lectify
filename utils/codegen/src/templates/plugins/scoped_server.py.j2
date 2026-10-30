@@ -19,6 +19,7 @@ class ServerConfig:
     tls_cert_file: str | None = field(default=None, repr=False)
     tls_key_file: str | None = field(default=None, repr=False)
     tls_ca_file: str | None = field(default=None, repr=False)
+    control_token: str | None = field(default=None, repr=False)
     tls: TLSConfig | None = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -26,6 +27,11 @@ class ServerConfig:
             raise ValueError('LECTIFY_RUNTIME_TOKEN must be nonempty printable ASCII without whitespace')
         if not self.execution_id or not self.node_id:
             raise ValueError('EXECUTION_ID and NODE_ID are required for the plugin server')
+        if self.control_token is not None:
+            if (not isinstance(self.control_token, str) or not 32 <= len(self.control_token) <= 512 or not self.control_token.isascii()
+                    or any(ord(c) <= 32 or ord(c) >= 127 for c in self.control_token)
+                    or hmac.compare_digest(self.control_token,self.token)):
+                raise ValueError('A distinct bounded control capability is required')
         object.__setattr__(self, "tls", TLSConfig.from_files(
             self.tls_cert_file, self.tls_key_file, self.tls_ca_file))
         validate_endpoint(self.endpoint, secure=self.tls is not None)
@@ -40,6 +46,7 @@ class ServerConfig:
             tls_cert_file=os.environ.get(prefix + "_TLS_CERT_FILE"),
             tls_key_file=os.environ.get(prefix + "_TLS_KEY_FILE"),
             tls_ca_file=os.environ.get(prefix + "_TLS_CA_FILE"),
+            control_token=os.environ.get(prefix + '_CONTROL_TOKEN'),
         )
 
 
@@ -58,8 +65,9 @@ class ExecutionAuthInterceptor(grpc.aio.ServerInterceptor):
                 duplicate = duplicate or key in headers
                 headers[key] = value
         authorization = headers.get('authorization', '')
-        valid_token = isinstance(authorization, str) and hmac.compare_digest(
-            authorization.encode('utf-8'), ('Bearer ' + self.config.token).encode('ascii'),
+        expected = self.config.control_token if details.method.startswith('/plugins.v1.PluginControlService/') else self.config.token
+        valid_token = expected is not None and isinstance(authorization, str) and hmac.compare_digest(
+            authorization.encode('utf-8'), ('Bearer ' + expected).encode('ascii'),
         )
         if duplicate or not valid_token:
             code, message = grpc.StatusCode.UNAUTHENTICATED, 'Runtime authentication required'
@@ -134,4 +142,13 @@ async def run_scoped_server(factory, config=None, stop_event=None):
         for signum, previous in installed:
             loop.remove_signal_handler(signum)
             signal.signal(signum, previous)
-        await server.stop(grace=5)
+        stopping = asyncio.create_task(server.stop(grace=5))
+        cancelled = False
+        while not stopping.done():
+            try:
+                await asyncio.shield(stopping)
+            except asyncio.CancelledError:
+                cancelled = True
+        stopping.result()
+        if cancelled:
+            raise asyncio.CancelledError

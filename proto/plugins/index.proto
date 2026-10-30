@@ -34,6 +34,17 @@ service PluginRuntimeService {
     rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
+// Commands are authenticated with a separate orchestrator control capability.
+// Executable arguments and environment come from the trusted assignment file.
+service PluginControlService {
+    rpc Start(ControlCommand) returns (ControlStatus);
+    rpc Stop(ControlCommand) returns (ControlStatus);
+    rpc Status(ControlStatusRequest) returns (ControlStatus);
+}
+message ControlCommand { string command_id = 1; }
+message ControlStatusRequest {}
+message ControlStatus { string state = 1; int32 exit_code = 2; }
+
 message DataChunk {
     string stream_name = 1;
     int64 sequence_number = 2;

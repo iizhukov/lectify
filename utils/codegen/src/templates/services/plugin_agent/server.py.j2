@@ -7,8 +7,9 @@ from generated.protos.plugins import index_pb2_grpc as rpc
 from generated.scoped_server import ServerConfig, create_scoped_server, run_scoped_server
 
 
-def create_server(config=None, proxy=None):
+def create_server(config=None, proxy=None, controller=None, _controllers=None):
     config = config or ServerConfig.from_env('LECTIFY_AGENT', '127.0.0.1:50055')
+    assignment = None
     if proxy is None:
         from src.service import create_agent
         path = os.environ.get('LECTIFY_AGENT_ASSIGNMENT_FILE')
@@ -29,8 +30,28 @@ def create_server(config=None, proxy=None):
         except (OSError, ValueError, UnicodeError):
             raise ValueError('Invalid plugin agent assignment file') from None
         proxy = create_agent(assignment)
-    return create_scoped_server(rpc.add_PluginAgentServiceServicer_to_server, proxy, config)
+    if controller is None and assignment is not None and 'runtime_command' in assignment:
+        from generated.plugin_agent.controller import PluginController
+        controller = PluginController(config.execution_id,config.node_id,assignment['runtime_command'],
+            assignment.get('runtime_environment',{}),assignment.get('runtime_cwd'))
+    if controller is not None:
+        if config.control_token is None or controller.assignment != (config.execution_id,config.node_id):
+            raise ValueError('Controller requires its own scoped capability')
+        if _controllers is not None:
+            _controllers.append(controller)
+    def register(servicer, server):
+        rpc.add_PluginAgentServiceServicer_to_server(servicer,server)
+        if controller is not None:
+            rpc.add_PluginControlServiceServicer_to_server(controller,server)
+    return create_scoped_server(register, proxy, config)
 
 
 async def run_server(config=None, stop_event=None):
-    await run_scoped_server(create_server, config, stop_event)
+    controllers = []
+    def factory(config):
+        return create_server(config,_controllers=controllers)
+    try:
+        await run_scoped_server(factory, config, stop_event)
+    finally:
+        for controller in controllers:
+            await controller.close()
