@@ -19,6 +19,8 @@ class GrpcClientGenerator(BaseGenerator):
         client_services = self._build_service_list()
         if not client_services:
             return
+        if self.svc.grpc_transport.enabled:
+            self.write('transport.py', self.render('plugins/transport.py.j2'))
 
         protos_out = self.output / "protos" / "clients"
         protos_out.mkdir(parents=True, exist_ok=True)
@@ -39,8 +41,8 @@ class GrpcClientGenerator(BaseGenerator):
 
         services = list(self.svc.grpc_client.services)
 
-        if self.svc.ticket_auth.enabled and "infra_tas" not in services:
-            services.append("infra_tas")
+        if self.svc.ticket_auth.enabled and self.svc.ticket_auth.tas_service not in services:
+            services.append(self.svc.ticket_auth.tas_service)
 
         if self.svc.config.enabled and "infra_config" not in services:
             services.append("infra_config")

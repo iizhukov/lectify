@@ -12,6 +12,8 @@ class GrpcServerGenerator(BaseGenerator):
     def generate(self) -> None:
         if not self.svc.grpc.enabled:
             return
+        if self.svc.grpc_transport.enabled:
+            self.write('transport.py', self.render('plugins/transport.py.j2'))
 
         proto_path = get_service_proto(self.output.parent)
         protos_out = self.output / "protos" / "server"

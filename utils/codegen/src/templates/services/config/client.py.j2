@@ -4,6 +4,10 @@
 # ---------------------------------------------------------------------------
 
 import grpc
+{% if manifest.service.grpc_transport.enabled %}
+import os
+from generated.transport import TLSConfig, create_channel
+{% endif %}
 import time
 import structlog
 
@@ -81,15 +85,27 @@ class ConfigClient:
 
         self._config_pb2_module = pb2_mod
         config_target = "{{ config_address }}"
+        {% if manifest.service.grpc_transport.enabled %}
+        config_target = os.environ.get('LECTIFY_CONFIG_ADDRESS', config_target)
+        {% endif %}
         {% if manifest.service.ticket_auth.enabled %}
         from generated.ticket_auth.interceptor import TicketAuthClientInterceptor
         interceptor = TicketAuthClientInterceptor(
             source_service=self._settings.service_name,
             target_service="{{ config_service }}",
         )
+        {% if manifest.service.grpc_transport.enabled %}
+        channel = create_channel(config_target,TLSConfig.from_env('LECTIFY_GRPC_CLIENT_TLS'),
+            interceptors=[interceptor],max_message_bytes=50 * 1048576)
+        {% else %}
         channel = grpc.aio.insecure_channel(config_target, interceptors=[interceptor])
+        {% endif %}
+        {% else %}
+        {% if manifest.service.grpc_transport.enabled %}
+        channel = create_channel(config_target,TLSConfig.from_env('LECTIFY_GRPC_CLIENT_TLS'),max_message_bytes=50 * 1048576)
         {% else %}
         channel = grpc.aio.insecure_channel(config_target)
+        {% endif %}
         {% endif %}
         self._config_stub = pb2_grpc_mod.ConfigServiceStub(channel)
 

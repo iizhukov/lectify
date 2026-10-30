@@ -55,7 +55,8 @@ class DockerSandbox:
         identity = repr((execution_id, node_id, fence, role)).encode()
         return 'lectify-' + hashlib.sha256(identity).hexdigest()[:40]
 
-    async def create(self, *, execution_id, node_id, fence, attempt_id, image, environment, network='none', role='plugin'):
+    async def create(self, *, execution_id, node_id, fence, attempt_id, image, environment, network='none',
+                     role='plugin', network_aliases=()):
         name = self.name(execution_id, node_id, fence, role)
         self._validate_attempt(attempt_id)
         if not isinstance(image, str) or not re.fullmatch(r'(?:[A-Za-z0-9][A-Za-z0-9./:_-]*@)?sha256:[a-f0-9]{64}', image):
@@ -64,12 +65,18 @@ class DockerSandbox:
             raise ValueError('Invalid sandbox network')
         if not isinstance(environment, dict) or len(environment) > 64:
             raise ValueError('Invalid sandbox environment')
+        if (not isinstance(network_aliases,(list,tuple)) or len(network_aliases)>16
+                or any(not isinstance(alias,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',alias)
+                       for alias in network_aliases) or network_aliases and network == 'none'):
+            raise ValueError('Invalid sandbox network aliases')
         arguments = ['create', '--pull=never', '--name', name, '--label', 'lectify.managed=true',
             '--label', 'lectify.attempt=' + attempt_id,
             '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
             '--pids-limit=128', '--memory=512m', '--cpus=1', '--user=1000:1000',
             '--network', network, '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000',
             '--log-driver=none']
+        for alias in network_aliases:
+            arguments.extend(('--network-alias',alias))
         for key, value in sorted(environment.items()):
             if (not isinstance(key, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,127}', key)
                     or not isinstance(value, str) or len(value.encode()) > 32768 or '\x00' in value):

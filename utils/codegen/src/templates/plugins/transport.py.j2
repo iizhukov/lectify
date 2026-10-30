@@ -60,19 +60,21 @@ def validate_endpoint(endpoint, secure=False):
             address = ipaddress.ip_address(host)
             local = address.is_loopback
         except ValueError:
-            if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', host):
+            if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?', host):
                 raise ValueError()
             local = host == 'localhost'
         if not secure and not local:
             raise ValueError()
     except (ValueError, AttributeError):
-        raise ValueError('Remote plugin endpoints require mTLS; insecure endpoints must be loopback or Unix sockets') from None
+        raise ValueError('Remote gRPC endpoints require mTLS; insecure endpoints must be loopback or Unix sockets') from None
 
 
-def create_channel(endpoint, tls=None, interceptors=None):
+def create_channel(endpoint, tls=None, interceptors=None, max_message_bytes=2 * 1048576):
     validate_endpoint(endpoint, secure=tls is not None)
-    options = [('grpc.max_receive_message_length', 2 * 1048576),
-               ('grpc.max_send_message_length', 2 * 1048576)]
+    if type(max_message_bytes) is not int or not 1 <= max_message_bytes <= 50 * 1048576:
+        raise ValueError('Invalid gRPC message limit')
+    options = [('grpc.max_receive_message_length', max_message_bytes),
+               ('grpc.max_send_message_length', max_message_bytes)]
     if tls is None:
         return grpc.aio.insecure_channel(endpoint, options=options, interceptors=interceptors)
     credentials = grpc.ssl_channel_credentials(
@@ -80,3 +82,16 @@ def create_channel(endpoint, tls=None, interceptors=None):
         certificate_chain=tls.certificate,
     )
     return grpc.aio.secure_channel(endpoint, credentials, options=options, interceptors=interceptors)
+
+
+def bind_server(server, endpoint, tls=None):
+    validate_endpoint(endpoint, secure=tls is not None)
+    if tls is None:
+        port = server.add_insecure_port(endpoint)
+    else:
+        credentials = grpc.ssl_server_credentials([(tls.private_key,tls.certificate)],
+            root_certificates=tls.roots,require_client_auth=True)
+        port = server.add_secure_port(endpoint,credentials)
+    if not port:
+        raise RuntimeError('gRPC listener could not bind')
+    return port

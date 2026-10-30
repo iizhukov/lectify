@@ -1,4 +1,5 @@
 service:
+  grpc_transport: {enabled: true}
   name: orchestrator
   version: 0.1.0
   description: "Lectify Orchestrator Service — manages workflow DAG execution, plugin lifecycle, streaming, and buffering"

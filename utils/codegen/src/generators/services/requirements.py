@@ -19,6 +19,7 @@ def _base_requirements(svc) -> list[str]:
             f"grpcio>={version('grpcio-tools')}",
             f"grpcio-tools>={version('grpcio-tools')}",
             "grpcio-reflection>=1.60.0",
+            "grpcio-health-checking>=1.60.0",
             f"protobuf>={version('protobuf')}",
             "mypy-protobuf>=3.5.0",
         ]

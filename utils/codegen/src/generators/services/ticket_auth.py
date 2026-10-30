@@ -1,4 +1,5 @@
 from generators.services.base import BaseGenerator
+from utils import get_service_manifest, get_service_path
 
 
 class TicketAuthGenerator(BaseGenerator):
@@ -6,7 +7,7 @@ class TicketAuthGenerator(BaseGenerator):
         if not self.svc.ticket_auth.enabled:
             return
 
-        tas_port = 10010  # TODO: fix in future
+        tas_port = get_service_manifest(get_service_path(self.svc.ticket_auth.tas_service)).service.grpc.port
         tas_addr = self.svc.ticket_auth.tas_service if self.docker else 'localhost'
         ctx = {'docker': self.docker, 'tas_address': f'{tas_addr}:{tas_port}'}
 

@@ -1,4 +1,5 @@
 service:
+  grpc_transport: {enabled: true}
   name: infra_tas
   version: 0.1.0
   description: "Ticket Authorization System - issues and validates JWT tickets for service-to-service auth"

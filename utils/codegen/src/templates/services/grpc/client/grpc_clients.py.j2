@@ -6,7 +6,8 @@
 import asyncio
 import grpc
 import uuid
-{% if manifest.service.plugin_agent.enabled %}
+{% if manifest.service.plugin_agent.enabled or manifest.service.grpc_transport.enabled %}
+import os
 from generated.transport import TLSConfig, create_channel
 {% endif %}
 
@@ -74,6 +75,9 @@ class GrpcClients:
             {% if manifest.service.plugin_agent.enabled %}
             ch = create_channel(target, TLSConfig.from_env("LECTIFY_AGENT_BACKEND_TLS"),
                                 interceptors=_interceptors or None)
+            {% elif manifest.service.grpc_transport.enabled %}
+            ch = create_channel(target, TLSConfig.from_env("LECTIFY_GRPC_CLIENT_TLS"),
+                                interceptors=_interceptors or None, max_message_bytes=50 * 1048576)
             {% else %}
             ch = grpc.aio.insecure_channel(target, interceptors=_interceptors or None)
             {% endif %}

@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 
 import time
-{% if manifest.service.plugin_agent.enabled %}
+{% if manifest.service.plugin_agent.enabled or manifest.service.grpc_transport.enabled %}
 import os
 from generated.transport import TLSConfig, create_channel
 {% endif %}
@@ -16,8 +16,8 @@ from typing import Any, Optional
 
 from generated.logger import get_logger  # type: ignore
 from generated.settings import get_settings  # type: ignore
-import generated.protos.clients.infra_tas.index_pb2 as pb2_mod  # type: ignore
-import generated.protos.clients.infra_tas.index_pb2_grpc as pb2_grpc_mod  # type: ignore
+import generated.protos.clients.{{ service.ticket_auth.tas_service }}.index_pb2 as pb2_mod  # type: ignore
+import generated.protos.clients.{{ service.ticket_auth.tas_service }}.index_pb2_grpc as pb2_grpc_mod  # type: ignore
 
 
 log = get_logger("ticket_auth")
@@ -72,6 +72,9 @@ class TicketAuthClient:
         {% if manifest.service.plugin_agent.enabled %}
         tas_target = os.environ.get("LECTIFY_AGENT_TAS_ADDRESS", tas_target)
         self._tas_channel = create_channel(tas_target, TLSConfig.from_env("LECTIFY_AGENT_BACKEND_TLS"))
+        {% elif manifest.service.grpc_transport.enabled %}
+        tas_target = os.environ.get("LECTIFY_TAS_ADDRESS", tas_target)
+        self._tas_channel = create_channel(tas_target, TLSConfig.from_env("LECTIFY_GRPC_CLIENT_TLS"))
         {% else %}
         self._tas_channel = grpc.aio.insecure_channel(tas_target)
         {% endif %}

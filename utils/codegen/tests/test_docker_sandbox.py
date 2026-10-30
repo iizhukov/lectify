@@ -44,6 +44,7 @@ async def test_sandbox_limits_and_cleanup_on_worker_cancellation():
 @pytest.mark.parametrize('override', [
     {'image':'registry/plugin:latest'}, {'image':'--privileged'}, {'network':'host'},
     {'environment':{'LD_PRELOAD':'\x00'}}, {'fence':True},
+    {'network_aliases':['api_auth']}, {'network':'internal','network_aliases':['--privileged']},
 ])
 async def test_sandbox_rejects_untrusted_launch_spec_before_docker(override):
     calls = []

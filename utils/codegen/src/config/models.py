@@ -165,6 +165,7 @@ class Service(BaseModel):
     user_auth: UserAuthConfig = Field(default_factory=UserAuthConfig)
     plugin_agent: PluginAgentConfig = Field(default_factory=PluginAgentConfig)
     plugin_runtime_client: PluginAgentConfig = Field(default_factory=PluginAgentConfig)
+    grpc_transport: PluginAgentConfig = Field(default_factory=PluginAgentConfig)
     workflow_validation: WorkflowValidationConfig = Field(default_factory=WorkflowValidationConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)

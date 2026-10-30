@@ -1,4 +1,5 @@
 service:
+  grpc_transport: {enabled: true}
   name: plugins_provider
   version: 0.1.0
   description: Bounded Polza chat and transcription adapter

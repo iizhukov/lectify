@@ -1,4 +1,5 @@
 service:
+  grpc_transport: {enabled: true}
   name: infra_config
   version: 0.1.0
   description: "Configuration Service - provides feature flags and configuration to services"

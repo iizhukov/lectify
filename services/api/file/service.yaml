@@ -1,4 +1,5 @@
 service:
+  grpc_transport: {enabled: true}
   name: api_file
   version: 0.1.0
   description: Owner-scoped file metadata and bounded object streams
