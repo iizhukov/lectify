@@ -93,6 +93,8 @@ async def test_orchestrator_start_and_get_status(test_session, mock_context):
 
     assert status_res.execution_id == res.execution_id
     assert len(status_res.nodes) == 2
+    await service.CancelExecution(pb.CancelExecutionRequest(execution_id=res.execution_id), mock_context)
+    assert not service._execution_tasks
 
 
 @pytest.mark.asyncio

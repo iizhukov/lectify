@@ -120,3 +120,7 @@ Reviewer воспроизвёл repeat-cancel interruption of asyncfinally. Root
 ## Dispatch claim интеграция и checkpoint
 
 StartExecution сохраняет dispatch в одной транзакции с execution, parent flush предшествует дочернему insert. Local worker wrapper claims/commits lease до pipeline, heartbeat продлевает каждые10сек и отменяет pipeline при потере lease.40 orchestrator tests pass, including two service instances only one enters sameclaimed pipeline. Poller recovery и fencing node writes/agent events ещё не подключены; full distributed exactly-once не заявлен. Full root runner95218: regen+16/16 suitespassed, codegen171. Создан interim checkpoint b8a059d (не release). После него runtime автор нашёл targeted glue blocker: prompt client protobuf descriptor escaping SyntaxError, исправление в работе; предыдущий общий gate не доказывает готовность latest backend glue.
+
+## Fenced pipeline writes
+
+Root передаёт owner/fence из lease wrapper в pipeline. guard_execution_write перед pipeline DB transactions locks matching current/notexpired dispatch row, затем RUNNING execution row, удерживая lock до commit. Старый/expired worker не получает write gate, cancelled execution отклоняется.41 orchestrator tests pass incl stale fence guard. Первоначальный прогон выявил старый teardown race: тест оставлял worker живым до drop tables; тест теперь явно CancelExecution+await cleanup, повторный gate прошёл. PostgreSQL race/deadlock verification и remote side-effect fencing через event/control plane остаются открыты. Runtime автор выполняет read-only audit.

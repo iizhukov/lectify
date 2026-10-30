@@ -37,3 +37,19 @@ async def renew(session, execution_id, owner, fence, now, ttl=30):
         _running(execution_id),
     ).values(lease_expires_at=now + ttl).returning(Dispatch.fence))
     return result.scalar_one_or_none() is not None
+
+
+async def guard_execution_write(session, execution_id, ownership, now):
+    """Lock lease then execution until commit; reject late or cancelled writes."""
+    if ownership is not None:
+        owner, fence = ownership
+        locked = await session.execute(update(Dispatch).where(
+            Dispatch.execution_id == execution_id, Dispatch.state == 'LEASED',
+            Dispatch.owner == owner, Dispatch.fence == fence, Dispatch.lease_expires_at > now,
+        ).values(fence=Dispatch.fence).returning(Dispatch.fence))
+        if locked.scalar_one_or_none() is None:
+            return False
+    locked = await session.execute(update(Execution).where(
+        Execution.id == execution_id, Execution.state == 'RUNNING',
+    ).values(id=Execution.id).returning(Execution.id))
+    return locked.scalar_one_or_none() is not None

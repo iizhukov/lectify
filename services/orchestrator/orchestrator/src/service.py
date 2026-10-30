@@ -18,7 +18,7 @@ from src.models import (
     PluginRegistryModel,
     utc_now,
 )
-from src.engine.dispatch import claim, renew
+from src.engine.dispatch import claim, renew, guard_execution_write
 from src.engine.dag import WorkflowDAG, DAGValidationError
 from src.engine.stream_router import StreamRouter
 from src.engine.docker_runner import ContainerLifecycleManager
@@ -148,7 +148,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 if not owned:
                     return
 
-        pipeline = asyncio.create_task(self._run_execution_pipeline(execution_id, sorted_nodes, dag, initial_inputs))
+        pipeline = asyncio.create_task(self._run_execution_pipeline(execution_id, sorted_nodes, dag, initial_inputs, (self.worker_id, fence)))
         lease = asyncio.create_task(heartbeat())
         try:
             done, _ = await asyncio.wait((pipeline, lease), return_when=asyncio.FIRST_COMPLETED)
@@ -168,6 +168,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         sorted_nodes: List[Dict[str, Any]],
         dag: WorkflowDAG,
         initial_inputs: Dict[str, str],
+        ownership=None,
     ) -> None:
         log.info("pipeline_started", execution_id=execution_id, node_count=len(sorted_nodes))
         session_factory = get_session_factory()
@@ -175,6 +176,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         try:
             for idx, node_def in enumerate(sorted_nodes):
                 async with session_factory() as session:
+                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                        return
                     current_state = await session.scalar(select(WorkflowExecutionModel.state).where(
                         WorkflowExecutionModel.id == execution_id,
                     ))
@@ -186,6 +189,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
                 # Update node state to RUNNING
                 async with session_factory() as session:
+                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                        return
                     stmt = select(WorkflowNodeExecutionModel).where(
                         WorkflowNodeExecutionModel.execution_id == execution_id,
                         WorkflowNodeExecutionModel.node_id == node_id,
@@ -216,6 +221,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
                 # Update node state to COMPLETED
                 async with session_factory() as session:
+                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                        return
                     stmt = select(WorkflowNodeExecutionModel).where(
                         WorkflowNodeExecutionModel.execution_id == execution_id,
                         WorkflowNodeExecutionModel.node_id == node_id,
@@ -231,6 +238,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 # Update total execution progress
                 total_progress = int(((idx + 1) / len(sorted_nodes)) * 100)
                 async with session_factory() as session:
+                    if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                        return
                     stmt = select(WorkflowExecutionModel).where(WorkflowExecutionModel.id == execution_id)
                     res = await session.execute(stmt)
                     exec_model = res.scalar_one_or_none()
@@ -240,6 +249,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
             # A late worker must not overwrite cancellation or another terminal state.
             async with session_factory() as session:
+                if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                    return
                 changed = await session.execute(update(WorkflowExecutionModel).where(
                     WorkflowExecutionModel.id == execution_id,
                     WorkflowExecutionModel.state == "RUNNING",
@@ -259,6 +270,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         except Exception as e:
             log.error("pipeline_failed", execution_id=execution_id, error=str(e))
             async with session_factory() as session:
+                if not await guard_execution_write(session, execution_id, ownership, int(time.time())):
+                    return
                 changed = await session.execute(update(WorkflowExecutionModel).where(
                     WorkflowExecutionModel.id == execution_id,
                     WorkflowExecutionModel.state == "RUNNING",
@@ -274,6 +287,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 f"Workflow failed: {str(e)}",
                 0,
             )
+
 
     async def _broadcast_event(
         self,

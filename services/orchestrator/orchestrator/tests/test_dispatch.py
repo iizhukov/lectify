@@ -83,3 +83,22 @@ async def test_two_service_instances_only_one_starts_claimed_pipeline(test_sessi
     assert calls == ['two-workers']
     release.set()
     await asyncio.wait_for(task, 2)
+
+
+@pytest.mark.asyncio
+async def test_stale_worker_cannot_lock_execution_for_result_write(test_session):
+    from src.engine.dispatch import guard_execution_write
+    row = WorkflowExecutionModel(id='fenced-write', workflow_id='workflow', state='RUNNING')
+    test_session.add(row)
+    await test_session.flush()
+    test_session.add(WorkflowDispatchModel(execution_id=row.id))
+    await test_session.commit()
+    first = await claim(test_session, row.id, 'old', 100, 10)
+    await test_session.commit()
+    second = await claim(test_session, row.id, 'new', 110, 10)
+    await test_session.commit()
+    assert not await guard_execution_write(test_session, row.id, ('old', first), 111)
+    await test_session.rollback()
+    assert await guard_execution_write(test_session, 'fenced-write', ('new', second), 111)
+    await test_session.commit()
+    assert not await guard_execution_write(test_session, 'fenced-write', ('new', second), 120)
