@@ -22,6 +22,7 @@ class PluginAgentGenerator(BaseGenerator):
             self.write('container_assignments.py', self.render('services/container_assignments.py.j2'))
             self.write('plugin_manifest_models.py', Path(plugin_models.__file__).read_text())
             self.write('plugin_manifest.py', self.render('services/plugin_manifest.py.j2'))
+            self.write('json_data.py', self.render('services/json_data.py.j2'))
             for module in ('stream_dag', 'stream_router', 'stream_pipeline'):
                 self.write(module + '.py', self.render('services/' + module + '.py.j2'))
         if not self.svc.plugin_agent.enabled:

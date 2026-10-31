@@ -350,3 +350,11 @@ SQLite2 registry tests прошли; real PostgreSQL12 concurrent registrations 
 Registry audit выявил category schema/PG mismatch (65+ chars), дополнительно воспроизведён escaped lone-surrogate encoding failure. Общая schema ограничивает category64, запрещает NUL и invalidUTF8 в category/description. Добавлены SQLite и realPG negatives; отказ происходит до DB flush с INVALID_ARGUMENT. До UTF8 regeneration новый regression воспроизвёл UnicodeEncodeError; после regen выполняется final gate. Audit подтвердил fixes по source.
 
 Final post-UTF8-regeneration gate: full runner17/17 passed (codegen215, orchestrator93); real PostgreSQL concurrent registration и oversized/NUL/surrogate negatives exit0, temporary container удалён.
+
+## Committed assignment authorization policy
+
+src.engine.grants.assignment_policy строит capabilities только после проверки lease/fence, owner из Execution, exact typed committed node, active node projection, PREPARED attempt execution/node/fence/daemon/role и active immutable manifest identity. Literal file_id grant ограничен сохранённым node.parameters.file_id при storage permission; prompt grant ограничен node.prompt_id при llm permission. Live backend ownership checks остаются обязательными. Policy возвращает copied committed parameters/inputs, а wrapper сверяет initial_inputs и коммитит DB lock до вызова trusted provision callback.
+
+Audit выявил coercion numeric dict keys через json.dumps. Заменено generated json_data.same_json_data: exact builtin types, UTF8 str keys, finite JSON-only values, no tuple/cycles. После сравнения используется saved node вместо caller object. Tests проверяют valid savedowner/file/prompt и отказ forged params/prompt/plugin/bool-int/fence/daemon/inputs/inactiveversion до provision. Focused2 passed; предыдущий full17/17 passed (codegen215, orchestrator95) до последнего codegen helper move; final gate выполняется. Audit подтвердил fix. Provision token/certificate issuance, safe duplicate-contender revocation и default resolver integration всё ещё открыты.
+
+Final grants policy gate после codegen move: full17/17 passed, codegen215/orchestrator95.
