@@ -36,3 +36,14 @@ hostname rejection, refusal of remote plaintext, and shutdown cancellation.
 internal network: the matching `api_auth` SAN succeeds while another alias to
 the same server is rejected. Its certificates are temporary test credentials;
 the test is not certificate provisioning for the application deployment.
+
+Read-only workloads can supply each TLS prefix with `_CERT_PEM`, `_KEY_PEM`
+and `_CA_PEM` instead of the three `_FILE` variables. A complete source is
+required; mixed, empty or partial sources fail closed. Inline fields are ASCII
+and limited to32KiB each. Credentials are loaded into memory and omitted from
+configuration repr; no key file is written. This applies to generic services,
+scoped plugin/agent servers, sidecar clients and TAS/config clients.
+Docker daemon administrators can inspect container environment; same-UID
+process isolation and production certificate issuance remain separate work.
+The Docker DNS integration now supplies PEM environment credentials and keeps
+all CA/leaf private keys outside its build context.

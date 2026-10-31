@@ -17,7 +17,7 @@ from generated.transport import TLSConfig, create_channel, bind_server
 
 async def main():
     role = os.environ['ROLE']
-    tls = TLSConfig.from_files('certs/'+role+'.crt','certs/'+role+'.key','certs/ca.crt')
+    tls = TLSConfig.from_env('TEST_TLS')
     if role == 'server':
         async def ping(request, context): return b'pong'
         server = grpc.aio.server()
@@ -47,14 +47,14 @@ def docker(*args):
     return subprocess.check_output(['docker',*args],text=True,stderr=subprocess.STDOUT).strip()
 
 
-async def probe(image, network):
+async def probe(image, network, credentials):
     sandbox = DockerSandbox()
     async with sandbox.allocated(execution_id=uuid.uuid4().hex,node_id='server',fence=1,
-            attempt_id=uuid.uuid4().hex,image=image,environment={'ROLE':'server'},network=network,
+            attempt_id=uuid.uuid4().hex,image=image,environment=dict(credentials['server'],ROLE='server'),network=network,
             network_aliases=['api_auth','wrong_auth']) as server:
         await sandbox.start(server)
         async with sandbox.allocated(execution_id=uuid.uuid4().hex,node_id='client',fence=1,
-                attempt_id=uuid.uuid4().hex,image=image,environment={'ROLE':'client'},network=network) as client:
+                attempt_id=uuid.uuid4().hex,image=image,environment=dict(credentials['client'],ROLE='client'),network=network) as client:
             output = await asyncio.to_thread(docker,'start','--attach',client)
             assert docker('inspect','--format','{{.State.ExitCode}}',client) == '0'
             print(output)
@@ -66,7 +66,7 @@ def main():
         root = Path(directory)
         certs, context = root/'authority', root/'build'
         certs.mkdir()
-        (context/'certs').mkdir(parents=True)
+        context.mkdir()
         def openssl(*args):
             subprocess.run(['openssl',*args],cwd=certs,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         openssl('req','-x509','-nodes','-newkey','rsa:2048','-keyout','ca.key','-out','ca.crt',
@@ -77,9 +77,9 @@ def main():
                 ('serverAuth' if name=='server' else 'clientAuth')+'\n')
             openssl('x509','-req','-in',name+'.csr','-CA','ca.crt','-CAkey','ca.key','-CAcreateserial',
                 '-out',name+'.crt','-days','1','-extfile','extensions.cnf')
-            for suffix in ('.crt','.key'):
-                shutil.copyfile(certs/(name+suffix),context/'certs'/(name+suffix))
-        shutil.copyfile(certs/'ca.crt',context/'certs/ca.crt')
+        credentials = {name:{'TEST_TLS_CERT_PEM':(certs/(name+'.crt')).read_text(),
+            'TEST_TLS_KEY_PEM':(certs/(name+'.key')).read_text(),
+            'TEST_TLS_CA_PEM':(certs/'ca.crt').read_text()} for name in ('server','client')}
         generated = context/'generated'
         generated.mkdir()
         (generated/'__init__.py').touch()
@@ -101,7 +101,7 @@ ENTRYPOINT ["python", "probe.py"]
             image = (root/'image.id').read_text().strip()
             network = 'lectify-tls-'+uuid.uuid4().hex[:12]
             docker('network','create','--internal',network)
-            asyncio.run(probe(image,network))
+            asyncio.run(probe(image,network,credentials))
         finally:
             if network:
                 docker('network','rm',network)

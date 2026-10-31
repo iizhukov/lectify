@@ -36,9 +36,21 @@ class TLSConfig:
 
     @classmethod
     def from_env(cls, prefix):
-        return cls.from_files(os.environ.get(prefix + '_CERT_FILE'),
-                              os.environ.get(prefix + '_KEY_FILE'),
-                              os.environ.get(prefix + '_CA_FILE'))
+        paths = tuple(os.environ.get(prefix + suffix) for suffix in ('_CERT_FILE','_KEY_FILE','_CA_FILE'))
+        inline = tuple(os.environ.get(prefix + suffix) for suffix in ('_CERT_PEM','_KEY_PEM','_CA_PEM'))
+        if any(value is not None for value in inline):
+            if any(value is not None for value in paths) or not all(inline):
+                raise ValueError('Use exactly one complete mTLS credential source')
+            try:
+                values = tuple(value.encode('ascii') for value in inline)
+                if any(len(value)>32768 for value in values):
+                    raise ValueError()
+            except (ValueError, UnicodeError):
+                raise ValueError('Invalid bounded inline mTLS credentials') from None
+            return cls(*values)
+        if any(value is not None for value in paths) and not all(paths):
+            raise ValueError('mTLS requires certificate, private key and CA together')
+        return cls.from_files(*paths)
 
 
 def validate_endpoint(endpoint, secure=False):

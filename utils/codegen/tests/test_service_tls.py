@@ -77,7 +77,27 @@ async def main():
         clients.channel('unsafe',addr='worker.example:5000')
     except ValueError: pass
     else: raise AssertionError('Remote plaintext client accepted')
-    tls = TLSConfig.from_files('certs/server.crt','certs/server.key','certs/ca.crt')
+    for suffix, filename in [('CERT_PEM','server.crt'),('KEY_PEM','server.key'),('CA_PEM','ca.crt')]:
+        os.environ['TEST_SERVER_TLS_'+suffix] = (Path('certs')/filename).read_text()
+    tls = TLSConfig.from_env('TEST_SERVER_TLS')
+    from generated.scoped_server import ServerConfig
+    os.environ.update(TEST_SERVER_TOKEN='a'*48,EXECUTION_ID='execution',NODE_ID='node')
+    config = ServerConfig.from_env('TEST_SERVER')
+    assert config.tls == tls and 'BEGIN CERTIFICATE' not in repr(config)
+    saved_inline = {key:value for key,value in os.environ.items() if key.startswith('TEST_SERVER_TLS_')}
+    for updates in ({'KEY_PEM':None},{'CERT_PEM':''},{'KEY_FILE':'certs/server.key'},
+                    {'KEY_PEM':'sensitive-'+'x'*32768},{'CERT_PEM':'sensitive-\u2603'}):
+        try:
+            for key,value in updates.items():
+                if value is None: os.environ.pop('TEST_SERVER_TLS_'+key,None)
+                else: os.environ['TEST_SERVER_TLS_'+key] = value
+            try: TLSConfig.from_env('TEST_SERVER_TLS')
+            except ValueError as error: assert 'sensitive-' not in str(error)
+            else: raise AssertionError('Invalid inline credential source accepted')
+        finally:
+            for key in tuple(os.environ):
+                if key.startswith('TEST_SERVER_TLS_'): del os.environ[key]
+            os.environ.update(saved_inline)
     from generated.transport import validate_endpoint
     validate_endpoint('api_auth:10020',secure=True)
     try: validate_endpoint('api_auth:10020')
@@ -85,8 +105,8 @@ async def main():
     else: raise AssertionError('Docker DNS enabled plaintext fallback')
     port = bind_server(server,'127.0.0.1:0',tls)
     await server.start()
-    for suffix, filename in [('CERT_FILE','client.crt'),('KEY_FILE','client.key'),('CA_FILE','ca.crt')]:
-        os.environ['LECTIFY_GRPC_CLIENT_TLS_'+suffix] = str(Path('certs')/filename)
+    for suffix, filename in [('CERT_PEM','client.crt'),('KEY_PEM','client.key'),('CA_PEM','ca.crt')]:
+        os.environ['LECTIFY_GRPC_CLIENT_TLS_'+suffix] = (Path('certs')/filename).read_text()
     try:
         channel = clients.channel('valid',addr=f'localhost:{port}')
         assert await channel.unary_unary('/tls.Test/Ping')(b'ping',timeout=3) == b'pong'
@@ -189,6 +209,7 @@ def test_generated_service_mtls_clients_and_listener(tmp_path):
     generated.mkdir()
     (generated/'__init__.py').touch()
     (generated/'transport.py').write_text(env.get_template('plugins/transport.py.j2').render())
+    (generated/'scoped_server.py').write_text(env.get_template('plugins/scoped_server.py.j2').render())
     manifest = ServiceManifest.model_validate({'service':{'name':'tls_test','grpc_transport':{'enabled':True}}})
     (generated/'grpc_clients.py').write_text(env.get_template('services/grpc/client/grpc_clients.py.j2').render(
         manifest=manifest,service=manifest.service,client_services=[]))

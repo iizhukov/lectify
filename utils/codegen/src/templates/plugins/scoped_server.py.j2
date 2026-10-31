@@ -20,7 +20,7 @@ class ServerConfig:
     tls_key_file: str | None = field(default=None, repr=False)
     tls_ca_file: str | None = field(default=None, repr=False)
     control_token: str | None = field(default=None, repr=False)
-    tls: TLSConfig | None = field(init=False, repr=False)
+    tls: TLSConfig | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if not self.token or not self.token.isascii() or any(ord(c) <= 32 or ord(c) >= 127 for c in self.token):
@@ -32,8 +32,10 @@ class ServerConfig:
                     or any(ord(c) <= 32 or ord(c) >= 127 for c in self.control_token)
                     or hmac.compare_digest(self.control_token,self.token)):
                 raise ValueError('A distinct bounded control capability is required')
-        object.__setattr__(self, "tls", TLSConfig.from_files(
-            self.tls_cert_file, self.tls_key_file, self.tls_ca_file))
+        file_tls = TLSConfig.from_files(self.tls_cert_file, self.tls_key_file, self.tls_ca_file)
+        if self.tls is not None and (not isinstance(self.tls,TLSConfig) or file_tls is not None):
+            raise ValueError('Use exactly one complete mTLS credential source')
+        object.__setattr__(self, 'tls', self.tls or file_tls)
         validate_endpoint(self.endpoint, secure=self.tls is not None)
 
     @classmethod
@@ -43,9 +45,7 @@ class ServerConfig:
             execution_id=os.environ.get('EXECUTION_ID', ''),
             node_id=os.environ.get('NODE_ID', ''),
             endpoint=os.environ.get(prefix + "_ENDPOINT", default_endpoint),
-            tls_cert_file=os.environ.get(prefix + "_TLS_CERT_FILE"),
-            tls_key_file=os.environ.get(prefix + "_TLS_KEY_FILE"),
-            tls_ca_file=os.environ.get(prefix + "_TLS_CA_FILE"),
+            tls=TLSConfig.from_env(prefix + '_TLS'),
             control_token=os.environ.get(prefix + '_CONTROL_TOKEN'),
         )
 
