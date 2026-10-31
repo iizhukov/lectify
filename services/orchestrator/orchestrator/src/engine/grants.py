@@ -65,6 +65,9 @@ def assignment_grants(factory, provision, *, credentials=None):
             if credentials is not None:
                 policy['user_access_token'] = await credentials.load(session,execution_id=execution_id,
                     owner_id=policy['owner_id'],ownership=ownership)
+                policy['report_token'] = await credentials.report_capability(session,execution_id=execution_id,
+                    owner_id=policy['owner_id'],ownership=ownership)
+                policy.update(lease_owner=ownership[0],fence=ownership[1])
             await session.commit()
         async with provision(policy=policy,placement=dict(placement),ownership=ownership) as grant:
             yield grant

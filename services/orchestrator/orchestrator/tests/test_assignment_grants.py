@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from copy import deepcopy
 import json
+import time
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -76,3 +77,27 @@ async def test_grants_never_provision_forged_inputs_or_inactive_plugin(test_sess
         async with grants(**assignment,initial_inputs={'source':'saved'}):
             pytest.fail('Inactive plugin received credentials')
     assert not entered
+
+
+@pytest.mark.asyncio
+async def test_grants_borrow_one_reporting_capability_for_the_lease(test_session,assignment):
+    from cryptography.fernet import Fernet
+    from generated.credential_cipher import CredentialCipher
+    from src.engine.credentials import ExecutionCredentials
+    store = ExecutionCredentials(CredentialCipher(Fernet.generate_key()))
+    test_session.add(store.prepare('grants','alice','la_saved',int(time.time())+900))
+    await test_session.commit()
+    tokens = []
+    @asynccontextmanager
+    async def provision(**fields):
+        policy = fields['policy']
+        assert policy['user_access_token'] == 'la_saved'
+        assert policy['lease_owner'] == assignment['ownership'][0]
+        assert policy['fence'] == assignment['ownership'][1]
+        tokens.append(policy['report_token'])
+        yield {}
+    factory = async_sessionmaker(test_session.bind,expire_on_commit=False)
+    grants = assignment_grants(factory,provision,credentials=store)
+    for _ in range(2):
+        async with grants(**assignment,initial_inputs={'source':'saved'}): pass
+    assert len(set(tokens)) == 1

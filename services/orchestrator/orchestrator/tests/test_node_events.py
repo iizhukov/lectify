@@ -11,6 +11,38 @@ from src.node_events import report_node_event
 from src.engine.dispatch import issue_report_capability
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('manual_rotation',[False,True])
+async def test_expired_encrypted_report_capability_is_rejected_before_purge(test_session,manual_rotation):
+    from cryptography.fernet import Fernet
+    from generated.credential_cipher import CredentialCipher
+    from src.engine.credentials import ExecutionCredentials
+    from src.models import ExecutionCredentialModel
+    store = ExecutionCredentials(CredentialCipher(Fernet.generate_key(),clock=lambda:0))
+    test_session.add(WorkflowExecutionModel(id='expired-report',workflow_id='workflow',user_id='user',state='RUNNING'))
+    await test_session.flush()
+    test_session.add_all([WorkflowDispatchModel(execution_id='expired-report',state='LEASED',owner='worker',
+        fence=1,lease_expires_at=9999999999),
+        WorkflowNodeExecutionModel(execution_id='expired-report',node_id='node',plugin_id='plugin',state='PROCESSING'),
+        store.prepare('expired-report','user','la_test',1)])
+    await test_session.commit()
+    token = await store.report_capability(test_session,execution_id='expired-report',owner_id='user',ownership=('worker',1))
+    if manual_rotation:
+        token = await issue_report_capability(test_session,'expired-report','worker',1)
+    await test_session.commit()
+    factory = async_sessionmaker(test_session.bind,expire_on_commit=False)
+    request = SimpleNamespace(execution_id='expired-report',node_id='node',owner='worker',fence=1,
+        event_id='expired',kind='progress',payload_json=json.dumps({'percent':50,'message':'half'}),report_token=token)
+    with pytest.raises(Rejected) as error:
+        await report_node_event(factory,request,Context())
+    assert error.value.args[0] == grpc.StatusCode.UNAUTHENTICATED
+    assert await test_session.get(ExecutionCredentialModel,'expired-report') is not None
+    dispatch = await test_session.get(WorkflowDispatchModel,'expired-report')
+    assert (dispatch.report_token_ciphertext is None) == manual_rotation
+    assert dispatch.report_token_hash
+    assert await test_session.scalar(select(func.count()).select_from(NodeEventModel)) == 0
+
+
 class Rejected(Exception):
     pass
 

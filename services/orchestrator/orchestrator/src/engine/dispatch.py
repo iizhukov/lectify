@@ -27,6 +27,10 @@ def _now(session, value):
     return cast(func.extract('epoch', clock), BigInteger)
 
 
+def database_epoch(session):
+    return _now(session,None)
+
+
 async def claim(session, execution_id, owner, now=None, ttl=30):
     _validate(owner, 0 if now is None else now, ttl)
     now = _now(session, now)
@@ -36,7 +40,8 @@ async def claim(session, execution_id, owner, now=None, ttl=30):
         Dispatch.lease_expires_at <= now,
         _running(execution_id),
     ).values(owner=owner, state='LEASED', lease_expires_at=now + ttl,
-             fence=Dispatch.fence + 1, report_token_hash=None, report_token_fence=None).returning(Dispatch.fence))
+             fence=Dispatch.fence + 1, report_token_hash=None, report_token_fence=None,
+             report_token_ciphertext=None).returning(Dispatch.fence))
     return result.scalar_one_or_none()
 
 
@@ -83,8 +88,9 @@ async def pending_executions(session, limit=100):
 async def issue_report_capability(session, execution_id, owner, fence, now=None):
     """Rotate reporting authority under the lease lock; commit before delivery.
 
-    Only a hash is persisted. The returned bearer token belongs to this claim,
-    and a new claim clears it before any replacement worker starts work.
+    This helper persists the hash and invalidates any encrypted delivery copy.
+    ExecutionCredentials can attach a bound encrypted copy in the same transaction.
+    A new claim clears both before any replacement worker starts work.
     """
     _validate(owner, 0 if now is None else now, 30)
     if type(fence) is not int or fence <= 0:
@@ -95,5 +101,5 @@ async def issue_report_capability(session, execution_id, owner, fence, now=None)
     await session.execute(update(Dispatch).where(
         Dispatch.execution_id == execution_id,
     ).values(report_token_hash=hashlib.sha256(token.encode('ascii')).hexdigest(),
-             report_token_fence=fence))
+             report_token_fence=fence,report_token_ciphertext=None))
     return token

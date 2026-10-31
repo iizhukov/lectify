@@ -9,8 +9,8 @@ import grpc
 from sqlalchemy import select
 
 from generated.protos.server import index_pb2 as pb
-from src.engine.dispatch import guard_execution_write
-from src.models import NodeEventModel, WorkflowDispatchModel, WorkflowNodeExecutionModel
+from src.engine.dispatch import guard_execution_write,database_epoch
+from src.models import NodeEventModel, WorkflowDispatchModel, WorkflowNodeExecutionModel,ExecutionCredentialModel,WorkflowExecutionModel
 
 _ID = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.:-]*$')
 _METRIC = re.compile(r'^[A-Za-z_:][A-Za-z0-9_:]{0,127}$')
@@ -115,6 +115,14 @@ async def report_node_event(factory, request, context):
         if (dispatch.report_token_fence != request.fence or not dispatch.report_token_hash
                 or not hmac.compare_digest(dispatch.report_token_hash, supplied)):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Reporting capability is invalid')
+        required = await session.scalar(select(WorkflowExecutionModel.credentials_required).where(
+            WorkflowExecutionModel.id == request.execution_id))
+        if required or dispatch.report_token_ciphertext is not None:
+            live = await session.scalar(select(ExecutionCredentialModel.execution_id).where(
+                ExecutionCredentialModel.execution_id == request.execution_id,
+                ExecutionCredentialModel.expires_at > database_epoch(session)))
+            if live is None:
+                await context.abort(grpc.StatusCode.UNAUTHENTICATED,'Reporting capability expired')
         existing = (await session.execute(select(NodeEventModel).where(
             NodeEventModel.execution_id == request.execution_id, NodeEventModel.event_id == request.event_id))).scalar_one_or_none()
         if existing is not None:

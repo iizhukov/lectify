@@ -62,7 +62,32 @@ async def verify_start_idempotency(factory):
             dispatch = await session.get(Dispatch,request.execution_id)
             assert await stores[1].load(session,execution_id=request.execution_id,owner_id='integration-user',
                 ownership=(dispatch.owner,dispatch.fence)) == 'la_integration'
+            ownership = (dispatch.owner,dispatch.fence)
             await session.commit()
+        async def capability(index):
+            async with factory() as session:
+                result = await stores[index % 2].report_capability(session,execution_id=request.execution_id,
+                    owner_id='integration-user',ownership=ownership)
+                await session.commit()
+                return result
+        reports = await asyncio.wait_for(asyncio.gather(*(capability(i) for i in range(12))),15)
+        assert len(set(reports)) == 1
+        async with factory() as session:
+            await session.execute(update(ExecutionCredentialModel).where(
+                ExecutionCredentialModel.execution_id == request.execution_id).values(expires_at=0))
+            await session.commit()
+        from src.node_events import report_node_event
+        class ExpiredReport(Exception): pass
+        class RejectExpired(Context):
+            async def abort(self,code,details):
+                assert code.name == 'UNAUTHENTICATED',code
+                raise ExpiredReport()
+        report = pb.ReportNodeEventRequest(execution_id=request.execution_id,node_id='node',
+            owner=ownership[0],fence=ownership[1],report_token=reports[0],event_id='expired',kind='progress',
+            payload_json='{"percent":50,"message":"half"}')
+        try: await report_node_event(factory,report,RejectExpired())
+        except ExpiredReport: pass
+        else: raise AssertionError('Expired capability accepted before purge')
         class Admin(Context):
             lectify_principal = SimpleNamespace(user_id='integration-admin',is_admin=True)
         plugin = pb.RegisterPluginManifestRequest(plugin_id='integration_plugin',version='0.1.0',
@@ -90,6 +115,8 @@ async def verify_start_idempotency(factory):
         await services[0].dispatch_pending()
         async with factory() as session:
             assert await session.get(ExecutionCredentialModel,request.execution_id) is None
+            dispatch = await session.get(Dispatch,request.execution_id)
+            assert dispatch.report_token_ciphertext is None and dispatch.report_token_hash is None
         set_session_factory(None)
 
 
@@ -116,14 +143,25 @@ async def verify(port, password):
             await connection.run_sync(BaseModel.metadata.create_all)
             from alembic.migration import MigrationContext
             from alembic.operations import Operations
-            path = ROOT/'services/orchestrator/orchestrator/migrations/versions/0004_execution_credentials.py'
-            spec = importlib.util.spec_from_file_location('credential_migration',path)
-            migration = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(migration)
+            migrations = []
+            for name in ('0004_execution_credentials','0005_report_credentials'):
+                path = ROOT/('services/orchestrator/orchestrator/migrations/versions/'+name+'.py')
+                spec = importlib.util.spec_from_file_location(name,path)
+                migration = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(migration)
+                migrations.append(migration)
             def roundtrip(sync):
                 with Operations.context(MigrationContext.configure(sync)):
-                    migration.downgrade()
-                    migration.upgrade()
+                    for migration in reversed(migrations): migration.downgrade()
+                    migrations[0].upgrade()
+                    sync.execute(text("INSERT INTO workflow_executions "
+                        "(id,workflow_id,user_id,state,graph_json,initial_inputs,total_progress,created_at,updated_at) "
+                        "VALUES ('migration-legacy','workflow','legacy-user','RUNNING','{}','{}',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)"))
+                    sync.execute(text("INSERT INTO execution_credentials (execution_id,owner_id,ciphertext,expires_at) "
+                        "VALUES ('migration-legacy','legacy-user',:ciphertext,0)"),{'ciphertext':b'migration-test'})
+                    migrations[1].upgrade()
+                    assert sync.scalar(text("SELECT credentials_required FROM workflow_executions WHERE id='migration-legacy'")) is True
+                    sync.execute(text("DELETE FROM workflow_executions WHERE id='migration-legacy'"))
             await connection.run_sync(roundtrip)
         async with factory() as session:
             session.add(Execution(id='integration', workflow_id='workflow', state='RUNNING'))

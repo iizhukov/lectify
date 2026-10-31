@@ -12,6 +12,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     LargeBinary,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +32,7 @@ class WorkflowExecutionModel(BaseModel):
     state: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False)
     graph_json: Mapped[dict] = mapped_column(JSON, default=dict)
     initial_inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    credentials_required: Mapped[bool] = mapped_column(Boolean,default=False,server_default=false(),nullable=False)
     total_progress: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -105,6 +107,7 @@ class WorkflowDispatchModel(BaseModel):
     fence: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     report_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     report_token_fence: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    report_token_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary,nullable=True)
 
 
 class NodeEventModel(BaseModel):

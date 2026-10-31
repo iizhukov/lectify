@@ -185,6 +185,7 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                 state="RUNNING",
                 graph_json=graph_json,
                 initial_inputs=initial_inputs,
+                credentials_required=credential is not None,
             )
             session.add(exec_model)
             try:

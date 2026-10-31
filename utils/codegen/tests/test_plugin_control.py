@@ -43,7 +43,8 @@ async def main():
     os.environ['AGENT_ONLY_SECRET'] = 'not-in-child'
     child = ('import os,time,json;from pathlib import Path;'
         'Path("spawns").open("a").write(str(os.getpid())+"\\n");'
-        'Path("child.json").write_text(json.dumps(dict(os.environ)));time.sleep(60)')
+        'Path("child.json.tmp").write_text(json.dumps(dict(os.environ)));'
+        'Path("child.json.tmp").replace("child.json");time.sleep(60)')
     controller = PluginController('execution','node',[sys.executable,'-c',child],
         {'EXECUTION_ID':'wrong','NODE_ID':'wrong','PLUGIN_MODE':'pipe'},str(Path.cwd()))
     class Proxy(rpc.PluginAgentServiceServicer): assignment = ('execution','node')
