@@ -14,6 +14,7 @@ class PluginAgentGenerator(BaseGenerator):
         self.files_written += shared.files_written
         self.write('transport.py', self.render('plugins/transport.py.j2'))
         self.write('process_supervisor.py', self.render('services/process_supervisor.py.j2'))
+        self.write('json_data.py', self.render('services/json_data.py.j2'))
         if self.svc.plugin_runtime_client.enabled:
             self.write('plugin_runtime_client.py', self.render('services/plugin_runtime_client.py.j2'))
             self.write('plugin_control_client.py', self.render('services/plugin_control_client.py.j2'))
@@ -22,7 +23,6 @@ class PluginAgentGenerator(BaseGenerator):
             self.write('container_assignments.py', self.render('services/container_assignments.py.j2'))
             self.write('plugin_manifest_models.py', Path(plugin_models.__file__).read_text())
             self.write('plugin_manifest.py', self.render('services/plugin_manifest.py.j2'))
-            self.write('json_data.py', self.render('services/json_data.py.j2'))
             self.write('credential_cipher.py', self.render('services/credential_cipher.py.j2'))
             for module in ('stream_dag', 'stream_router', 'stream_pipeline'):
                 self.write(module + '.py', self.render('services/' + module + '.py.j2'))

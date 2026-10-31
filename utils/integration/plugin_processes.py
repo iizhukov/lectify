@@ -35,7 +35,8 @@ async def child(role):
         if os.environ.get('LECTIFY_TEST_CONTROLLED') == '1':
             environment = {key:os.environ[key] for key in (
                 'LECTIFY_AGENT_TOKEN','LECTIFY_AGENT_ENDPOINT','LECTIFY_RUNTIME_TOKEN',
-                'LECTIFY_RUNTIME_ENDPOINT','PLUGIN_PARAMETERS')}
+                'LECTIFY_RUNTIME_ENDPOINT')}
+            environment['PYTHONDONTWRITEBYTECODE'] = '1'
             controller = Controller('execution','node',[sys.executable,'-m','generated.main'],
                 environment,str(ROOT/'plugins/format/text_to_md'))
         def register(proxy, server):
@@ -103,7 +104,8 @@ async def main(controlled=False):
                     control = await lifecycle.enter_async_context(ControlClient(
                         '127.0.0.1:50055','execution','node','c'*48))
                     assert (await control.status()).state == 'READY'
-                    await lifecycle.enter_async_context(control.running('integration-start'))
+                    await lifecycle.enter_async_context(control.running('integration-start',
+                        parameters_json='{"title":"Integration"}'))
                 await operation()
             if controlled:
                 async with ControlClient('127.0.0.1:50055','execution','node','c'*48) as control:

@@ -34,7 +34,8 @@ class RuntimeStreamDispatcher:
                         agent = await lifecycle.enter_async_context(PluginControlClient(
                             control['endpoint'], execution_id, node['id'], control['token'],
                             tls=control.get('tls'), timeout=control.get('timeout',15)))
-                        await lifecycle.enter_async_context(agent.running(control['command_id']))
+                        arguments = {'parameters_json':control['parameters_json']} if 'parameters_json' in control else {}
+                        await lifecycle.enter_async_context(agent.running(control['command_id'],**arguments))
                     async with PluginRuntimeClient(assignment['endpoint'], execution_id, node['id'],
                             assignment['token'], tls=assignment.get('tls'),
                             timeout=assignment.get('timeout', 300)) as client:

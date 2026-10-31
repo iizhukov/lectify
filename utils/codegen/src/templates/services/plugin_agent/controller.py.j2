@@ -6,6 +6,7 @@ import re
 import grpc
 from generated.protos.plugins import index_pb2 as pb, index_pb2_grpc as rpc
 from generated.process_supervisor import stop_process_groups
+from generated.json_data import canonical_json_object
 
 
 async def _settle(task):
@@ -44,12 +45,14 @@ class PluginController(rpc.PluginControlServiceServicer):
         self._environment = dict(environment,EXECUTION_ID=execution_id,NODE_ID=node_id,PLUGIN_MODE='server')
         self._lock = asyncio.Lock()
         self._state, self._command_id = 'READY', None
+        self._parameters = None
         self._process = self._starting = self._stopping = self._monitor = None
 
     def _status(self):
         if self._process is not None and self._process.returncode is not None and self._state in ('STARTING','RUNNING'):
             self._state = 'EXITED'
-        return pb.ControlStatus(state=self._state,exit_code=(self._process.returncode or 0) if self._process else 0)
+        return pb.ControlStatus(state=self._state,exit_code=(self._process.returncode or 0) if self._process else 0,
+            supports_parameters=True)
 
     async def _spawn(self):
         try:
@@ -69,12 +72,22 @@ class PluginController(rpc.PluginControlServiceServicer):
         if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',request.command_id):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Invalid control command ID')
         async with self._lock:
-            if self._command_id is not None and self._command_id != request.command_id:
+            try:
+                raw = request.parameters_json if request.HasField('parameters_json') else self._environment.get('PLUGIN_PARAMETERS','{}')
+                parameters = canonical_json_object(raw)
+                candidate = dict(self._environment,PLUGIN_PARAMETERS=parameters)
+                if sum(len(key)+len(value.encode()) for key,value in candidate.items())>262144:
+                    raise ValueError()
+            except (ValueError,TypeError):
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Invalid runtime parameters')
+            if self._command_id is not None and (self._command_id != request.command_id or self._parameters != parameters):
                 await context.abort(grpc.StatusCode.ALREADY_EXISTS,'Assignment start is already bound to a command')
             if self._state in ('STOPPING','STOPPED','EXITED','FAILED'):
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION,'Assignment cannot be restarted')
             if self._starting is None:
                 self._command_id, self._state = request.command_id, 'STARTING'
+                self._parameters = parameters
+                self._environment['PLUGIN_PARAMETERS'] = parameters
                 self._starting = asyncio.create_task(self._spawn())
             starting = self._starting
         await _settle(starting)

@@ -2,10 +2,12 @@
 import math
 import re
 import asyncio
+import grpc
 from contextlib import asynccontextmanager
 
 from generated.protos.plugins import index_pb2 as pb, index_pb2_grpc as rpc
 from generated.transport import create_channel
+from generated.json_data import canonical_json_object
 
 
 class PluginControlClient:
@@ -20,6 +22,7 @@ class PluginControlClient:
         self._stub = rpc.PluginControlServiceStub(self._channel)
         self._metadata = (('authorization','Bearer '+token),('x-execution-id',execution_id),('x-node-id',node_id))
         self.timeout = timeout
+        self._parameters_supported = False
 
     async def close(self):
         await self._channel.close()
@@ -28,16 +31,31 @@ class PluginControlClient:
     async def __aexit__(self,*args): await self.close()
 
     @staticmethod
-    def _command(command_id):
+    def _command(command_id, parameters_json=None):
         if not isinstance(command_id,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',command_id):
             raise ValueError('Invalid control command ID')
-        return pb.ControlCommand(command_id=command_id)
+        if parameters_json is not None:
+            parameters_json = canonical_json_object(parameters_json)
+        command = pb.ControlCommand(command_id=command_id)
+        if parameters_json is not None:
+            command.parameters_json = parameters_json
+        return command
 
-    async def start(self, command_id):
-        result = await self._stub.Start(self._command(command_id),metadata=self._metadata,timeout=self.timeout)
+    async def start(self, command_id, *, parameters_json=None):
+        command = self._command(command_id,parameters_json)
+        if parameters_json is not None:
+            await self._check_parameters_support()
+        result = await self._stub.Start(command,metadata=self._metadata,timeout=self.timeout)
         if result.state != 'RUNNING':
             raise RuntimeError('Plugin runtime did not enter RUNNING state')
         return result
+
+    async def _check_parameters_support(self):
+        if not self._parameters_supported:
+            result = await self.status()
+            if getattr(result,'supports_parameters',False) is not True:
+                raise ValueError('Agent does not support runtime parameter transport')
+            self._parameters_supported = True
 
     async def stop(self, command_id):
         result = await self._stub.Stop(self._command(command_id),metadata=self._metadata,timeout=self.timeout)
@@ -52,19 +70,34 @@ class PluginControlClient:
         return result
 
     @asynccontextmanager
-    async def running(self, command_id):
+    async def running(self, command_id, *, parameters_json=None):
+        PluginControlClient._command(command_id,parameters_json)
+        if parameters_json is not None:
+            await self._check_parameters_support()
         # Stop even if Start's response is lost: the agent may already own a child.
+        cleanup = True
         try:
-            await self.start(command_id)
+            try:
+                if parameters_json is None:
+                    await self.start(command_id)
+                else:
+                    await self.start(command_id,parameters_json=parameters_json)
+            except grpc.aio.AioRpcError as error:
+                if error.code() in (grpc.StatusCode.INVALID_ARGUMENT,grpc.StatusCode.ALREADY_EXISTS,
+                        grpc.StatusCode.FAILED_PRECONDITION,grpc.StatusCode.UNAUTHENTICATED,
+                        grpc.StatusCode.PERMISSION_DENIED,grpc.StatusCode.UNIMPLEMENTED,grpc.StatusCode.NOT_FOUND):
+                    cleanup = False
+                raise
             yield self
         finally:
-            stopping = asyncio.create_task(self.stop(command_id))
-            cancelled = False
-            while not stopping.done():
-                try:
-                    await asyncio.shield(stopping)
-                except asyncio.CancelledError:
-                    cancelled = True
-            stopping.result()
-            if cancelled:
-                raise asyncio.CancelledError
+            if cleanup:
+                stopping = asyncio.create_task(self.stop(command_id))
+                cancelled = False
+                while not stopping.done():
+                    try:
+                        await asyncio.shield(stopping)
+                    except asyncio.CancelledError:
+                        cancelled = True
+                stopping.result()
+                if cancelled:
+                    raise asyncio.CancelledError

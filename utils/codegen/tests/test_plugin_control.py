@@ -15,7 +15,7 @@ import grpc
 from generated.plugin_agent.controller import PluginController
 from generated.plugin_agent.server import create_server, load_assignment
 from generated.plugin_control_client import PluginControlClient
-from generated.scoped_server import ServerConfig, run_scoped_server
+from generated.scoped_server import ServerConfig, run_scoped_server, create_scoped_server
 from generated.protos.plugins import index_pb2 as pb, index_pb2_grpc as rpc
 
 async def rejected(awaitable, code):
@@ -61,16 +61,48 @@ async def main():
             await rejected(wrong.status(),grpc.StatusCode.PERMISSION_DENIED)
         async with PluginControlClient(endpoint,'execution','node','c'*48) as client:
             assert (await client.status()).state == 'READY'
-            replies = await asyncio.gather(client.start('start-one'),client.start('start-one'))
+            parameters = {'text':'','caption':'Привет','nested':{'enabled':True,'count':1,'optional':None},'EXECUTION_ID':'spoof'}
+            raw = json.dumps(parameters,ensure_ascii=False,separators=(',',':'))
+            parameters['text'] = 'x'*(65536-len(raw.encode()))
+            raw = json.dumps(parameters,ensure_ascii=False,separators=(',',':'))
+            assert len(raw.encode()) == 65536
+            replies = await asyncio.gather(client.start('start-one',parameters_json=raw),
+                client.start('start-one',parameters_json=raw))
             assert all(reply.state == 'RUNNING' for reply in replies)
             async with asyncio.timeout(3):
                 while not Path('child.json').exists(): await asyncio.sleep(0.01)
             child_environment = json.loads(Path('child.json').read_text())
             assert child_environment['EXECUTION_ID'] == 'execution'
             assert child_environment['NODE_ID'] == 'node' and child_environment['PLUGIN_MODE'] == 'server'
+            assert json.loads(child_environment['PLUGIN_PARAMETERS']) == parameters
             assert 'AGENT_ONLY_SECRET' not in child_environment
             assert Path('spawns').read_text().splitlines() == [str(controller._process.pid)]
             await rejected(client.start('different-start'),grpc.StatusCode.ALREADY_EXISTS)
+            reordered = json.dumps(dict(reversed(tuple(parameters.items()))),ensure_ascii=False,separators=(',',':'))
+            assert (await client.start('start-one',parameters_json=reordered)).state == 'RUNNING'
+            await rejected(client.start('start-one',parameters_json='{"text":"changed"}'),grpc.StatusCode.ALREADY_EXISTS)
+            assert (await client.start('start-one')).state == 'RUNNING'
+            expansion = '{"v":['+','.join(['1e9']*8000)+']}'
+            for bad in ('{"x":1,"x":2}','{"x":NaN}','{"x":1e999}','[]','',raw+' ',expansion):
+                await rejected(client._stub.Start(pb.ControlCommand(command_id='invalid',parameters_json=bad),
+                    metadata=client._metadata,timeout=2),grpc.StatusCode.INVALID_ARGUMENT)
+            for invalid in ('[]',expansion):
+                try:
+                    async with client.running('start-one',parameters_json=invalid): pass
+                except ValueError: pass
+                else: raise AssertionError('Invalid parameters accepted by client')
+            async def conflict(command):
+                async with client.running(command,parameters_json='{}'):
+                    raise AssertionError('Conflicting Start accepted')
+            for command in ('different-start','start-one'):
+                await rejected(conflict(command),grpc.StatusCode.ALREADY_EXISTS)
+            assert (await client.status()).state == 'RUNNING'
+            try:
+                async with client.running('start-one'):
+                    raise RuntimeError('consumer failed')
+            except RuntimeError as error: assert str(error) == 'consumer failed'
+            else: raise AssertionError('Consumer error lost')
+            assert (await client.status()).state == 'STOPPED'
             for _ in range(2): assert (await client.stop('stop-one')).state == 'STOPPED'
             assert (await client.status()).state == 'STOPPED'
             await rejected(client.start('start-one'),grpc.StatusCode.FAILED_PRECONDITION)
@@ -164,6 +196,32 @@ async def delayed_runtime_listener():
         await asyncio.gather(task,return_exceptions=True)
         await server.stop(0)
 asyncio.run(delayed_runtime_listener())
+
+async def legacy_agent_requires_explicit_parameter_support():
+    calls = []
+    class Legacy(rpc.PluginControlServiceServicer):
+        assignment = ('execution','node')
+        async def Status(self, request, context): return pb.ControlStatus(state='READY')
+        async def Start(self, request, context):
+            calls.append('start')
+            return pb.ControlStatus(state='RUNNING')
+        async def Stop(self, request, context):
+            calls.append('stop')
+            return pb.ControlStatus(state='STOPPED')
+    config = ServerConfig('p'*48,'execution','node','127.0.0.1:0',control_token='c'*48)
+    server,port = create_scoped_server(rpc.add_PluginControlServiceServicer_to_server,Legacy(),config)
+    await server.start()
+    try:
+        async with PluginControlClient(f'127.0.0.1:{port}','execution','node','c'*48) as client:
+            try:
+                async with client.running('attempt',parameters_json='{}'): pass
+            except ValueError: pass
+            else: raise AssertionError('Legacy agent silently ignored parameters')
+            assert not calls
+            async with client.running('legacy'): pass
+            assert calls == ['start','stop']
+    finally: await server.stop(0)
+asyncio.run(legacy_agent_requires_explicit_parameter_support())
 '''
 
 

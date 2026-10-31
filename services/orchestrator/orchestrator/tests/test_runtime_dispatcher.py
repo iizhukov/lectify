@@ -79,7 +79,8 @@ async def test_agent_lifecycle_wraps_stream_and_assignment(monkeypatch):
     async def assignments(**scope):
         try:
             yield {'endpoint':'runtime','token':'runtime-token','outputs':[],
-                'control':{'endpoint':'agent','token':'control-token','command_id':'attempt-1'}}
+                'control':{'endpoint':'agent','token':'control-token','command_id':'attempt-1',
+                    'parameters_json':'{"value":true}'}}
         finally:
             events.append('assignment-cleanup')
     class Control:
@@ -88,8 +89,9 @@ async def test_agent_lifecycle_wraps_stream_and_assignment(monkeypatch):
         async def __aenter__(self): return self
         async def __aexit__(self,*args): events.append('control-close')
         @asynccontextmanager
-        async def running(self, command):
+        async def running(self, command, *, parameters_json):
             assert command == 'attempt-1'
+            assert parameters_json == '{"value":true}'
             events.append('start')
             try: yield self
             finally: events.append('stop')
