@@ -31,4 +31,4 @@ message ResetPasswordRequest { string token = 1; string new_password = 2; }
 message OperationResponse { bool accepted = 1; }
 
 message AuthenticateRequest { string access_token = 1; }
-message AuthenticateResponse { string user_id = 1; bool is_admin = 2; bool valid = 3; string username = 4; }
+message AuthenticateResponse { string user_id = 1; bool is_admin = 2; bool valid = 3; string username = 4; int64 access_expires_at = 5; }

@@ -10,6 +10,7 @@ from generated.stream_router import StreamChunkData
 
 class RuntimeStreamDispatcher:
     supports_streaming = True
+    requires_credentials = True
 
     def __init__(self, assignments):
         # An async context-manager factory owned by trusted deployment policy.

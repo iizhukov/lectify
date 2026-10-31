@@ -6,6 +6,8 @@ import secrets
 import subprocess
 import sys
 import uuid
+import time
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'services/orchestrator/orchestrator'))
@@ -24,8 +26,13 @@ async def verify_start_idempotency(factory):
     from generated.db.connection import set_session_factory
     from generated.protos.server import index_pb2 as pb
     from src.service import OrchestratorServiceImpl
+    from src.models import ExecutionCredentialModel
+    from src.engine.credentials import ExecutionCredentials
+    from generated.credential_cipher import CredentialCipher
+    from cryptography.fernet import Fernet
     class Context:
-        lectify_principal = SimpleNamespace(user_id='integration-user',is_admin=False)
+        lectify_principal = SimpleNamespace(user_id='integration-user',is_admin=False,access_expires_at=int(time.time())+900)
+        def invocation_metadata(self): return (('x-user-authorization','Bearer la_integration'),)
         async def abort(self, code, details):
             raise RuntimeError('Unexpected RPC rejection: '+code.name)
     class Runner:
@@ -36,7 +43,9 @@ async def verify_start_idempotency(factory):
             self.started.set()
             await asyncio.Event().wait()
     runner = Runner()
-    services = [OrchestratorServiceImpl(container_manager=runner) for _ in range(2)]
+    key = Fernet.generate_key()
+    stores = [ExecutionCredentials(CredentialCipher(key)) for _ in range(2)]
+    services = [OrchestratorServiceImpl(container_manager=runner,credential_store=store) for store in stores]
     request = pb.StartExecutionRequest(execution_id='integration-start',workflow_id='workflow',
         graph=pb.WorkflowGraph(nodes=[pb.WorkflowNode(id='node',plugin_id='plugin')]))
     set_session_factory(factory)
@@ -47,6 +56,13 @@ async def verify_start_idempotency(factory):
         assert responses[0].execution_id == responses[1].execution_id
         assert responses[0].started_at == responses[1].started_at
         assert runner.calls == 1
+        async with factory() as session:
+            saved = await session.get(ExecutionCredentialModel,request.execution_id)
+            assert saved is not None and b'la_integration' not in saved.ciphertext
+            dispatch = await session.get(Dispatch,request.execution_id)
+            assert await stores[1].load(session,execution_id=request.execution_id,owner_id='integration-user',
+                ownership=(dispatch.owner,dispatch.fence)) == 'la_integration'
+            await session.commit()
         class Admin(Context):
             lectify_principal = SimpleNamespace(user_id='integration-admin',is_admin=True)
         plugin = pb.RegisterPluginManifestRequest(plugin_id='integration_plugin',version='0.1.0',
@@ -71,6 +87,9 @@ async def verify_start_idempotency(factory):
         for service in services:
             await service.CancelExecution(pb.CancelExecutionRequest(execution_id=request.execution_id),Context())
             await asyncio.gather(*list(service._execution_tasks.values()),return_exceptions=True)
+        await services[0].dispatch_pending()
+        async with factory() as session:
+            assert await session.get(ExecutionCredentialModel,request.execution_id) is None
         set_session_factory(None)
 
 
@@ -95,6 +114,17 @@ async def verify(port, password):
                 await asyncio.sleep(0.2)
         async with engine.begin() as connection:
             await connection.run_sync(BaseModel.metadata.create_all)
+            from alembic.migration import MigrationContext
+            from alembic.operations import Operations
+            path = ROOT/'services/orchestrator/orchestrator/migrations/versions/0004_execution_credentials.py'
+            spec = importlib.util.spec_from_file_location('credential_migration',path)
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            def roundtrip(sync):
+                with Operations.context(MigrationContext.configure(sync)):
+                    migration.downgrade()
+                    migration.upgrade()
+            await connection.run_sync(roundtrip)
         async with factory() as session:
             session.add(Execution(id='integration', workflow_id='workflow', state='RUNNING'))
             await session.flush()

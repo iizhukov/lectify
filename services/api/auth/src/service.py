@@ -66,19 +66,19 @@ class AuthServiceImpl(AuthServiceBase):
         return pb.AuthResponse(principal=principal(user), access_token=access, refresh_token=refresh,
                                access_expires_at=row.access_expires_at, refresh_expires_at=row.refresh_expires_at)
 
-    async def _access_user(self, session, token, context):
+    async def _access_user(self, session, token, context, *, include_expiry=False):
         digest = token_hash(token)
         user = None
         if digest:
             user = (await session.execute(
-                select(User).join(Session, Session.user_id == User.id).where(
+                select(User,Session.access_expires_at).join(Session, Session.user_id == User.id).where(
                     Session.access_hash == digest, Session.access_expires_at > self.now(),
                     Session.security_version == User.security_version,
                 )
-            )).scalar_one_or_none()
+            )).one_or_none()
         if user is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Invalid or expired credentials')
-        return user
+        return (user[0],user[1]) if include_expiry else user[0]
 
     async def Register(self, request, context):
         username, email = request.username.strip().casefold(), request.email.strip().casefold()
@@ -118,9 +118,9 @@ class AuthServiceImpl(AuthServiceBase):
 
     async def Authenticate(self, request, context):
         async with self.factory()() as session:
-            user = await self._access_user(session, request.access_token, context)
+            user,expiry = await self._access_user(session, request.access_token, context,include_expiry=True)
             return pb.AuthenticateResponse(user_id=user.id, username=user.username,
-                                           is_admin=user.is_admin, valid=True)
+                                           is_admin=user.is_admin, valid=True,access_expires_at=expiry)
 
     async def Refresh(self, request, context):
         digest = token_hash(request.token)

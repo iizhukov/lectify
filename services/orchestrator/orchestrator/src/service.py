@@ -3,6 +3,7 @@ import time
 import uuid
 import re
 import json
+import os
 from contextlib import aclosing
 from typing import Any, AsyncIterator, Dict, List, Optional
 import grpc
@@ -31,6 +32,9 @@ from src.engine.stream_router import StreamRouter
 from src.engine.docker_runner import ContainerLifecycleManager
 from generated.stream_pipeline import run_streaming_graph
 from generated.plugin_manifest import parse_plugin_manifest
+from generated.credential_cipher import CredentialCipher
+from generated.user_auth.client import delegated_metadata
+from src.engine.credentials import ExecutionCredentials
 from src.flags import flags
 
 log = get_logger("orchestrator_service")
@@ -77,9 +81,13 @@ def _node_data(node):
 
 
 class OrchestratorServiceImpl(OrchestratorServiceBase):
-    def __init__(self, container_manager=None) -> None:
+    def __init__(self, container_manager=None, *, credential_store=None) -> None:
         self.worker_id = str(uuid.uuid4())
         self.container_manager = container_manager if container_manager is not None else ContainerLifecycleManager()
+        self.credentials = credential_store
+        key = os.environ.get('LECTIFY_EXECUTION_CREDENTIAL_KEY')
+        if self.credentials is None and key is not None:
+            self.credentials = ExecutionCredentials(CredentialCipher(key))
         self._active_routers: Dict[str, StreamRouter] = {}
         self._execution_tasks: Dict[str, asyncio.Task] = {}
         self._event_subscribers: Dict[str, List[asyncio.Queue]] = {}
@@ -144,6 +152,16 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
         graph_json = {"nodes": nodes_data, "edges": edges_data}
         initial_inputs = dict(request.initial_inputs)
+        credential = None
+        if getattr(self.container_manager,'requires_credentials',False) and self.credentials is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION,'Execution credential storage is not configured')
+        if self.credentials is not None:
+            try:
+                token = delegated_metadata(context)[0][1][7:]
+                credential = self.credentials.prepare(execution_id,user_id,token,
+                    getattr(context.lectify_principal,'access_expires_at',0))
+            except (PermissionError,ValueError):
+                await context.abort(grpc.StatusCode.UNAUTHENTICATED,'A live user credential is required for background execution')
         async def reuse(saved):
             if saved.user_id != user_id:
                 await context.abort(grpc.StatusCode.NOT_FOUND, 'Execution not found')
@@ -178,6 +196,8 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
                     raise
                 return await reuse(existing)
             session.add(WorkflowDispatchModel(execution_id=execution_id))
+            if credential is not None:
+                session.add(credential)
 
             for node in sorted_nodes:
                 node_model = WorkflowNodeExecutionModel(
@@ -215,6 +235,10 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
 
     async def dispatch_pending(self, limit=100):
         factory = get_session_factory()
+        if self.credentials is not None:
+            async def purge(session):
+                await self.credentials.purge(session)
+            await run_transaction(factory,purge)
         async with factory() as session:
             rows = await pending_executions(session, limit)
         scheduled = 0

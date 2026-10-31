@@ -54,7 +54,7 @@ async def assignment_policy(session, *, execution_id, node, ownership, placement
         parameters=node.get('parameters',{}),initial_inputs=execution.initial_inputs))
 
 
-def assignment_grants(factory, provision):
+def assignment_grants(factory, provision, *, credentials=None):
     @asynccontextmanager
     async def grants(*, placement, execution_id, node, ownership, initial_inputs):
         async with factory() as session:
@@ -62,6 +62,9 @@ def assignment_grants(factory, provision):
                 ownership=ownership,placement=placement)
             if not _same_data(policy['initial_inputs'],initial_inputs):
                 raise PermissionError('Assignment inputs differ from committed execution')
+            if credentials is not None:
+                policy['user_access_token'] = await credentials.load(session,execution_id=execution_id,
+                    owner_id=policy['owner_id'],ownership=ownership)
             await session.commit()
         async with provision(policy=policy,placement=dict(placement),ownership=ownership) as grant:
             yield grant

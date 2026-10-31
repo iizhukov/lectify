@@ -12,6 +12,7 @@ class VerifiedPrincipal:
     user_id: str
     is_admin: bool = False
     username: str = ''
+    access_expires_at: int = 0
 
 
 class _PrincipalContext:
@@ -45,7 +46,8 @@ class UserAuthServerInterceptor(grpc.aio.ServerInterceptor):
             await context.abort(grpc.StatusCode.UNAVAILABLE, 'User authentication unavailable')
         if not result.valid or not result.user_id or len(result.user_id) > 128:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Invalid user session')
-        principal = VerifiedPrincipal(result.user_id, result.is_admin, result.username)
+        principal = VerifiedPrincipal(result.user_id, result.is_admin, result.username,
+            getattr(result,'access_expires_at',0))
         return _PrincipalContext(context, principal)
 
     async def intercept_service(self, continuation, details):

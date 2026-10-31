@@ -88,6 +88,7 @@ async def main():
     assert login.principal.username == 'alice' and not login.principal.is_admin
     assert login.access_token != login.refresh_token
     verified = await second.Authenticate(pb.AuthenticateRequest(access_token=login.access_token), context)
+    assert verified.access_expires_at == login.access_expires_at
     assert verified.valid and verified.user_id == login.principal.user_id
     await reject(first.Authenticate(pb.AuthenticateRequest(access_token=login.refresh_token), context))
     await reject(first.Register(request, context), grpc.StatusCode.ALREADY_EXISTS)

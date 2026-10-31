@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     Index,
+    LargeBinary,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +43,14 @@ class WorkflowExecutionModel(BaseModel):
         back_populates="execution",
         cascade="all, delete-orphan",
     )
+
+
+class ExecutionCredentialModel(BaseModel):
+    __tablename__ = 'execution_credentials'
+    execution_id: Mapped[str] = mapped_column(ForeignKey('workflow_executions.id',ondelete='CASCADE'),primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64),nullable=False)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary,nullable=False)
+    expires_at: Mapped[int] = mapped_column(BigInteger,nullable=False)
 
 
 class WorkflowNodeExecutionModel(BaseModel):
