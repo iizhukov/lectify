@@ -50,13 +50,21 @@ from src.models import StoredFile
 
 
 class Body(io.BytesIO):
-    def __init__(self, data, reads):
+    def __init__(self, data, reads, storage):
         super().__init__(data)
         self.reads = reads
+        self.storage = storage
+        self.close_calls = 0
     def read(self, size=-1):
         assert 0 < size <= CHUNK_BYTES, 'unbounded object read'
         self.reads.append(size)
         return super().read(size)
+    def close(self):
+        self.close_calls += 1
+        if self.storage.block_close:
+            self.storage.close_started.set()
+            assert self.storage.close_release.wait(5)
+        super().close()
 
 
 class Storage:
@@ -71,6 +79,9 @@ class Storage:
         self.block_open = False
         self.open_started = threading.Event()
         self.open_release = threading.Event()
+        self.block_close = False
+        self.close_started = threading.Event()
+        self.close_release = threading.Event()
     def put_stream(self, key, body, content_type):
         data = []
         while True:
@@ -88,7 +99,7 @@ class Storage:
         if self.block_open:
             self.open_started.set()
             assert self.open_release.wait(5)
-        body = Body(self.objects[key], self.reads)
+        body = Body(self.objects[key], self.reads, self)
         self.bodies.append(body)
         return body
     def delete(self, key):
@@ -200,8 +211,43 @@ async def main():
         await stub.DeleteFile(pb.FileRequest(id=empty.id), metadata=alice)
         key = next(iter(store.objects))
         store.objects[key] = b'corrupt'
-        await denied(stub.Download(pb.FileRequest(id=file.id), metadata=alice), grpc.StatusCode.DATA_LOSS)
+        store.block_close = True
+        rejected_download = asyncio.create_task(denied(
+            stub.Download(pb.FileRequest(id=file.id), metadata=alice), grpc.StatusCode.DATA_LOSS))
+        try:
+            assert await asyncio.to_thread(store.close_started.wait,2)
+            try:
+                await asyncio.wait_for(asyncio.shield(rejected_download),0.05)
+            except asyncio.TimeoutError: pass
+            else: raise AssertionError('Terminal status preceded storage cleanup')
+        finally:
+            store.close_release.set()
+        await rejected_download
+        store.block_close = False
         assert store.bodies[-1].closed
+        store.close_started.clear()
+        store.close_release.clear()
+        store.block_close = True
+        class DirectService(FileServiceImpl):
+            async def _owner(self, context): return 'alice'
+        class Context:
+            async def abort(self,*args): raise AssertionError('Cancelled download sent terminal status')
+        direct = DirectService(factory,store)
+        async def consume():
+            async for _ in direct.Download(pb.FileRequest(id=file.id),Context()): pass
+        closing_download = asyncio.create_task(consume())
+        try:
+            assert await asyncio.to_thread(store.close_started.wait,2)
+            body = store.bodies[-1]
+            for _ in range(2):
+                closing_download.cancel()
+                await asyncio.sleep(0)
+                assert not closing_download.done()
+        finally: store.close_release.set()
+        result = await asyncio.gather(closing_download,return_exceptions=True)
+        assert isinstance(result[0],asyncio.CancelledError)
+        assert body.closed and body.close_calls == 1
+        store.block_close = False
         store.objects[key] = data
         # A slow incoming producer is bounded independently of a caller's deadline.
         old_timeout = service.max_upload_seconds

@@ -17,6 +17,21 @@ SPEC = dict(execution_id='execution', node_id='node', fence=1,
 
 
 @pytest.mark.asyncio
+async def test_explicit_worker_context_scopes_every_daemon_operation():
+    commands = []
+    async def runner(*args):
+        commands.append(args)
+        return 'daemon-worker' if args[2] == 'info' else 'b'*64
+    sandbox = sandbox_class()(runner=runner,context='cluster-worker-2')
+    assert await sandbox.daemon_identity() == 'daemon-worker'
+    async with sandbox.launched(**SPEC): pass
+    assert len(commands) == 4
+    assert all(args[:2] == ('--context','cluster-worker-2') for args in commands)
+    for context in ('--host','unix:///var/run/docker.sock','a b','',42):
+        with pytest.raises(ValueError): sandbox_class()(runner=runner,context=context)
+
+
+@pytest.mark.asyncio
 async def test_sandbox_limits_and_cleanup_on_worker_cancellation():
     commands = []
     async def runner(*args):

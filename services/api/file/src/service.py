@@ -184,6 +184,29 @@ class FileServiceImpl(FileServiceBase):
             row = await self._row(session, request.id, owner, context)
             metadata, key = self._message(row), row.object_key
         response = None
+        closing = None
+        async def close_response():
+            nonlocal response, closing
+            if closing is None and response is not None:
+                closing = asyncio.create_task(_io(response.close))
+                response = None
+            if closing is None:
+                return
+            cancelled = False
+            while not closing.done():
+                try:
+                    await asyncio.shield(closing)
+                except asyncio.CancelledError:
+                    cancelled = True
+            closing.result()
+            if cancelled:
+                raise asyncio.CancelledError
+
+        async def fail(code, message):
+            # Complete storage cleanup before publishing a terminal RPC status.
+            await close_response()
+            await context.abort(code, message)
+
         try:
             try:
                 response = await _open_object(self._objects().open, key)
@@ -195,21 +218,21 @@ class FileServiceImpl(FileServiceBase):
                 try:
                     data = await _io(response.read, CHUNK_BYTES)
                 except Exception:
-                    await context.abort(grpc.StatusCode.UNAVAILABLE, 'File storage unavailable')
+                    await fail(grpc.StatusCode.UNAVAILABLE, 'File storage unavailable')
                 if not data:
                     break
                 size += len(data)
                 if len(data) > CHUNK_BYTES or size > metadata.size_bytes:
-                    await context.abort(grpc.StatusCode.DATA_LOSS, 'Stored file exceeds metadata size')
+                    await fail(grpc.StatusCode.DATA_LOSS, 'Stored file exceeds metadata size')
                 digest.update(data)
                 yield pb.DownloadFrame(chunk=data, sequence=sequence)
                 sequence += 1
             if size != metadata.size_bytes or digest.hexdigest() != metadata.sha256:
-                await context.abort(grpc.StatusCode.DATA_LOSS, 'Stored file checksum mismatch')
+                await fail(grpc.StatusCode.DATA_LOSS, 'Stored file checksum mismatch')
+            await close_response()
             yield pb.DownloadFrame(chunk=b'', sequence=sequence, is_last=True)
         finally:
-            if response is not None:
-                await _io(response.close)
+            await close_response()
 
     async def DeleteFile(self, request, context):
         owner = await self._owner(context)

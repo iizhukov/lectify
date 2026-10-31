@@ -11,8 +11,8 @@ sys.path.insert(0, str(ROOT / 'services/orchestrator/orchestrator'))
 from generated.docker_sandbox import DockerSandbox
 
 
-def inspect_image():
-    raw = subprocess.check_output(['docker', 'image', 'inspect', 'python:3.12-slim',
+def inspect_image(context):
+    raw = subprocess.check_output(['docker', '--context',context,'image', 'inspect', 'python:3.12-slim',
         '--format', '{{json .RepoDigests}}'], text=True)
     digests = json.loads(raw)
     if not digests:
@@ -21,11 +21,12 @@ def inspect_image():
 
 
 async def main():
-    sandbox = DockerSandbox()
+    context = subprocess.check_output(['docker','context','show'],text=True).strip()
+    sandbox = DockerSandbox(context=context)
     assignment = dict(execution_id=uuid.uuid4().hex, node_id='integration', fence=1,
-        attempt_id=uuid.uuid4().hex, image=inspect_image(), environment={}, network='none')
+        attempt_id=uuid.uuid4().hex, image=inspect_image(context), environment={}, network='none')
     async with sandbox.launched(**assignment) as container_id:
-        raw = subprocess.check_output(['docker','inspect','--format',
+        raw = subprocess.check_output(['docker','--context',context,'inspect','--format',
             '{{json .HostConfig}}',container_id], text=True)
         config = json.loads(raw)
         assert config['ReadonlyRootfs'] and config['NetworkMode'] == 'none'

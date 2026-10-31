@@ -77,7 +77,7 @@ async def record_container(session, *, attempt_id, execution_id, owner, fence, c
 
 @asynccontextmanager
 async def launch_container(factory, sandbox, *, execution_id, node_id, owner, fence,
-                           role, image, environment, network='none'):
+                           role, image, environment, network='none', network_aliases=()):
     """Commit durable intent before Docker; persist its identity before start."""
     scope = dict(execution_id=execution_id, owner=owner, fence=fence)
     daemon_id = await sandbox.daemon_identity()
@@ -94,7 +94,8 @@ async def launch_container(factory, sandbox, *, execution_id, node_id, owner, fe
     cleaned = False
     try:
         async with sandbox.allocated(execution_id=execution_id, node_id=node_id, fence=fence,
-                attempt_id=attempt_id, role=role, image=image, environment=environment, network=network) as identity:
+                attempt_id=attempt_id, role=role, image=image, environment=environment,
+                network=network, network_aliases=network_aliases) as identity:
             container_id = identity
             async with factory() as session:
                 if not await record_container(session, **scope, attempt_id=attempt_id, container_id=identity):

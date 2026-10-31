@@ -17,8 +17,14 @@ class DockerSandbox:
     Command output is never included in errors because inspect/create may carry
     assignment credentials. The deployment selects the Docker context.
     """
-    def __init__(self, *, runner=None):
-        self._runner = runner or self._command
+    def __init__(self, *, runner=None, context=None):
+        if context is not None and (not isinstance(context,str)
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',context)):
+            raise ValueError('Invalid trusted Docker context')
+        command = runner or self._command
+        async def invoke(*args):
+            return await command(*((('--context',context) + args) if context is not None else args))
+        self._runner = invoke
 
     async def daemon_identity(self):
         identity = await self._runner('info', '--format', '{% raw %}{{.ID}}{% endraw %}')

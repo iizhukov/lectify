@@ -111,6 +111,7 @@ async def test_durable_intent_and_identity_are_committed_before_external_actions
                 row = await session.get(ContainerAttemptModel, assignment['attempt_id'])
                 assert row.state == 'CREATING' and row.container_id is None
             operations.append('create')
+            assert assignment['network_aliases'] == ('runtime-test',)
             try:
                 yield 'a'*64
             finally:
@@ -137,13 +138,13 @@ async def test_durable_intent_and_identity_are_committed_before_external_actions
         with pytest.raises(RuntimeError, match='lost before start'):
             async with launch_container(factory, Sandbox(), execution_id='ordered', node_id='node',
                     owner='worker', fence=fence, role='plugin', image='registry/plugin@sha256:'+'a'*64,
-                    environment={}):
+                    environment={},network='internal',network_aliases=('runtime-test',)):
                 pytest.fail('Cancelled container must not execute')
         assert operations == ['create','remove']
         return
     async with launch_container(factory, Sandbox(), execution_id='ordered', node_id='node',
             owner='worker', fence=fence, role='plugin', image='registry/plugin@sha256:'+'a'*64,
-            environment={}):
+            environment={},network='internal',network_aliases=('runtime-test',)):
         operations.append('execute')
     assert operations == ['create','start','execute','remove']
     async with factory() as session:

@@ -312,3 +312,13 @@ Audit нашёл timeout cleanup gap harness: docker CLI timeout не остан
 Real Docker experiment: cp в stopped read-only rootfs отклонён daemon, поэтому такой transport не подходит текущему sandbox. Agent loader поддерживает mutually-exclusive private FILE (до1MiB) или LECTIFY_AGENT_ASSIGNMENT_JSON (до32KiB); inline source удаляется из process env после чтения. Strict JSON отклоняет duplicate keys, nonfinite/overflow и non-object. Credentials в Docker env остаются доступны администраторам Docker daemon; это не secret isolation от одинакового UID. Runtime environment по-прежнему задаётся явно.
 
 Audit выявил существующий FILE FIFO startup hang до fstat. Добавлен O_NONBLOCK, реальный mkfifo без writer отклоняется сразу. Focused3 passed. Generated controlled image rebuilt, probe создал actual agent server и controller через src.create_agent из inline fake assignment без proxy injection, отдельные import roots verified, exit0. Сетевые backend calls и distributed assignment resolver этим gate не проверены.
+
+## Explicit Docker worker routing
+
+Generated DockerSandbox принимает trusted context name и добавляет --context ко всем daemon operations, включая identity/reconcile/remove; process-global context/env не меняются. Имена валидируются, arbitrary CLI flags/host URI не принимаются. Durable launch передаёт network_aliases, необходимые для certificate DNS endpoints. Existing attempt.daemon_id продолжает запрещать cleanup чужого daemon и смену daemon для того же attempt.
+
+Unit14 passed, real utils/integration/docker_sandbox.py explicit-current-context gate exit0: create/start/limits/removal/repeat reconciliation. Это проверка worker transport, не распределённый scheduler. Не подключены automatic worker placement, credentials issuance и production assignment resolver; existing default dispatcher остаётся fail-closed.
+
+Полный gate worker routing сначала выявил flaky api_file checksum assertion: DATA_LOSS публиковался до завершения finally close. Download теперь закрывает storage response до terminal EOF/error. Audit нашёл double-close при отмене pre-terminal cleanup; заменено once-only closing task с detach до await и shielded settle repeatedcancel. Regression блокирует close и проверяет отсутствие terminalstatus; direct service/DB generator отменяется дважды, cleanup ждёт release, close_calls==1. Focused file passed.
+
+После исправления File Download полный runner17/17 passed: codegen213, orchestrator90. Независимый audit подтвердил once-only close и explicit Docker context routing.
