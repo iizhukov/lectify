@@ -13,7 +13,7 @@ import asyncio, json, os, signal, sys
 from pathlib import Path
 import grpc
 from generated.plugin_agent.controller import PluginController
-from generated.plugin_agent.server import create_server
+from generated.plugin_agent.server import create_server, load_assignment
 from generated.plugin_control_client import PluginControlClient
 from generated.scoped_server import ServerConfig, run_scoped_server
 from generated.protos.plugins import index_pb2 as pb, index_pb2_grpc as rpc
@@ -24,6 +24,22 @@ async def rejected(awaitable, code):
     else: raise AssertionError('Unauthorized control operation accepted')
 
 async def main():
+    os.environ.pop('LECTIFY_AGENT_ASSIGNMENT_FILE',None)
+    os.environ['LECTIFY_AGENT_ASSIGNMENT_JSON'] = '{"execution_id":"execution","node_id":"node"}'
+    assert load_assignment() == {'execution_id':'execution','node_id':'node'}
+    assert 'LECTIFY_AGENT_ASSIGNMENT_JSON' not in os.environ
+    for raw in ('{"x":1,"x":2}', '{"x":NaN}', '{"x":1e999}', '[]', ' '*32769):
+        os.environ['LECTIFY_AGENT_ASSIGNMENT_JSON'] = raw
+        try: load_assignment()
+        except ValueError: pass
+        else: raise AssertionError('Invalid assignment accepted')
+    os.mkfifo('assignment.fifo',0o600)
+    os.environ['LECTIFY_AGENT_ASSIGNMENT_FILE'] = str(Path('assignment.fifo').resolve())
+    try:
+        try: load_assignment()
+        except ValueError: pass
+        else: raise AssertionError('FIFO assignment accepted')
+    finally: os.environ.pop('LECTIFY_AGENT_ASSIGNMENT_FILE')
     os.environ['AGENT_ONLY_SECRET'] = 'not-in-child'
     child = ('import os,time,json;from pathlib import Path;'
         'Path("spawns").open("a").write(str(os.getpid())+"\\n");'

@@ -31,12 +31,32 @@ def main():
                 '--iidfile',str(root/'image.id'),str(runtime)],check=True,timeout=600)
             image = (root/'image.id').read_text().strip()
             # Explicit child env matches the controller: no agent PYTHONPATH.
-            check = '''import os, subprocess, sys
+            check = '''import asyncio, json, os, subprocess, sys
 assert os.getuid() == 1000
 from generated.plugin_agent.server import create_server
 from generated.plugin_agent.controller import PluginController
 from src.service import create_agent
 assert __import__('generated').__path__[0] == '/agent/generated'
+async def assignment_bootstrap():
+    os.environ.update(EXECUTION_ID='execution',NODE_ID='node',
+        LECTIFY_AGENT_TOKEN='a'*48,LECTIFY_AGENT_CONTROL_TOKEN='c'*48,
+        LECTIFY_AGENT_ENDPOINT='127.0.0.1:0',
+        LECTIFY_AGENT_ASSIGNMENT_JSON=json.dumps({
+            'execution_id':'execution','node_id':'node','owner_id':'owner',
+            'manifest':{'plugin':{'name':'text_to_md'}},
+            'user_access_token':'test-credential','lease_owner':'worker',
+            'fence':1,'report_token':'test-report',
+            'runtime_command':[sys.executable,'-m','generated.main'],
+            'runtime_cwd':'/runtime','runtime_environment':{}}))
+    controllers = []
+    server, port = create_server(_controllers=controllers)
+    try:
+        assert port and len(controllers) == 1
+        assert 'LECTIFY_AGENT_ASSIGNMENT_JSON' not in os.environ
+    finally:
+        for controller in controllers: await controller.close()
+        await server.stop(0)
+asyncio.run(assignment_bootstrap())
 subprocess.run([sys.executable, '-c',
     "from generated.server import create_server; from src.plugin import PluginHandler; "
     "assert __import__('generated').__path__[0] == '/runtime/generated'"],
