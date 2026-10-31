@@ -16,6 +16,7 @@ class PluginAgentGenerator(BaseGenerator):
             self.write('plugin_runtime_client.py', self.render('services/plugin_runtime_client.py.j2'))
             self.write('plugin_control_client.py', self.render('services/plugin_control_client.py.j2'))
             self.write('docker_sandbox.py', self.render('services/docker_sandbox.py.j2'))
+            self.write('docker_workers.py', self.render('services/docker_workers.py.j2'))
             for module in ('stream_dag', 'stream_router', 'stream_pipeline'):
                 self.write(module + '.py', self.render('services/' + module + '.py.j2'))
         if not self.svc.plugin_agent.enabled:

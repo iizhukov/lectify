@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from generated.db.base import BaseModel
 from src.models import WorkflowExecutionModel as Execution, WorkflowDispatchModel as Dispatch, WorkflowNodeExecutionModel as Node
 from src.engine.dispatch import claim, renew, guard_execution_write
-from src.engine.launch import prepare_launch, begin_launch
+from src.engine.launch import prepare_worker_launch, begin_launch
+from generated.docker_workers import DockerWorkers
 
 
 async def verify_start_idempotency(factory):
@@ -93,11 +94,19 @@ async def verify(port, password):
         assert len(winners) == 1, results
         owner, fence = winners[0]
         assert fence == 1
-        async with factory() as session:
-            attempt_id = await prepare_launch(session, execution_id='integration', node_id='node',
-                owner=owner, fence=fence, role='plugin', image='registry/plugin@sha256:'+'a'*64,
-                daemon_id='integration-daemon')
-            await session.commit()
+        workers = {'integration-daemon-a':object(),'integration-daemon-b':object()}
+        async def place(index):
+            inventory = workers if index % 2 else dict(reversed(tuple(workers.items())))
+            async with factory() as session:
+                result = await prepare_worker_launch(session,DockerWorkers(inventory),
+                    execution_id='integration',node_id='node',owner=owner,fence=fence,
+                    role='plugin',image='registry/plugin@sha256:'+'a'*64)
+                await session.commit()
+                return result[:2]
+        placements = await asyncio.wait_for(asyncio.gather(*(place(i) for i in range(12))),15)
+        assert len(set(placements)) == 1, placements
+        attempt_id, assigned_daemon = placements[0]
+        assert assigned_daemon in workers
         async def compete_launch():
             async with factory() as session:
                 won = await begin_launch(session, attempt_id=attempt_id, execution_id='integration',

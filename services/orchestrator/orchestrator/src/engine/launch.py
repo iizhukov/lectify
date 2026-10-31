@@ -9,6 +9,38 @@ from src.engine.dispatch import guard_execution_write
 from src.models import ContainerAttemptModel, WorkflowNodeExecutionModel, WorkflowExecutionModel, WorkflowDispatchModel
 
 
+async def prepare_worker_launch(session, workers, *, execution_id, node_id, owner, fence, role, image, now=None):
+    """Choose and persist placement under the same execution lease lock."""
+    if not await guard_execution_write(session, execution_id, (owner,fence), now):
+        raise RuntimeError('Worker placement lease is not active')
+    existing = await session.scalar(select(ContainerAttemptModel).where(
+        ContainerAttemptModel.execution_id == execution_id,
+        ContainerAttemptModel.node_id == node_id,
+        ContainerAttemptModel.fence == fence, ContainerAttemptModel.role == role))
+    daemon_id, sandbox = workers.choose(execution_id,node_id,role,
+        daemon_id=existing.daemon_id if existing is not None else None)
+    attempt_id = await prepare_launch(session, execution_id=execution_id,node_id=node_id,
+        owner=owner,fence=fence,role=role,image=image,daemon_id=daemon_id,now=now)
+    if attempt_id is None:
+        raise RuntimeError('Worker placement node is not active')
+    return attempt_id, daemon_id, sandbox
+
+
+@asynccontextmanager
+async def launch_on_worker(factory, workers, *, execution_id, node_id, owner, fence, role, image,
+                           environment, network='none', network_aliases=()):
+    async with factory() as session:
+        _, daemon_id, sandbox = await prepare_worker_launch(session,workers,
+            execution_id=execution_id,node_id=node_id,owner=owner,fence=fence,role=role,image=image)
+        await session.commit()
+    if await sandbox.daemon_identity() != daemon_id:
+        raise RuntimeError('Docker worker context does not match assigned daemon')
+    async with launch_container(factory,sandbox,execution_id=execution_id,node_id=node_id,
+            owner=owner,fence=fence,role=role,image=image,environment=environment,
+            network=network,network_aliases=network_aliases) as identity:
+        yield identity
+
+
 async def prepare_launch(session, *, execution_id, node_id, owner, fence, role, image, daemon_id, now=None):
     if not isinstance(daemon_id, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,256}', daemon_id):
         raise ValueError('Invalid Docker daemon identity')

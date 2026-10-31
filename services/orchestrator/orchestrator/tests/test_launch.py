@@ -7,6 +7,33 @@ from src.models import ContainerAttemptModel, WorkflowDispatchModel, WorkflowExe
 
 
 @pytest.mark.asyncio
+async def test_worker_placement_survives_inventory_change_and_refuses_silent_migration(test_session):
+    from generated.docker_workers import DockerWorkers
+    from src.engine.launch import prepare_worker_launch
+    test_session.add(WorkflowExecutionModel(id='placement',workflow_id='workflow',state='RUNNING'))
+    await test_session.flush()
+    test_session.add_all([WorkflowDispatchModel(execution_id='placement'),
+        WorkflowNodeExecutionModel(execution_id='placement',node_id='node',plugin_id='plugin')])
+    await test_session.commit()
+    fence = await claim(test_session,'placement','owner')
+    await test_session.commit()
+    sandboxes = {'daemon-a':object(),'daemon-b':object()}
+    scope = dict(execution_id='placement',node_id='node',owner='owner',fence=fence,
+        role='plugin',image='sha256:'+'a'*64)
+    first = await prepare_worker_launch(test_session,DockerWorkers(sandboxes),**scope)
+    await test_session.commit()
+    expanded = DockerWorkers({**sandboxes,'daemon-c':object()})
+    assert await prepare_worker_launch(test_session,expanded,**scope) == first
+    await test_session.commit()
+    missing = DockerWorkers({key:value for key,value in sandboxes.items() if key != first[1]})
+    with pytest.raises(RuntimeError,match='unavailable'):
+        await prepare_worker_launch(test_session,missing,**scope)
+    await test_session.rollback()
+    row = await test_session.get(ContainerAttemptModel,first[0])
+    assert row.daemon_id == first[1] and row.state == 'PREPARED'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('daemon_failure', [False, True])
 async def test_cleanup_preserves_current_assignment_and_retries_daemon_errors(test_session, daemon_failure):
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -92,7 +119,8 @@ async def test_launch_intent_survives_retry_and_rejects_stale_owner(test_session
 async def test_durable_intent_and_identity_are_committed_before_external_actions(test_session, monkeypatch, cancel_before_start):
     from contextlib import asynccontextmanager
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from src.engine.launch import launch_container
+    from src.engine.launch import launch_container, launch_on_worker
+    from generated.docker_workers import DockerWorkers
     test_session.add(WorkflowExecutionModel(id='ordered', workflow_id='workflow', state='RUNNING'))
     await test_session.flush()
     test_session.add_all([WorkflowDispatchModel(execution_id='ordered'),
@@ -142,7 +170,7 @@ async def test_durable_intent_and_identity_are_committed_before_external_actions
                 pytest.fail('Cancelled container must not execute')
         assert operations == ['create','remove']
         return
-    async with launch_container(factory, Sandbox(), execution_id='ordered', node_id='node',
+    async with launch_on_worker(factory, DockerWorkers({'daemon-a':Sandbox()}), execution_id='ordered', node_id='node',
             owner='worker', fence=fence, role='plugin', image='registry/plugin@sha256:'+'a'*64,
             environment={},network='internal',network_aliases=('runtime-test',)):
         operations.append('execute')
