@@ -140,6 +140,9 @@ async def test_durable_intent_and_identity_are_committed_before_external_actions
                 assert row.state == 'CREATING' and row.container_id is None
             operations.append('create')
             assert assignment['network_aliases'] == ('runtime-test',)
+            assert assignment['image'] == 'registry/plugin@sha256:'+'a'*64
+            if not cancel_before_start:
+                assert assignment['environment'] == {'EXECUTION_ID':'ordered','NODE_ID':'node'}
             try:
                 yield 'a'*64
             finally:
@@ -170,11 +173,25 @@ async def test_durable_intent_and_identity_are_committed_before_external_actions
                 pytest.fail('Cancelled container must not execute')
         assert operations == ['create','remove']
         return
-    async with launch_on_worker(factory, DockerWorkers({'daemon-a':Sandbox()}), execution_id='ordered', node_id='node',
-            owner='worker', fence=fence, role='plugin', image='registry/plugin@sha256:'+'a'*64,
-            environment={},network='internal',network_aliases=('runtime-test',)):
+    from src.engine.assignments import runtime_assignments
+    @asynccontextmanager
+    async def grants(**fields):
+        async with factory() as session:
+            row = await session.get(ContainerAttemptModel,fields['placement']['attempt_id'])
+            assert row.state == 'PREPARED' and row.daemon_id == 'daemon-a'
+        try:
+            yield {'environment':{'EXECUTION_ID':'spoof','NODE_ID':'spoof'},
+                'network':'internal','network_aliases':('runtime-test',),
+                'runtime':{'endpoint':'runtime','token':'runtime-token','outputs':[],
+                    'control':{'endpoint':'agent','token':'control-token','command_id':'spoof'}}}
+        finally: operations.append('grants-cleanup')
+    assignments = runtime_assignments(factory,DockerWorkers({'daemon-a':Sandbox()}),
+        {('plugin','0.1.0'):'registry/plugin@sha256:'+'a'*64},grants)
+    async with assignments(execution_id='ordered',node={'id':'node','plugin_id':'plugin',
+            'parameters':{'image':'untrusted:latest'}},ownership=('worker',fence),initial_inputs={}) as runtime:
+        assert len(runtime['control']['command_id']) == 32
         operations.append('execute')
-    assert operations == ['create','start','execute','remove']
+    assert operations == ['create','start','execute','remove','grants-cleanup']
     async with factory() as session:
         assert await session.scalar(select(ContainerAttemptModel.state).where(
             ContainerAttemptModel.execution_id == 'ordered')) == 'CLEANED'
