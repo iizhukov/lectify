@@ -99,7 +99,7 @@ class PluginConfig(BaseModel):
     name: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     version: str = "0.1.0"
     description: str = ""
-    category: str = "general"
+    category: str = Field(default="general",max_length=64)
     language: Literal["python", "go", "rust", "nodejs"] = "python"
     active: bool = True
 
@@ -107,6 +107,17 @@ class PluginConfig(BaseModel):
     outputs: list[PluginOutputConfig] = Field(default_factory=list)
     parameters: list[PluginParameterConfig] = Field(default_factory=list)
     permissions: PluginPermissionsConfig = Field(default_factory=PluginPermissionsConfig)
+
+    @field_validator('category','description')
+    @classmethod
+    def validate_registry_text(cls,value):
+        if '\x00' in value:
+            raise ValueError('Registry text cannot contain NUL')
+        try:
+            value.encode('utf-8')
+        except UnicodeError:
+            raise ValueError('Registry text must be valid UTF-8') from None
+        return value
 
     @model_validator(mode="after")
     def validate_names(self):

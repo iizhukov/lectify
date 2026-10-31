@@ -1,5 +1,6 @@
 """Real PostgreSQL lease checks in a disposable, locally bound Docker container."""
 import asyncio
+import json
 from pathlib import Path
 import secrets
 import subprocess
@@ -46,6 +47,26 @@ async def verify_start_idempotency(factory):
         assert responses[0].execution_id == responses[1].execution_id
         assert responses[0].started_at == responses[1].started_at
         assert runner.calls == 1
+        class Admin(Context):
+            lectify_principal = SimpleNamespace(user_id='integration-admin',is_admin=True)
+        plugin = pb.RegisterPluginManifestRequest(plugin_id='integration_plugin',version='0.1.0',
+            manifest_yaml='plugin: {name: integration_plugin, version: "0.1.0"}')
+        registrations = await asyncio.wait_for(asyncio.gather(*(
+            services[index % 2].RegisterPluginManifest(plugin,Admin()) for index in range(12))),15)
+        assert all(result.success for result in registrations)
+        async with factory() as session:
+            assert await session.scalar(text("SELECT count(*) FROM plugin_registry WHERE id='integration_plugin'")) == 1
+        class InvalidManifest(Exception): pass
+        class RejectInvalid(Admin):
+            async def abort(self,code,details):
+                assert code.name == 'INVALID_ARGUMENT',code
+                raise InvalidManifest()
+        for metadata in ({'category':'x'*65},{'description':'bad\x00text'},{'description':'bad\ud800text'}):
+            invalid = pb.RegisterPluginManifestRequest(plugin_id='invalid_plugin',version='0.1.0',
+                manifest_yaml=json.dumps({'plugin':{'name':'invalid_plugin','version':'0.1.0',**metadata}}))
+            try: await services[0].RegisterPluginManifest(invalid,RejectInvalid())
+            except InvalidManifest: pass
+            else: raise AssertionError('Invalid registry metadata reached PostgreSQL')
     finally:
         for service in services:
             await service.CancelExecution(pb.CancelExecutionRequest(execution_id=request.execution_id),Context())

@@ -1,4 +1,6 @@
 from config.plugin_models import PluginConfig, PluginManifest
+from config import plugin_models
+from pathlib import Path
 from generators.plugins.protos import ProtosGenerator
 from generators.services.base import BaseGenerator
 
@@ -18,6 +20,8 @@ class PluginAgentGenerator(BaseGenerator):
             self.write('docker_sandbox.py', self.render('services/docker_sandbox.py.j2'))
             self.write('docker_workers.py', self.render('services/docker_workers.py.j2'))
             self.write('container_assignments.py', self.render('services/container_assignments.py.j2'))
+            self.write('plugin_manifest_models.py', Path(plugin_models.__file__).read_text())
+            self.write('plugin_manifest.py', self.render('services/plugin_manifest.py.j2'))
             for module in ('stream_dag', 'stream_router', 'stream_pipeline'):
                 self.write(module + '.py', self.render('services/' + module + '.py.j2'))
         if not self.svc.plugin_agent.enabled:

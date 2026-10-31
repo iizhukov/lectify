@@ -33,6 +33,8 @@ def _base_requirements(svc) -> list[str]:
         ]
     if svc.http.enabled:
         deps.append("httpx>=0.27.0")
+    if svc.plugin_runtime_client.enabled:
+        deps.append('PyYAML>=6.0.2')
     if svc.minio.enabled:
         deps.append("minio>=7.2.0")
         deps.append("boto3>=1.34.0")

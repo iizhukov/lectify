@@ -30,6 +30,7 @@ from src.engine.dag import WorkflowDAG, DAGValidationError
 from src.engine.stream_router import StreamRouter
 from src.engine.docker_runner import ContainerLifecycleManager
 from generated.stream_pipeline import run_streaming_graph
+from generated.plugin_manifest import parse_plugin_manifest
 from src.flags import flags
 
 log = get_logger("orchestrator_service")
@@ -630,16 +631,46 @@ class OrchestratorServiceImpl(OrchestratorServiceBase):
         _, admin = await self._principal(context)
         if not admin:
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, 'Plugin registration requires administrator access')
+        try:
+            if (not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',request.plugin_id)
+                    or not re.fullmatch(r'[A-Za-z0-9_.+-]{1,32}',request.version)):
+                raise ValueError()
+            manifest, canonical = parse_plugin_manifest(request.manifest_yaml)
+            plugin = manifest['plugin']
+            if plugin['name'] != request.plugin_id or plugin['version'] != request.version:
+                raise ValueError()
+        except ValueError:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Invalid plugin manifest or version identity')
         session_factory = get_session_factory()
-        async with session_factory() as session:
+        async def persist(session):
+            async def verify(existing):
+                try:
+                    _, saved = parse_plugin_manifest(existing.manifest_yaml)
+                except ValueError:
+                    saved = None
+                if saved != canonical:
+                    await context.abort(grpc.StatusCode.ALREADY_EXISTS,'Plugin version is immutable')
+            existing = await session.get(PluginRegistryModel,(request.plugin_id,request.version))
+            if existing is not None:
+                await verify(existing)
+                return
             model = PluginRegistryModel(
                 id=request.plugin_id,
                 version=request.version,
                 name=request.plugin_id,
-                manifest_yaml=request.manifest_yaml,
+                manifest_yaml=canonical,category=plugin['category'],description=plugin['description'],
+                active=plugin['active'],
             )
-            await session.merge(model)
-            await session.commit()
+            session.add(model)
+            try:
+                await session.flush()
+            except IntegrityError:
+                await session.rollback()
+                existing = await session.get(PluginRegistryModel,(request.plugin_id,request.version))
+                if existing is None:
+                    raise
+                await verify(existing)
+        await run_transaction(session_factory,persist)
 
         return pb.RegisterPluginManifestResponse(
             success=True,
