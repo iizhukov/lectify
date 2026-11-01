@@ -6,6 +6,9 @@ service:
   ticket_auth:
     enabled: true
     tas_service: infra_tas
+  grpc_client:
+    enabled: true
+    services: [api_auth, api_file, api_prompt, plugins_provider, orchestrator]
   plugin_agent:
     enabled: true
   vault:

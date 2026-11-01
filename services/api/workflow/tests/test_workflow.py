@@ -173,7 +173,7 @@ def generated_service(tmp_path):
     auth = project/'services/api/auth'
     auth.mkdir(parents=True)
     shutil.copy(ROOT/'services/api/auth/service.yaml',auth/'service.yaml')
-    environment = dict(os.environ,LECTIFY_ROOT=str(project),PYTHONPATH=str(service))
+    environment = dict(os.environ,CODEGEN_ROOT=str(project),PYTHONPATH=str(service))
     result = subprocess.run([sys.executable,'-c',GENERATE,str(ROOT/'utils/codegen/src')],
         cwd=service,env=environment,text=True,capture_output=True,timeout=30)
     assert result.returncode==0,result.stdout+result.stderr

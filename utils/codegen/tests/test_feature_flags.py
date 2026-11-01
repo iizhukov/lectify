@@ -25,7 +25,7 @@ def generated_flags(tmp_path_factory):
     root = tmp_path_factory.mktemp("feature_flags_service")
     output = root / "generated"
     manifest = ServiceManifest.model_validate({
-        "service": {"name": "example_server", "config": {"enabled": True}},
+        "service": {"name": "example_server", "config": {"config_service": "infra_config", "enabled": True}},
     })
     previous_modules = _generated_modules()
     try:

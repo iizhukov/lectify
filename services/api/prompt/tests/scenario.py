@@ -5,7 +5,7 @@ import shutil
 import sys
 from types import SimpleNamespace
 
-root = Path(os.environ['LECTIFY_ROOT'])
+root = Path(os.environ['CODEGEN_ROOT'])
 source = Path(os.environ['PROMPT_SOURCE'])
 workspace = Path(sys.argv[1])
 sys.path.insert(0, str(root / 'utils/codegen/src'))

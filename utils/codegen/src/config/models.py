@@ -97,6 +97,7 @@ class ObservabilityConfig(BaseModel):
 
 class ConfigConfig(BaseModel):
     enabled: bool = False
+    config_service: str = ""
     update_interval_seconds: int = Field(default=30, ge=1)
 
 
@@ -112,7 +113,7 @@ class SchedulerConfig(BaseModel):
 
 class TicketAuthConfig(BaseModel):
     enabled: bool = False
-    tas_service: str = "infra_tas"
+    tas_service: str = ""
     ticket_ttl: int = 60
 
 
@@ -126,7 +127,7 @@ class HttpConfig(BaseModel):
 
 class UserAuthConfig(BaseModel):
     enabled: bool = False
-    auth_service: str = Field(default="api_auth", pattern=r"^[a-z][a-z0-9_]*$")
+    auth_service: str = Field(default="", pattern=r"^[a-z][a-z0-9_]*$")
     timeout_seconds: float = Field(default=5.0, gt=0, le=30, allow_inf_nan=False)
 
 

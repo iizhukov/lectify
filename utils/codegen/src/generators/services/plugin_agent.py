@@ -31,6 +31,5 @@ class PluginAgentGenerator(BaseGenerator):
         self.write('scoped_server.py', self.render('plugins/scoped_server.py.j2'))
         self.write('plugin_agent/__init__.py', '')
         self.write('plugin_agent/proxy.py', self.render('services/plugin_agent/proxy.py.j2'))
-        self.write('plugin_agent/backends.py', self.render('services/plugin_agent/backends.py.j2'))
         self.write('plugin_agent/server.py', self.render('services/plugin_agent/server.py.j2'))
         self.write('plugin_agent/controller.py', self.render('services/plugin_agent/controller.py.j2'))

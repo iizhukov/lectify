@@ -32,7 +32,7 @@ Vault delivery and deploying the full service chain are separate deployment work
 `utils/codegen/tests/test_service_tls.py` creates temporary test certificates and
 checks a real generated client/server exchange, client-certificate enforcement,
 hostname rejection, refusal of remote plaintext, and shutdown cancellation.
-`utils/integration/service_tls_docker.py` tests two containers on a disposable
+`tests/integration/service_tls_docker.py` tests two containers on a disposable
 internal network: the matching `api_auth` SAN succeeds while another alias to
 the same server is rejected. Its certificates are temporary test credentials;
 the test is not certificate provisioning for the application deployment.

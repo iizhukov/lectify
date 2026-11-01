@@ -88,7 +88,7 @@ def test_user_auth_tas_deadline_and_channel_cleanup(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(base, 'get_context_manager', lambda: SimpleNamespace(
         get_service_context=lambda name: ServiceContext()))
     manifest = ServiceManifest.model_validate({'service': {'name': 'tas_protected',
-        'ticket_auth': {'enabled': True}, 'user_auth': {'enabled': True, 'timeout_seconds': 0.1}}})
+        'ticket_auth': {'tas_service': 'infra_tas', 'enabled': True}, 'user_auth': {'auth_service': 'api_auth', 'enabled': True, 'timeout_seconds': 0.1}}})
     (tmp_path / "service.yaml").write_text(manifest.model_dump_json())
     (tmp_path / "src").mkdir()
     (tmp_path / "src/__init__.py").touch()

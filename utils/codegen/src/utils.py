@@ -19,10 +19,10 @@ class PluginManifestError(Exception):
 
 
 def get_repo_root() -> Path:
-    root_env = os.environ.get("LECTIFY_ROOT")
+    root_env = os.environ.get("CODEGEN_ROOT") or os.environ.get("LECTIFY_ROOT")
 
     if not root_env:
-        raise ValueError("LECTIFY_ROOT environment variable not set")
+        raise ValueError("CODEGEN_ROOT environment variable not set")
 
     return Path(root_env)
 

@@ -65,7 +65,7 @@ class TestServiceManifest:
                 "vault": {"enabled": True, "vars": ["DB_PASSWORD", "SECRET_KEY"]},
                 "scheduler": {"enabled": True, "storage": "memory"},
                 "ticket_auth": {"enabled": True, "tas_service": "infra_tas", "ticket_ttl": 120},
-                "config": {"enabled": True, "update_interval_seconds": 15},
+                "config": {"config_service": "infra_config", "enabled": True, "update_interval_seconds": 15},
                 "logging": {
                     "file": {"level": "DEBUG", "path": "logs/test.log", "max_bytes": 5000000, "backup_count": 3},
                     "loki": {"enabled": True, "level": "INFO", "batch_size": 50, "flush_interval": 2},
@@ -191,7 +191,7 @@ class TestComponentConfigs:
     def test_ticket_auth_defaults(self):
         cfg = TicketAuthConfig()
         assert cfg.enabled is False
-        assert cfg.tas_service == "infra_tas"
+        assert cfg.tas_service == ""
         assert cfg.ticket_ttl == 60
 
     def test_postgres_pool_mode(self):

@@ -6,7 +6,7 @@ from config.models import ServiceManifest
 @pytest.mark.parametrize('manifest', [
     {'service': {'name': 'protected', 'user_aut': {'enabled': True}}},
     {'service': {'name': 'protected', 'ticket_ath': {'enabled': True}}},
-    {'service': {'name': 'protected'}, 'user_auth': {'enabled': True}},
+    {'service': {'name': 'protected'}, 'user_auth': {'auth_service': 'api_auth', 'enabled': True}},
 ])
 def test_misplaced_or_misspelled_security_settings_are_not_silently_ignored(manifest):
     with pytest.raises(ValidationError, match='Extra inputs are not permitted'):

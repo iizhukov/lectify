@@ -84,4 +84,5 @@ service:
 
   # Config service specific
   config:
+    config_service: infra_config
     enabled: false

@@ -40,8 +40,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix='lectify-plugin-smoke-') as directory:
         context = Path(directory)
         files = [
-            'utils/integration/plugin_stream.py',
-            'utils/integration/plugin_processes.py',
+            'tests/integration/plugin_stream.py',
+            'tests/integration/plugin_processes.py',
             'services/orchestrator/agent/src/policy.py',
             'services/orchestrator/agent/generated/plugin_agent/proxy.py',
             'services/orchestrator/agent/generated/plugin_agent/controller.py',
@@ -62,7 +62,7 @@ RUN pip install --disable-pip-version-check --timeout 15 --retries 1 --no-cache-
 COPY . /app
 ENV PYTHONDONTWRITEBYTECODE=1
 USER 1000:1000
-ENTRYPOINT ["python", "utils/integration/plugin_processes.py", "--controlled"]
+ENTRYPOINT ["python", "tests/integration/plugin_processes.py", "--controlled"]
 ''' + 'LABEL lectify.integration-build="' + uuid.uuid4().hex + '"\n')
         try:
             subprocess.run(['docker','build','--pull=false','--progress=plain','--iidfile',str(context / 'image.id'),

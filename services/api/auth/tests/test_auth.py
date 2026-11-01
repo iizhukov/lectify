@@ -165,7 +165,7 @@ def generated_service(tmp_path):
     protocol = project / 'proto/api/auth'
     protocol.mkdir(parents=True)
     shutil.copy(ROOT / 'proto/api/auth/index.proto', protocol / 'index.proto')
-    environment = dict(os.environ, LECTIFY_ROOT=str(project), PYTHONPATH=str(service))
+    environment = dict(os.environ, CODEGEN_ROOT=str(project), PYTHONPATH=str(service))
     generated = subprocess.run(
         [sys.executable, '-c', GENERATE, str(ROOT / 'utils/codegen/src')], cwd=service,
         env=environment, text=True, capture_output=True, timeout=30,

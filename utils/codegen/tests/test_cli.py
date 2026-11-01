@@ -84,6 +84,7 @@ class TestServiceCommand:
             "service:\n"
             "  name: test_config_svc\n"
             "  config:\n"
+            "    config_service: infra_config\n"
             "    enabled: true\n"
             "    update_interval_seconds: 20\n"
         )
@@ -216,7 +217,7 @@ class TestInfraCommand:
             "    topics:\n"
             "      - test_topic\n"
         )
-        monkeypatch.setenv("LECTIFY_ROOT", str(repo_root))
+        monkeypatch.setenv("CODEGEN_ROOT", str(repo_root))
         monkeypatch.chdir(repo_root)
 
         rc = main(["infra"])
@@ -250,7 +251,7 @@ class TestProjectCommand:
             "  active: false\n"
         )
 
-        monkeypatch.setenv("LECTIFY_ROOT", str(repo_root))
+        monkeypatch.setenv("CODEGEN_ROOT", str(repo_root))
         monkeypatch.chdir(repo_root)
 
         rc = main(["project"])
@@ -273,14 +274,14 @@ class TestTestCommand:
         tests_dir.mkdir()
         (tests_dir / "test_sample.py").write_text("def test_ok(): assert True\n")
 
-        monkeypatch.setenv("LECTIFY_ROOT", str(repo_root))
+        monkeypatch.setenv("CODEGEN_ROOT", str(repo_root))
         monkeypatch.chdir(repo_root)
 
         rc = main(["test", "test_runner_svc"])
         assert rc == 0
 
     def test_test_command_missing_service(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("LECTIFY_ROOT", str(tmp_path))
+        monkeypatch.setenv("CODEGEN_ROOT", str(tmp_path))
         monkeypatch.chdir(tmp_path)
 
         rc = main(["test", "non_existent_service"])

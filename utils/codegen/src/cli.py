@@ -99,7 +99,7 @@ service:
   # Ticket Authorization
   ticket_auth:
     enabled: false
-    tas_service: "infra_tas"
+    tas_service: ""
     ticket_ttl: 60
 
   # Feature flags
@@ -521,36 +521,31 @@ def cmd_test(args: argparse.Namespace) -> int:
 
         print(f"[codegen] Running tests for {service_name}...")
         env = dict(os.environ)
-        env["LECTIFY_ROOT"] = str(repo_root)
-        res = subprocess.run(["pytest", "tests"], cwd=str(svc_path), env=env)
+        env["CODEGEN_ROOT"] = str(repo_root)
+        res = subprocess.run([sys.executable, "-m", "pytest", "tests", "--import-mode=importlib", "-q"], cwd=str(svc_path), env=env)
         return res.returncode
 
-    # Run tests for all active services
-    manifests = load_valid_services()
-    active_manifests = [m for m in manifests if m.service.active]
-
+    suites = []
+    for category, filename, key in (("services", "service.yaml", "service"),
+                                    ("plugins", "plugin.yaml", "plugin")):
+        for path in sorted((repo_root / category).rglob(filename)):
+            try:
+                manifest = load_manifest(path) if key == "service" else load_plugin_manifest(path)
+                active = getattr(manifest, key).active
+            except (ServiceManifestError, PluginManifestError):
+                continue
+            if active and (path.parent / "tests").is_dir():
+                suites.append(path.parent)
     total_code = 0
-    for manifest in active_manifests:
-        svc_name = manifest.service.name
-        try:
-            svc_path = get_service_path(svc_name)
-        except Exception:
-            continue
-
-        tests_dir = svc_path / "tests"
-        if not tests_dir.exists():
-            continue
-
-        print(f"\n[codegen] ========================================")
-        print(f"[codegen] Running tests for: {svc_name}")
-        print(f"[codegen] ========================================")
-        env = dict(os.environ)
-        env["LECTIFY_ROOT"] = str(repo_root)
-        res = subprocess.run(["pytest", "tests"], cwd=str(svc_path), env=env)
-        # Exit code 5 means no tests were found/collected
-        if res.returncode not in (0, 5):
-            total_code = res.returncode
-
+    for suite in suites:
+        print(f"[codegen] Running tests for {suite.relative_to(repo_root)}", flush=True)
+        env = dict(os.environ, CODEGEN_ROOT=str(repo_root))
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests", "--import-mode=importlib", "-q"],
+            cwd=suite, env=env,
+        )
+        if result.returncode not in (0, 5):
+            total_code = result.returncode
     return total_code
 
 

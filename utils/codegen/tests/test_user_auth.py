@@ -125,7 +125,7 @@ def test_user_auth_generated_rpc(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(base, 'get_context_manager', lambda: SimpleNamespace(
         get_service_context=lambda name: ServiceContext()))
     manifest = ServiceManifest.model_validate({'service': {'name': 'protected_test',
-        'user_auth': {'enabled': True, 'timeout_seconds': 0.05}}})
+        'user_auth': {'auth_service': 'api_auth', 'enabled': True, 'timeout_seconds': 0.05}}})
     # user_auth alone automatically adds its AuthService client.
     GrpcClientGenerator(manifest, tmp_path / 'generated').generate()
     UserAuthGenerator(manifest, tmp_path / 'generated').generate()

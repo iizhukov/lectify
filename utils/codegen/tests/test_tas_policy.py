@@ -56,6 +56,7 @@ class TestTasPolicyLoader:
             "service:\n"
             "  name: feature_flagged_svc\n"
             "  config:\n"
+            "    config_service: infra_config\n"
             "    enabled: true\n"
         )
 
@@ -77,6 +78,7 @@ class TestTasPolicyLoader:
             "    services:\n"
             "      - service_b\n"
             "  config:\n"
+            "    config_service: infra_config\n"
             "    enabled: true\n"
         )
 

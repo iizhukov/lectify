@@ -65,9 +65,6 @@ def _base_requirements(svc) -> list[str]:
         deps.append("pyjwt>=2.8.0")
         deps.append("cryptography>=41.0.0")
 
-    if svc.name == "infra_tas":
-        deps.append("cryptography>=41.0.0")
-
     return deps
 
 

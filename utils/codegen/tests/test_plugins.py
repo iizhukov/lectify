@@ -122,7 +122,7 @@ def test_plugin_generator(tmp_path: Path):
 
 
 def test_plugin_cli_init_and_validate(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("LECTIFY_ROOT", str(tmp_path))
+    monkeypatch.setenv("CODEGEN_ROOT", str(tmp_path))
     plugin_dir = tmp_path / "plugins" / "media" / "mock_plugin"
 
     # CLI plugin init

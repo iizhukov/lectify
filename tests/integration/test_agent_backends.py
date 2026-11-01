@@ -14,14 +14,14 @@ from generators.services.grpc_client import GrpcClientGenerator
 from generators.services.plugin_agent import PluginAgentGenerator
 from generators.plugins.sidecar_client import SidecarClientGenerator
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 
 SCENARIO = r'''
 import asyncio
 import hashlib
 import os
 import grpc
-from generated.plugin_agent.backends import RPCBackends
+from src.backends import RPCBackends
 from generated.plugin_agent.proxy import PluginAgentProxy
 from generated.plugin_agent.server import create_server
 from generated.scoped_server import ServerConfig
@@ -151,7 +151,7 @@ asyncio.run(main())
 def test_agent_real_backend_rpc_mapping_and_delegated_owner(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(base,'get_settings',lambda:SimpleNamespace(POSTGRES_PORT=5432))
     monkeypatch.setattr(base,'get_context_manager',lambda:SimpleNamespace(get_service_context=lambda name:ServiceContext()))
-    manifest=ServiceManifest.model_validate({'service':{'name':'agent_backends','plugin_agent':{'enabled':True}}})
+    manifest=ServiceManifest.model_validate({'service':{'name':'agent_backends','plugin_agent':{'enabled':True},'grpc_client':{'enabled':True,'services':['api_auth','api_file','api_prompt','plugins_provider','orchestrator']}}})
     GrpcClientGenerator(manifest,tmp_path/'generated').generate()
     PluginAgentGenerator(manifest,tmp_path/'generated').generate()
     SidecarClientGenerator(PluginManifest(plugin=PluginConfig(name='test')),tmp_path/'generated').generate()

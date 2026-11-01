@@ -15,6 +15,7 @@ service:
     vars:
       - API_WORKFLOW_DB_URL
   user_auth:
+    auth_service: api_auth
     enabled: true
   testing:
     generated_fixtures: false

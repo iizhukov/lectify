@@ -2,21 +2,22 @@ from generators.services.base import BaseGenerator
 from utils import get_service_manifest, get_service_path
 
 
-CONFIG_SERVICE = "infra_config"
-
 
 class ConfigGenerator(BaseGenerator):
     def generate(self) -> None:
         if not self.svc.config.enabled:
             return
 
-        config_addr = CONFIG_SERVICE if self.docker else "localhost"
+        if not self.svc.config.config_service:
+            raise ValueError("config.config_service is required when config is enabled")
+
+        config_addr = self.svc.config.config_service if self.docker else "localhost"
         config_port = self._resolve_config_port()
 
         ctx = {
             "docker": self.docker,
             "config_address": f"{config_addr}:{config_port}",
-            "config_service": CONFIG_SERVICE,
+            "config_service": self.svc.config.config_service,
             "update_interval_seconds": self.svc.config.update_interval_seconds,
         }
 
@@ -42,9 +43,5 @@ class ConfigGenerator(BaseGenerator):
         )
 
     def _resolve_config_port(self) -> int:
-        try:
-            svc_path = get_service_path(CONFIG_SERVICE)
-            svc_manifest = get_service_manifest(svc_path)
-            return svc_manifest.service.grpc.port
-        except Exception:
-            return 10011
+        svc_path = get_service_path(self.svc.config.config_service)
+        return get_service_manifest(svc_path).service.grpc.port

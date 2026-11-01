@@ -43,7 +43,7 @@ class TestRequirementsGenerator:
 
     def test_config_requirements(self, tmp_path):
         manifest = ServiceManifest.model_validate({
-            "service": {"name": "test_svc", "config": {"enabled": True}}
+            "service": {"name": "test_svc", "config": {"config_service": "infra_config", "enabled": True}}
         })
         gen = RequirementsGenerator(manifest, tmp_path / "generated", docker=False)
         gen.generate()
@@ -56,7 +56,7 @@ class TestRequirementsGenerator:
 
     def test_ticket_auth_requirements(self, tmp_path):
         manifest = ServiceManifest.model_validate({
-            "service": {"name": "test_svc", "ticket_auth": {"enabled": True}}
+            "service": {"name": "test_svc", "ticket_auth": {"tas_service": "infra_tas", "enabled": True}}
         })
         gen = RequirementsGenerator(manifest, tmp_path / "generated", docker=False)
         gen.generate()
@@ -80,7 +80,7 @@ class TestRequirementsGenerator:
 class TestConfigGenerator:
     def test_config_generator_creates_all_files(self, tmp_path):
         manifest = ServiceManifest.model_validate({
-            "service": {"name": "test_svc", "config": {"enabled": True, "update_interval_seconds": 15}}
+            "service": {"name": "test_svc", "config": {"config_service": "infra_config", "enabled": True, "update_interval_seconds": 15}}
         })
         gen = ConfigGenerator(manifest, tmp_path / "generated", docker=False)
         gen.generate()
@@ -111,7 +111,7 @@ class TestSchedulerGenerator:
             "service": {
                 "name": "test_svc",
                 "scheduler": {"enabled": False},
-                "config": {"enabled": True},
+                "config": {"config_service": "infra_config", "enabled": True},
             }
         })
         gen = SchedulerGenerator(manifest, tmp_path / "generated", docker=False)
@@ -172,7 +172,7 @@ class TestTestingGenerator:
         manifest = ServiceManifest.model_validate({
             "service": {
                 "name": "full_test_svc",
-                "config": {"enabled": True},
+                "config": {"config_service": "infra_config", "enabled": True},
                 "postgres": {"enabled": True},
                 "kafka_producer": {"enabled": True, "topics": ["test.topic"]},
             }

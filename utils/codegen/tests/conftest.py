@@ -12,5 +12,5 @@ if str(repo_root) not in sys.path:
 if str(codegen_dir / "src") not in sys.path:
     sys.path.insert(0, str(codegen_dir / "src"))
 
-os.environ["LECTIFY_ROOT"] = str(repo_root)
+os.environ["CODEGEN_ROOT"] = str(repo_root)
 

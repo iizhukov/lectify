@@ -82,6 +82,7 @@ service:
 
   # Feature flags
   config:
+    config_service: infra_config
     enabled: false
 
   # Observability

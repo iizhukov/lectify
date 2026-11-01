@@ -1,1 +1,3 @@
 # User dependencies — add your packages here
+
+cryptography>=41.0.0

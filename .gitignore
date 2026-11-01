@@ -68,3 +68,6 @@ proto/temp
 services/temp
 
 .codegen/
+
+# Local credentials
+.secrets/

@@ -172,7 +172,7 @@ def test_generated_agent_rpc(tmp_path: Path):
 
 
 def test_missing_protocol_fails_generation(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("LECTIFY_ROOT", str(tmp_path))
+    monkeypatch.setenv("CODEGEN_ROOT", str(tmp_path))
     generator = ProtosGenerator(
         PluginManifest(plugin=PluginConfig(name="missing_proto")), tmp_path / "generated",
     )

@@ -44,16 +44,11 @@ class GrpcClientGenerator(BaseGenerator):
         if self.svc.ticket_auth.enabled and self.svc.ticket_auth.tas_service not in services:
             services.append(self.svc.ticket_auth.tas_service)
 
-        if self.svc.config.enabled and "infra_config" not in services:
-            services.append("infra_config")
+        if self.svc.config.enabled and self.svc.config.config_service not in services:
+            services.append(self.svc.config.config_service)
 
         if self.svc.user_auth.enabled and self.svc.user_auth.auth_service not in services:
             services.append(self.svc.user_auth.auth_service)
-
-        if self.svc.plugin_agent.enabled:
-            for dependency in ("api_auth", "api_file", "api_prompt", "plugins_provider", "orchestrator"):
-                if dependency not in services:
-                    services.append(dependency)
 
         for svc_name in services:
             svc_path = get_service_path(svc_name)

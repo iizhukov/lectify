@@ -8,7 +8,7 @@ import pytest
 
 @pytest.mark.parametrize('owned',[True,False])
 def test_probe_timeout_removes_only_its_labelled_container(monkeypatch,owned):
-    path = Path(__file__).resolve().parents[2] / 'integration/controlled_image.py'
+    path = Path(__file__).resolve().parent / 'controlled_image.py'
     spec = importlib.util.spec_from_file_location('controlled_image_probe',path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
