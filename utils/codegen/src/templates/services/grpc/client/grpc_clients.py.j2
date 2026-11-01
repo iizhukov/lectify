@@ -6,8 +6,8 @@
 import asyncio
 import grpc
 import uuid
-{% if manifest.service.plugin_agent.enabled or manifest.service.grpc_transport.enabled %}
 import os
+{% if manifest.service.plugin_agent.enabled or manifest.service.grpc_transport.enabled %}
 from generated.transport import TLSConfig, create_channel
 {% endif %}
 
@@ -22,6 +22,27 @@ from generated.config.interceptor import ConfigClientInterceptor  # type: ignore
 {% for svc in client_services %}
 from generated.protos.clients.{{ svc.name }} import {{ svc.proto_module }}_pb2_grpc as {{ svc.name }}__pb2_grpc  # type: ignore
 {% endfor %}
+
+
+def _split_interceptors(interceptors):
+    # grpc.aio categorizes each interceptor once using an if/elif chain.
+    # A class implementing several cardinalities therefore needs one adapter
+    # per interface, sharing the original ticket cache and close lifecycle.
+    result = []
+    for delegate in interceptors:
+        for interface, method in (
+            (grpc.aio.UnaryUnaryClientInterceptor, 'intercept_unary_unary'),
+            (grpc.aio.UnaryStreamClientInterceptor, 'intercept_unary_stream'),
+            (grpc.aio.StreamUnaryClientInterceptor, 'intercept_stream_unary'),
+            (grpc.aio.StreamStreamClientInterceptor, 'intercept_stream_stream'),
+        ):
+            if isinstance(delegate, interface):
+                def adapter(target, name, base):
+                    async def intercept(self, *args):
+                        return await getattr(target, name)(*args)
+                    return type('CardinalityAdapter', (base,), {name: intercept})()
+                result.append(adapter(delegate, method, interface))
+    return result
 
 
 class GrpcClients:
@@ -49,7 +70,7 @@ class GrpcClients:
     def channel(self, service_name: str, addr: str | None = None) -> grpc.aio.Channel:
         if self._closed:
             raise RuntimeError('gRPC clients are closed')
-        target = addr or self._defaults.get(service_name)
+        target = addr or os.environ.get(service_name.upper().replace('-', '_') + '_ADDRESS') or self._defaults.get(service_name)
 
         if target is None:
             raise ValueError(f"No address for service: {service_name}")
@@ -60,6 +81,10 @@ class GrpcClients:
                 bind_contextvars(trace_id=str(uuid.uuid4().hex)[:32], span_id=str(uuid.uuid4().hex)[:16])
 
             _interceptors: list = []
+            {% if manifest.service.observability.enabled %}
+            from generated.observability.client import TracingClientInterceptor
+            _interceptors.append(TracingClientInterceptor())
+            {% endif %}
             {% if manifest.service.ticket_auth.enabled %}
             _interceptors.append(TicketAuthClientInterceptor(
                 source_service=self._source_service or "{{ service.name }}",
@@ -74,12 +99,12 @@ class GrpcClients:
             {% endif %}
             {% if manifest.service.plugin_agent.enabled %}
             ch = create_channel(target, TLSConfig.from_env("LECTIFY_AGENT_BACKEND_TLS"),
-                                interceptors=_interceptors or None)
+                                interceptors=_split_interceptors(_interceptors) or None)
             {% elif manifest.service.grpc_transport.enabled %}
             ch = create_channel(target, TLSConfig.from_env("LECTIFY_GRPC_CLIENT_TLS"),
-                                interceptors=_interceptors or None, max_message_bytes=50 * 1048576)
+                                interceptors=_split_interceptors(_interceptors) or None, max_message_bytes=50 * 1048576)
             {% else %}
-            ch = grpc.aio.insecure_channel(target, interceptors=_interceptors or None)
+            ch = grpc.aio.insecure_channel(target, interceptors=_split_interceptors(_interceptors) or None)
             {% endif %}
             self._interceptor_resources.extend(item for item in _interceptors if hasattr(item, "close"))
             self._channels[service_name] = ch

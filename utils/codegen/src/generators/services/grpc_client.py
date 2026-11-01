@@ -16,6 +16,10 @@ class GrpcClientGenerator(BaseGenerator):
         if not self.svc.grpc_client.enabled and not self.svc.ticket_auth.enabled and not self.svc.config.enabled and not self.svc.user_auth.enabled and not self.svc.plugin_agent.enabled:
             return
 
+        if self.svc.observability.enabled:
+            # Client generation remains usable independently of the full service pipeline.
+            self.write('observability/client.py', self.render('services/observability/client.py.j2'))
+
         client_services = self._build_service_list()
         if not client_services:
             return
@@ -30,6 +34,9 @@ class GrpcClientGenerator(BaseGenerator):
             out = protos_out / str(svc["name"])
             out.mkdir(parents=True, exist_ok=True)
             self._generate_proto_stubs(svc, out)
+
+        self.write("grpc_client/rpc_catalog.py", self.render(
+            "services/grpc/client/rpc_catalog.py.j2", client_services=client_services))
 
         self.write(
             "grpc_client/grpc_clients.py",

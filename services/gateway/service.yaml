@@ -1,0 +1,15 @@
+service:
+  name: gateway
+  version: 0.1.0
+  description: HTTP composition of declarative gRPC graphs
+  active: true
+  vault: {enabled: false}
+  grpc_transport: {enabled: true}
+  grpc_client:
+    enabled: true
+    services: [api_file, api_auth]
+  ticket_auth: {enabled: true, tas_service: infra_tas}
+  observability:
+    enabled: true
+    trace_sampling_rate: 1.0
+  testing: {generated_fixtures: false}

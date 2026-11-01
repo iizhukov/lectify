@@ -7,33 +7,19 @@ import time
 import uuid
 import grpc.aio
 import structlog
+import asyncio
 
 from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine
 from structlog.contextvars import get_contextvars, bind_contextvars
 from opentelemetry import trace, metrics
-from opentelemetry.trace import SpanKind, SpanContext, TraceFlags, NonRecordingSpan
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from opentelemetry import propagate as _otel_propagate
-from opentelemetry.trace.propagation import set_span_in_context
 
 from generated.logger import get_logger  # type: ignore
 
 
 log = get_logger("middleware")
 _TRACE_ID_HEADER = "x-trace-id"
-
-
-def _make_parent_context(trace_id_hex: str) -> object | None:
-    try:
-        trace_id = int(trace_id_hex, 16)
-        span_context = SpanContext(
-            trace_id=trace_id,
-            span_id=uuid.uuid4().int & 0xFFFFFFFFFFFFFFFF,
-            is_remote=True,
-            trace_flags=TraceFlags(TraceFlags.SAMPLED),
-        )
-        return set_span_in_context(NonRecordingSpan(span_context))
-    except Exception:
-        return None
 
 
 class _TracedHandler(grpc.RpcMethodHandler):
@@ -117,24 +103,35 @@ class _TracedHandler(grpc.RpcMethodHandler):
         start = time.monotonic()
         tracer = trace.get_tracer(__name__)
 
-        parent_ctx = self._otel_parent_ctx or _make_parent_context(trace_id_hex)
+        parent_ctx = self._otel_parent_ctx
 
         try:
             with tracer.start_as_current_span(
                 f"{self._service}/{self._method}",
                 context=parent_ctx,
                 kind=SpanKind.SERVER,
+                record_exception=False,
+                set_status_on_exception=False,
             ) as span:
                 span.set_attribute("rpc.service", self._service)
                 span.set_attribute("rpc.method", self._method)
                 span.set_attribute("rpc.system", "grpc")
                 span.set_attribute("request_id", _existing.get("request_id", ""))
-                span.set_attribute("otel.trace_id", trace_id_hex)
+                current = span.get_span_context()
+                bind_contextvars(trace_id=format(current.trace_id, '032x'),
+                    span_id=format(current.span_id, '016x'))
 
-                result = await coro
+                try:
+                    result = await coro
+                except BaseException as error:
+                    span.set_attribute('rpc.grpc.status_code', 'CANCELLED' if isinstance(error, asyncio.CancelledError) else _get_status_code(context, 'UNKNOWN'))
+                    span.set_status(Status(StatusCode.ERROR))
+                    raise
 
                 status_code = _get_status_code(context)
                 span.set_attribute("rpc.grpc.status_code", status_code)
+                if status_code != "OK":
+                    span.set_status(Status(StatusCode.ERROR))
 
                 self._calls.add(1, {
                     "rpc.service": self._service,
@@ -143,11 +140,11 @@ class _TracedHandler(grpc.RpcMethodHandler):
                 })
 
                 return result
-        except Exception as exc:
+        except BaseException as exc:
             self._calls.add(1, {
                 "rpc.service": self._service,
                 "rpc.method": self._method,
-                "rpc.grpc.status_code": "ERROR",
+                "rpc.grpc.status_code": 'CANCELLED' if isinstance(exc, asyncio.CancelledError) else _get_status_code(context, 'UNKNOWN'),
             })
             raise
         finally:
@@ -176,27 +173,38 @@ class _TracedHandler(grpc.RpcMethodHandler):
 
         start = time.monotonic()
         tracer = trace.get_tracer(__name__)
-        parent_ctx = self._otel_parent_ctx or _make_parent_context(trace_id_hex)
+        parent_ctx = self._otel_parent_ctx
 
         try:
             with tracer.start_as_current_span(
                 f"{self._service}/{self._method}",
                 context=parent_ctx,
                 kind=SpanKind.SERVER,
+                record_exception=False,
+                set_status_on_exception=False,
             ) as span:
                 span.set_attribute("rpc.service", self._service)
                 span.set_attribute("rpc.method", self._method)
                 span.set_attribute("rpc.system", "grpc")
                 span.set_attribute("request_id", _existing.get("request_id", ""))
-                span.set_attribute("otel.trace_id", trace_id_hex)
+                current = span.get_span_context()
+                bind_contextvars(trace_id=format(current.trace_id, '032x'),
+                    span_id=format(current.span_id, '016x'))
 
                 items = 0
-                async for item in async_iter:
-                    yield item
-                    items += 1
+                try:
+                    async for item in async_iter:
+                        yield item
+                        items += 1
+                except BaseException as error:
+                    span.set_attribute('rpc.grpc.status_code', 'CANCELLED' if isinstance(error, (asyncio.CancelledError, GeneratorExit)) else _get_status_code(context, 'UNKNOWN'))
+                    span.set_status(Status(StatusCode.ERROR))
+                    raise
 
                 status_code = _get_status_code(context)
                 span.set_attribute("rpc.grpc.status_code", status_code)
+                if status_code != "OK":
+                    span.set_status(Status(StatusCode.ERROR))
                 span.set_attribute("rpc.stream.items", items)
 
                 self._calls.add(1, {
@@ -204,11 +212,11 @@ class _TracedHandler(grpc.RpcMethodHandler):
                     "rpc.method": self._method,
                     "rpc.grpc.status_code": status_code,
                 })
-        except Exception:
+        except BaseException as exc:
             self._calls.add(1, {
                 "rpc.service": self._service,
                 "rpc.method": self._method,
-                "rpc.grpc.status_code": "ERROR",
+                "rpc.grpc.status_code": 'CANCELLED' if isinstance(exc, (asyncio.CancelledError, GeneratorExit)) else _get_status_code(context, 'UNKNOWN'),
             })
             raise
         finally:
@@ -220,9 +228,10 @@ class _TracedHandler(grpc.RpcMethodHandler):
             self._inflight.add(-1, {"rpc.service": self._service, "rpc.method": self._method})
 
 
-def _get_status_code(context: grpc.aio.ServicerContext) -> str:
+def _get_status_code(context: grpc.aio.ServicerContext, default='OK') -> str:
     try:
-        return str(context.code())
+        code = context.code()
+        return code.name if code is not None else default
     except Exception:
         return "UNKNOWN"
 
@@ -259,7 +268,7 @@ class TracingInterceptor(grpc.aio.ServerInterceptor):
                 )
 
             try:
-                _carrier = {k: [v] for k, v in handler_call_details.invocation_metadata}
+                _carrier = dict(handler_call_details.invocation_metadata)
                 otel_parent_ctx = _otel_propagate.extract(_carrier)
             except Exception:
                 pass

@@ -21,33 +21,6 @@ _SERVICE_NAME_HEADER = "x-service-name"
 _TRACE_ID_HEADER = "x-trace-id"
 
 
-def _inject_traceparent(metadata: list) -> None:
-    try:
-        carrier: dict[str, str] = {}
-        propagate.inject(carrier)
-        tp = carrier.get("traceparent")
-
-        if tp:
-            metadata[:] = [(k, v) for k, v in metadata if k.lower() != "traceparent"]
-            metadata.append(("traceparent", tp))
-    except Exception:
-        pass
-
-
-def _make_parent_context(trace_id_hex: str) -> object | None:
-    try:
-        trace_id = int(trace_id_hex, 16)
-        span_context = trace.SpanContext(
-            trace_id=trace_id,
-            span_id=uuid.uuid4().int & 0xFFFFFFFFFFFFFFFF,
-            is_remote=False,
-            trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),
-        )
-        return trace.set_span_in_context(trace.NonRecordingSpan(span_context))
-    except Exception:
-        return None
-
-
 class ConfigServerInterceptor(grpc.aio.ServerInterceptor):
     """Retrieves and processes feature flags from incoming gRPC metadata."""
 
@@ -123,13 +96,13 @@ class _ConfigProcessingHandler(grpc.RpcMethodHandler):
 
         bind_contextvars(**{f"flag_{k}": v for k, v in flags.items()})
 
-    async def _wrap(self, func) -> Callable:
+    def _wrap(self, func) -> Callable:
         async def wrapper(request, context):
             await self._process_flags(context)
             return await func(request, context)
         return wrapper
 
-    async def _wrap_stream(self, func) -> Callable:
+    def _wrap_stream(self, func) -> Callable:
         async def wrapper(request_iterator, context):
             await self._process_flags(context)
             async for response in func(request_iterator, context):
@@ -199,32 +172,9 @@ class ConfigClientInterceptor(
 
 
     async def _with_client_span(self, d, continuation, req):
-        method = d.method
-
-        if isinstance(method, bytes):
-            method = method.decode()
-
-        span_name = method.lstrip("/")
-        
-        try:
-            tracer = trace.get_tracer(__name__)
-            _trace_id_hex = get_contextvars().get("trace_id", "")
-            parent_ctx = _make_parent_context(_trace_id_hex) if _trace_id_hex else None
-            with tracer.start_as_current_span(
-                span_name, context=parent_ctx, kind=SpanKind.CLIENT
-            ) as span:
-                metadata = await self._inject_flags(d)
-                span.set_attribute("rpc.service", method.split("/")[0] if "/" in method else "")
-                span.set_attribute("rpc.method", method)
-                
-                _inject_traceparent(metadata)
-                d2 = d._replace(metadata=metadata)
-                return await continuation(d2, req)
-        except Exception:
-            metadata = await self._inject_flags(d)
-            _inject_traceparent(metadata)
-            d2 = d._replace(metadata=metadata)
-            return await continuation(d2, req)
+        # Tracing belongs to the common interceptor; metadata enrichment never retries RPC.
+        metadata = await self._inject_flags(d)
+        return await continuation(d._replace(metadata=metadata), req)
 
     def _bind_request_context(self, call_details: grpc.aio.ClientCallDetails) -> None:
         method = call_details.method

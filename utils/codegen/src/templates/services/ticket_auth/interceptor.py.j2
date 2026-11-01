@@ -25,36 +25,6 @@ _SOURCE_SERVICE_HEADER = "x-source-service"
 _TRACE_ID_HEADER = "x-trace-id"
 
 
-def _inject_traceparent(metadata: list) -> None:
-    """Inject W3C traceparent into gRPC metadata for OTel propagation."""
-    try:
-        from opentelemetry import propagate
-        carrier: dict[str, str] = {}
-        propagate.inject(carrier)
-        tp = carrier.get("traceparent")
-        if tp:
-            # Remove existing traceparent if any
-            metadata[:] = [(k, v) for k, v in metadata if k.lower() != "traceparent"]
-            metadata.append(("traceparent", tp))
-    except Exception:
-        pass
-
-
-def _make_parent_context(trace_id_hex: str) -> object | None:
-    """Bridge structlog trace_id into OTel span context."""
-    try:
-        trace_id = int(trace_id_hex, 16)
-        span_context = trace.SpanContext(
-            trace_id=trace_id,
-            span_id=uuid.uuid4().int & 0xFFFFFFFFFFFFFFFF,
-            is_remote=False,
-            trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),
-        )
-        return trace.set_span_in_context(trace.NonRecordingSpan(span_context))
-    except Exception:
-        return None
-
-
 class TicketAuthServerInterceptor(grpc.aio.ServerInterceptor):
     """Validates JWT tickets from incoming gRPC metadata."""
 
@@ -233,40 +203,9 @@ class TicketAuthClientInterceptor(grpc.aio.UnaryUnaryClientInterceptor,
 
 
     async def _with_client_span(self, d, continuation, req):
-        """Wrap a gRPC call in an OTel client span.
-        
-        This makes the calling service (e.g. example_client) appear
-        as the first service in Grafana trace tree, with the
-        downstream server span as its child via traceparent propagation.
-        TAS calls (ticket request, public key fetch) are made inside this
-        span so they appear as child spans in the same trace.
-        """
-        method = d.method
-        if isinstance(method, bytes):
-            method = method.decode()
-        span_name = method.lstrip("/")
-        
-        try:
-            tracer = trace.get_tracer(__name__)
-            _trace_id_hex = get_contextvars().get("trace_id", "")
-            parent_ctx = _make_parent_context(_trace_id_hex) if _trace_id_hex else None
-            with tracer.start_as_current_span(
-                span_name, context=parent_ctx, kind=SpanKind.CLIENT
-            ) as span:
-                # Get ticket inside the span so TAS calls are children
-                metadata = await self._inject_ticket(d)
-                ctx = span.get_span_context()
-                span.set_attribute("rpc.service", method.split("/")[0] if "/" in method else "")
-                span.set_attribute("rpc.method", method)
-                
-                _inject_traceparent(metadata)
-                d2 = d._replace(metadata=metadata)
-                return await continuation(d2, req)
-        except Exception:
-            metadata = await self._inject_ticket(d)
-            _inject_traceparent(metadata)
-            d2 = d._replace(metadata=metadata)
-            return await continuation(d2, req)
+        # Tracing belongs to the common interceptor; metadata enrichment never retries RPC.
+        metadata = await self._inject_ticket(d)
+        return await continuation(d._replace(metadata=metadata), req)
 
     def _bind_request_context(self, call_details: grpc.aio.ClientCallDetails) -> None:
         method = call_details.method

@@ -1,0 +1,27 @@
+version: 1
+id: reload_file
+http:
+  method: POST
+  path: /v1/files/reload
+  auth: required
+  request_schema: schemas:Input
+  response_schema: schemas:Output
+execution:
+  timeout_ms: 3000
+  max_parallel_nodes: 2
+nodes:
+  left:
+    parents: []
+    rpc:
+      service: api_file
+      method: api.file.v1.FileService/GetFile
+    request: mappings:left_request
+  right:
+    parents: [left]
+    rpc:
+      service: api_file
+      method: api.file.v1.FileService/GetFile
+    request: mappings:reload_request
+response:
+  parents: [left, right]
+  mapping: mappings:response

@@ -88,24 +88,23 @@ class ConfigClient:
         {% if manifest.service.grpc_transport.enabled %}
         config_target = os.environ.get('LECTIFY_CONFIG_ADDRESS', config_target)
         {% endif %}
+        from generated.grpc_client.grpc_clients import _split_interceptors
+        interceptors = []
+        {% if manifest.service.observability.enabled %}
+        from generated.observability.client import TracingClientInterceptor
+        interceptors.append(TracingClientInterceptor())
+        {% endif %}
         {% if manifest.service.ticket_auth.enabled %}
         from generated.ticket_auth.interceptor import TicketAuthClientInterceptor
-        interceptor = TicketAuthClientInterceptor(
-            source_service=self._settings.service_name,
-            target_service="{{ config_service }}",
-        )
-        {% if manifest.service.grpc_transport.enabled %}
-        channel = create_channel(config_target,TLSConfig.from_env('LECTIFY_GRPC_CLIENT_TLS'),
-            interceptors=[interceptor],max_message_bytes=50 * 1048576)
-        {% else %}
-        channel = grpc.aio.insecure_channel(config_target, interceptors=[interceptor])
+        interceptors.append(TicketAuthClientInterceptor(
+            source_service=self._settings.service_name, target_service="{{ config_service }}"))
         {% endif %}
-        {% else %}
+        interceptors = _split_interceptors(interceptors)
         {% if manifest.service.grpc_transport.enabled %}
-        channel = create_channel(config_target,TLSConfig.from_env('LECTIFY_GRPC_CLIENT_TLS'),max_message_bytes=50 * 1048576)
+        channel = create_channel(config_target, TLSConfig.from_env('LECTIFY_GRPC_CLIENT_TLS'),
+            interceptors=interceptors, max_message_bytes=50 * 1048576)
         {% else %}
-        channel = grpc.aio.insecure_channel(config_target)
-        {% endif %}
+        channel = grpc.aio.insecure_channel(config_target, interceptors=interceptors)
         {% endif %}
         self._config_stub = pb2_grpc_mod.ConfigServiceStub(channel)
 

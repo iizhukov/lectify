@@ -1,0 +1,27 @@
+version: 1
+id: compare_files
+http:
+  method: POST
+  path: /v1/files/compare
+  auth: required
+  request_schema: schemas:Input
+  response_schema: schemas:Output
+execution:
+  timeout_ms: 3000
+  max_parallel_nodes: 2
+nodes:
+  left:
+    parents: []
+    rpc:
+      service: api_file
+      method: api.file.v1.FileService/GetFile
+    request: mappings:left_request
+  right:
+    parents: []
+    rpc:
+      service: api_file
+      method: api.file.v1.FileService/GetFile
+    request: mappings:right_request
+response:
+  parents: [left, right]
+  mapping: mappings:response

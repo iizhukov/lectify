@@ -1,0 +1,75 @@
+# Auto-generated — do not edit manually.
+"""One tracing owner for every gRPC call, independent of auth/config."""
+import asyncio
+import grpc
+from opentelemetry import propagate, trace
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
+
+class TracingClientInterceptor(grpc.aio.UnaryUnaryClientInterceptor,
+        grpc.aio.UnaryStreamClientInterceptor, grpc.aio.StreamUnaryClientInterceptor,
+        grpc.aio.StreamStreamClientInterceptor):
+    async def invoke(self, continuation, details, request, streaming=False):
+        method = details.method.decode() if isinstance(details.method, bytes) else details.method
+        service, name = method.lstrip('/').rsplit('/', 1)
+        tracer = trace.get_tracer('grpc.client')
+        span = tracer.start_span(method.lstrip('/'), kind=SpanKind.CLIENT,
+            attributes={'rpc.system': 'grpc', 'rpc.service': service, 'rpc.method': name})
+        handed_off = False
+        try:
+            with trace.use_span(span, end_on_exit=False, record_exception=False, set_status_on_exception=False):
+                carrier = {}
+                propagate.inject(carrier)
+                metadata = [(k, v) for k, v in (details.metadata or ())
+                    if k.lower() not in ('traceparent', 'tracestate')]
+                metadata.extend((k, v) for k, v in carrier.items() if k in ('traceparent', 'tracestate'))
+                call = await continuation(details._replace(metadata=metadata), request)
+                if not streaming:
+                    await call
+                    span.set_attribute('rpc.grpc.status_code', 'OK')
+                    return call
+            async def finish(completed):
+                code = await completed.code()
+                span.set_attribute('rpc.grpc.status_code', code.name)
+                if code != grpc.StatusCode.OK:
+                    span.set_status(Status(StatusCode.ERROR))
+                span.end()
+            call.add_done_callback(lambda completed: asyncio.create_task(finish(completed)))
+            async def items():
+                try:
+                    async for item in call:
+                        yield item
+                    span.set_attribute('rpc.grpc.status_code', 'OK')
+                except BaseException as error:
+                    self.failed(span, error)
+                    call.cancel()
+                    raise
+                finally:
+                    span.end()
+            handed_off = True
+            return items()
+        except BaseException as error:
+            self.failed(span, error)
+            raise
+        finally:
+            if not handed_off:
+                span.end()
+
+    @staticmethod
+    def failed(span, error):
+        code = error.code().name if isinstance(error, grpc.aio.AioRpcError) else (
+            'CANCELLED' if isinstance(error, (asyncio.CancelledError, GeneratorExit)) else 'UNKNOWN')
+        span.set_attribute('rpc.grpc.status_code', code)
+        span.set_status(Status(StatusCode.ERROR))
+
+    async def intercept_unary_unary(self, continuation, details, request):
+        return await self.invoke(continuation, details, request)
+
+    async def intercept_stream_unary(self, continuation, details, request):
+        return await self.invoke(continuation, details, request)
+
+    async def intercept_unary_stream(self, continuation, details, request):
+        return await self.invoke(continuation, details, request, True)
+
+    async def intercept_stream_stream(self, continuation, details, request):
+        return await self.invoke(continuation, details, request, True)

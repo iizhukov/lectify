@@ -18,3 +18,5 @@ class ObservabilityGenerator(BaseGenerator):
             "observability/middleware.py",
             self.render("services/observability/middleware.py.j2"),
         )
+
+        self.write("observability/client.py", self.render("services/observability/client.py.j2"))

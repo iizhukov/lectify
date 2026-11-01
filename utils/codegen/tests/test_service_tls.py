@@ -211,6 +211,8 @@ def test_generated_service_mtls_clients_and_listener(tmp_path):
     (generated/'transport.py').write_text(env.get_template('plugins/transport.py.j2').render())
     (generated/'scoped_server.py').write_text(env.get_template('plugins/scoped_server.py.j2').render())
     manifest = ServiceManifest.model_validate({'service':{'name':'tls_test','grpc_transport':{'enabled':True}}})
+    (generated/'observability').mkdir()
+    (generated/'observability'/'client.py').write_text(env.get_template('services/observability/client.py.j2').render())
     (generated/'grpc_clients.py').write_text(env.get_template('services/grpc/client/grpc_clients.py.j2').render(
         manifest=manifest,service=manifest.service,client_services=[]))
     server = generated/'grpc_server'

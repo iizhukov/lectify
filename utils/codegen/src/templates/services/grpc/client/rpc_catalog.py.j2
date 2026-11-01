@@ -1,0 +1,39 @@
+# Auto-generated — do not edit manually.
+from dataclasses import dataclass
+from importlib import import_module
+from google.protobuf.message_factory import GetMessageClass
+
+
+@dataclass(frozen=True)
+class RpcMethod:
+    service: str
+    path: str
+    request_type: type
+    response_type: type
+    client_streaming: bool
+    server_streaming: bool
+
+    def bind(self, clients):
+        channel = clients.channel(self.service)
+        cardinality = ('stream' if self.client_streaming else 'unary') + '_' + ('stream' if self.server_streaming else 'unary')
+        return getattr(channel, cardinality)(
+            '/' + self.path,
+            request_serializer=self.request_type.SerializeToString,
+            response_deserializer=self.response_type.FromString,
+        )
+
+
+def get_rpc_catalog():
+    result = {}
+    {% for svc in client_services %}
+    module = import_module('generated.protos.clients.{{ svc.name }}.{{ svc.proto_module }}_pb2')
+    for service in module.DESCRIPTOR.services_by_name.values():
+        for method in service.methods:
+            path = service.full_name + '/' + method.name
+            result[('{{ svc.name }}', path)] = RpcMethod(
+                '{{ svc.name }}', path,
+                GetMessageClass(method.input_type), GetMessageClass(method.output_type),
+                method.client_streaming, method.server_streaming,
+            )
+    {% endfor %}
+    return result
