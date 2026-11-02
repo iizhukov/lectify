@@ -76,10 +76,6 @@ def is_port_in_use(port):
 
 async def run_grpc() -> None:
     """Запускает gRPC сервер."""
-    if is_port_in_use({{ service.grpc.port }}):
-        log.warning(f"Port {{ service.grpc.port }} is already in use. Skipping gRPC server startup.")
-        return
-
     log.info("Starting gRPC server...")
     try:
         from generated.grpc_server import grpc_app  # type: ignore
@@ -211,18 +207,33 @@ async def run_plugin_agent() -> None:
         {% if manifest.service.observability.enabled %}
         await run_observability()
         {% endif %}
-        await asyncio.gather(*tasks, return_exceptions=True)
-        {% if manifest.service.observability.enabled %}
-        from opentelemetry import trace as _otel_trace
-        _tp = _otel_trace.get_tracer_provider()
-        if hasattr(_tp, "force_flush"):
-            _tp.force_flush()
-        {% endif %}
+        import signal
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signum, stop.set)
+        running = [asyncio.create_task(task) for task in tasks]
+        stopping = asyncio.create_task(stop.wait())
+        try:
+            done, _ = await asyncio.wait([*running, stopping], return_when=asyncio.FIRST_COMPLETED)
+            if stopping not in done:
+                for task in done:
+                    task.result()
+                raise RuntimeError('A service component stopped unexpectedly')
+        finally:
+            for task in [*running, stopping]:
+                task.cancel()
+            await asyncio.gather(*running, stopping, return_exceptions=True)
     except Exception as e:
         log.error(f"Error in main: {e}")
         raise
-    {% if service.logging.loki.enabled or service.http.enabled %}
     finally:
+        {% if manifest.service.observability.enabled %}
+        from opentelemetry import trace, metrics
+        for provider in (metrics.get_meter_provider(), trace.get_tracer_provider()):
+            if hasattr(provider, 'shutdown'):
+                await asyncio.to_thread(provider.shutdown)
+        {% endif %}
         {% if service.http.enabled %}
         from generated.http.client import close_http_client
         await close_http_client()
@@ -235,7 +246,7 @@ async def run_plugin_agent() -> None:
         except Exception:
             pass
         {% endif %}
-    {% endif %}
+        pass
 
 
 if __name__ == "__main__":

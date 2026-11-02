@@ -6,6 +6,7 @@ import math
 import re
 
 import grpc
+from generated.runtime_logs import sanitize,sanitize_fields,secret_values
 
 from generated.protos.plugins import index_pb2 as pb
 from generated.protos.plugins import index_pb2_grpc as rpc
@@ -22,6 +23,11 @@ class PluginAgentProxy(rpc.PluginAgentServiceServicer):
             raise ValueError('Agent timeout must be finite and bounded')
         self.policy, self.backends, self.timeout = policy, backends, timeout
         self.assignment = (policy.execution_id, policy.node_id)
+        self._log_secrets=secret_values()
+
+    async def runtime_log(self,level,message,fields):
+        await self._backend('log')(**self._context(),level=level,message=sanitize(message,self._log_secrets),
+            fields=sanitize_fields(fields,self._log_secrets))
 
     def _context(self):
         return dict(owner_id=self.policy.owner_id, execution_id=self.policy.execution_id,
@@ -44,6 +50,8 @@ class PluginAgentProxy(rpc.PluginAgentServiceServicer):
                 await close()
 
     async def _abort(self, context, error):
+        if isinstance(error, grpc.aio.AioRpcError):
+            await context.abort(error.code(),'Agent backend request failed')
         if isinstance(error, PermissionError):
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, 'Assignment permission denied')
         if isinstance(error, (ValueError, TypeError)):
@@ -119,6 +127,22 @@ class PluginAgentProxy(rpc.PluginAgentServiceServicer):
         except Exception as error:
             await self._abort(context, error)
 
+    async def GetFileInfo(self, request, context):
+        try:
+            self.policy.authorize_file(request.file_id)
+            async with asyncio.timeout(self.timeout):
+                result = await self._backend('get_file_info')(**self._context(),file_id=request.file_id)
+            if (not isinstance(result,dict) or result.get('file_id') != request.file_id
+                    or type(result.get('size_bytes')) is not int or result['size_bytes']<0
+                    or any(not isinstance(result.get(key),str) or len(result[key])>256
+                           for key in ('filename','content_type','sha256'))):
+                raise RuntimeError('Invalid file metadata backend response')
+            return pb.FileInfo(**result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await self._abort(context,error)
+
     async def ReadFile(self, request, context):
         try:
             self.policy.authorize_file(request.file_id)
@@ -146,15 +170,20 @@ class PluginAgentProxy(rpc.PluginAgentServiceServicer):
             if len(request.variables) > 32 or any(len(key) > 128 or len(value) > 4096 for key, value in request.variables.items()):
                 raise ValueError('Invalid prompt variables')
             async with asyncio.timeout(self.timeout):
+                options = {'raw_template':True} if request.raw_template else {}
                 result = await self._backend('fetch_prompt')(**self._context(), prompt_id=request.prompt_id,
-                    variables=dict(request.variables))
+                    variables=dict(request.variables), **options)
                 if not isinstance(result, dict) or result.get('prompt_id') != request.prompt_id:
                     raise RuntimeError('Invalid prompt backend response')
                 values = {key: result.get(key, '') for key in
                           ('prompt_id', 'system_prompt', 'user_prompt_template', 'rendered_user_prompt')}
                 if any(not isinstance(value, str) or len(value.encode('utf-8')) > 1048576 for value in values.values()):
                     raise RuntimeError('Invalid prompt backend response')
-                return pb.FetchPromptResponse(**values)
+                variables = result.get('variables', [])
+                if (not isinstance(variables, (list,tuple)) or len(variables)>32
+                        or any(not isinstance(name,str) or len(name)>128 for name in variables)):
+                    raise RuntimeError('Invalid prompt variables schema')
+                return pb.FetchPromptResponse(**values,variables=variables)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -229,7 +258,7 @@ class PluginAgentProxy(rpc.PluginAgentServiceServicer):
                     or any(len(key) > 128 or len(value) > 4096 for key, value in request.fields.items())):
                 raise ValueError('Invalid plugin log')
             async with asyncio.timeout(self.timeout):
-                await self._backend('log')(**self._context(), level=request.level, message=request.message, fields=dict(request.fields))
+                await self.runtime_log(request.level,sanitize(request.message,self._log_secrets),dict(request.fields))
             return pb.ReportLogResponse(acknowledged=True)
         except asyncio.CancelledError:
             raise

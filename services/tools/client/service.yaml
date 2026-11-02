@@ -1,0 +1,11 @@
+service:
+  name: tools_client
+  version: 0.1.0
+  description: Operator gRPC client for local backend validation
+  active: true
+  grpc_transport: {enabled: true}
+  grpc_client:
+    enabled: true
+    services: [api_auth, api_file, api_prompt, api_workflow, api_execution, orchestrator]
+  ticket_auth: {enabled: true, tas_service: infra_tas}
+  observability: {enabled: true}

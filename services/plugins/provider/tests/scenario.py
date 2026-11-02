@@ -158,7 +158,7 @@ async def main():
     client = get_http_client()
     assert get_http_client() is client
     assert 'bearer_token' not in repr(get_settings().http)
-    assert get_settings().extensions['provider']['max_tokens'] == 2048
+    assert get_settings().extensions['provider']['max_tokens'] == 4096
     adapter = PolzaAdapter(client, 'test-only-provider-token', test_endpoint=f'http://127.0.0.1:{port}/api/v1')
     for bad_token in ('has space', 'private-token\x00', 'private-token\x7f'):
         try:
@@ -210,14 +210,19 @@ async def main():
             mode = scenario
             await expect_error(stub.CallLLM(request()), status)
         mode = 'success'
-        async def audio(bad_eof=False):
+        async def audio(bad_eof=False,language='ru'):
             payload = b'abc' * 30000
-            yield pb.AudioFrame(metadata=pb.AudioMetadata(model='audio-test', language='ru',
+            yield pb.AudioFrame(metadata=pb.AudioMetadata(model='audio-test', language=language,
                 content_type='audio/wav', size_bytes=len(payload), owner_id='alice', execution_id='execution', node_id='node'))
             yield pb.AudioFrame(chunk=payload[:65536], sequence=1)
             yield pb.AudioFrame(chunk=payload[65536:], sequence=2, is_last=not bad_eof)
         result = await stub.Transcribe(audio())
         assert result.text == 'Recognized lecture' and result.duration == 4.5
+        assert requests[-1][1]['language']=='ru'
+        for language in ('auto',''):
+            result=await stub.Transcribe(audio(language=language))
+            assert result.text=='Recognized lecture'
+            assert 'language' not in requests[-1][1]
         count = len(requests)
         await expect_error(stub.Transcribe(audio(True)), grpc.StatusCode.INVALID_ARGUMENT)
         assert len(requests) == count

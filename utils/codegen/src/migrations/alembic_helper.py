@@ -20,51 +20,12 @@ class AlembicHelper:
     
     def _create_config(self) -> Config:
         sync_url = self.db_url.replace("+asyncpg", "+psycopg2")
-        
-        alembic_ini = self.migrations_dir.parent / "alembic.ini"
-        self._write_alembic_ini(alembic_ini, sync_url)
-        
-        return Config(str(alembic_ini))
-    
-    def _write_alembic_ini(self, path: Path, sync_url: str) -> None:
-        path.write_text(f"""[alembic]
-script_location = {self.migrations_dir}
-sqlalchemy.url = {sync_url}
-
-[loggers]
-keys = root,sqlalchemy,alembic
-
-[handlers]
-keys = console
-
-[formatters]
-keys = generic
-
-[logger_root]
-level = WARN
-handlers = console
-qualname =
-
-[logger_sqlalchemy]
-level = WARN
-handlers =
-qualname = sqlalchemy.engine
-
-[logger_alembic]
-level = INFO
-handlers =
-qualname = alembic
-
-[handler_console]
-class = StreamHandler
-args = (sys.stderr,)
-level = NOTSET
-formatter = generic
-
-[formatter_generic]
-format = %(levelname)-5.5s [%(name)s] %(message)s
-datefmt = %H:%M:%S
-""")
+        # Keep connection credentials in memory. ConfigParser needs literal
+        # percent signs escaped, e.g. when a URL contains percent-encoded data.
+        config=Config()
+        config.set_main_option('script_location',str(self.migrations_dir))
+        config.set_main_option('sqlalchemy.url',sync_url.replace('%','%%'))
+        return config
     
     def _ensure_env_py(self) -> None:
         env_py = self.migrations_dir / "env.py"

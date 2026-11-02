@@ -15,10 +15,10 @@ extensions:
   provider:
     allowed_chat_models: [openai/gpt-4o-mini]
     allowed_audio_models: [openai/gpt-4o-mini-transcribe]
-    allowed_purposes: [transform, summarization, summary, stt]
+    allowed_purposes: [transform, summarization, summary, stt, llm_request, latex, subject, latex_repair]
     default_chat_model: openai/gpt-4o-mini
     default_audio_model: openai/gpt-4o-mini-transcribe
-    max_tokens: 2048
+    max_tokens: 4096
     max_input_chars: 65536
     max_output_bytes: 1048576
     max_audio_bytes: 8388608

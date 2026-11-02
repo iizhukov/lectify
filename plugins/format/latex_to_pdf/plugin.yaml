@@ -1,0 +1,26 @@
+plugin:
+  name: latex_to_pdf
+  version: 1.0.0
+  description: Настоящая компиляция LaTeX в PDF с ограниченным LLM-исправлением ошибок
+  category: format
+  system_packages: [texlive-latex-base, texlive-fonts-recommended, texlive-latex-extra, texlive-lang-cyrillic, poppler-utils]
+  inputs:
+    - name: latex
+      type: stream/text
+      buffer: {strategy: full}
+  outputs:
+    - {name: pdf, type: stream/binary}
+    - {name: output, type: artifact/file}
+    - {name: metadata, type: stream/json}
+  parameters:
+    - {name: max_attempts, type: int, default: 3}
+    - {name: use_llm_repair, type: bool, default: true}
+    - {name: model, type: string, default: openai/gpt-4o-mini}
+    - {name: compile_timeout, type: int, default: 60}
+    - {name: repair_timeout, type: int, default: 120}
+  permissions:
+    llm:
+      enabled: true
+      allowed_models: [openai/gpt-4o-mini, gpt-4o, deepseek-chat]
+      allowed_purposes: [latex_repair]
+    storage: {enabled: true, upload_artifacts: true}

@@ -11,7 +11,8 @@ class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="{{ service.name | upper | replace("-", "_") }}_DB_", extra="ignore")
 
     url: str = Field(
-        default="postgresql+asyncpg://{{ service.name }}:{{ context.postgres_password }}@localhost:{{ settings.POSTGRES_PORT }}/{{ service.name | replace("-", "_")}}",
+        default="",
+        repr=False,
         description="Async database DSN",
     )
     pool_size: int = Field(default={{service.postgres.pool_size}}, ge=1)
@@ -36,7 +37,7 @@ class MinioSettings(BaseSettings):
 
     endpoint: str = Field(default="localhost:9000")
     access_key: str = Field(default="{{ service.name }}")
-    secret_key: str = Field(default="{{ context.minio_password }}")
+    secret_key: str = Field(default="", repr=False)
 
 
 # class AuthSettings(BaseSettings):

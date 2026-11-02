@@ -13,6 +13,9 @@ class DockerWorkers:
             raise ValueError('A bounded trusted Docker daemon inventory is required')
         self._workers = MappingProxyType(dict(workers))
 
+    def items(self):
+        return self._workers.items()
+
     def choose(self, execution_id, node_id, role, *, daemon_id=None):
         if (role not in ('plugin','agent') or any(not isinstance(value,str)
                 or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',value)

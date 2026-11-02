@@ -24,12 +24,13 @@ from generators.services.grpc_server import GrpcServerGenerator
 from generators.services.grpc_client import GrpcClientGenerator
 from generators.services.user_auth import UserAuthGenerator
 from generators.services.workflow_validation import WorkflowValidationGenerator
+from generators.services.ticket_auth import TicketAuthGenerator
 import yaml
 manifest = ServiceManifest.model_validate(yaml.safe_load(Path('service.yaml').read_text()))
 base.get_settings = lambda: SimpleNamespace(POSTGRES_PORT=5432)
 base.get_context_manager = lambda: SimpleNamespace(get_service_context=lambda name: ServiceContext())
 for generator in (SettingsGenerator, LoggerGenerator, DbGenerator, GrpcServerGenerator,
-                  GrpcClientGenerator, UserAuthGenerator, WorkflowValidationGenerator):
+                  GrpcClientGenerator, TicketAuthGenerator, UserAuthGenerator, WorkflowValidationGenerator):
     generator(manifest, Path('generated').resolve()).generate()
 '''
 PREFIX = r'''
@@ -170,6 +171,13 @@ def generated_service(tmp_path):
         protocol = project/'proto/api'/name
         protocol.mkdir(parents=True)
         shutil.copy(ROOT/f'proto/api/{name}/index.proto',protocol/'index.proto')
+    for category, name in (('orchestrator', 'orchestrator'), ('infra', 'tas')):
+        dependency = project / 'services' / category / name
+        dependency.mkdir(parents=True)
+        shutil.copy(ROOT / 'services' / category / name / 'service.yaml', dependency / 'service.yaml')
+        protocol = project / 'proto' / category / name
+        protocol.mkdir(parents=True)
+        shutil.copy(ROOT / 'proto' / category / name / 'index.proto', protocol / 'index.proto')
     auth = project/'services/api/auth'
     auth.mkdir(parents=True)
     shutil.copy(ROOT/'services/api/auth/service.yaml',auth/'service.yaml')
@@ -189,6 +197,47 @@ def run(generated_service, scenario):
 
 def test_persisted_crud_acl_versions_snapshots_and_graph_validation(generated_service):
     run(generated_service,BUSINESS)
+
+
+def test_default_registry_adapter_reads_pinned_schemas_over_grpc(generated_service):
+    run(generated_service, PREFIX + r'''
+from src import registry
+from generated.protos.clients.orchestrator import index_pb2 as registry_pb, index_pb2_grpc as registry_rpc
+calls = []
+class Registry(registry_rpc.OrchestratorServiceServicer):
+    async def GetPluginManifest(self, request, context):
+        assert dict(context.invocation_metadata())['x-user-authorization'] == 'Bearer verified'
+        calls.append((request.plugin_id, request.version))
+        if request.plugin_id != 'text':
+            await context.abort(grpc.StatusCode.NOT_FOUND, 'missing')
+        return registry_pb.GetPluginManifestResponse(manifest_json=json.dumps({'plugin':SCHEMAS['text@1.0.0']}))
+class VerifiedContext(Context):
+    def invocation_metadata(self): return [('x-user-authorization','Bearer verified')]
+async def main():
+    server = grpc.aio.server()
+    registry_rpc.add_OrchestratorServiceServicer_to_server(Registry(),server)
+    port = server.add_insecure_port('127.0.0.1:0')
+    await server.start()
+    class Clients:
+        def __init__(self, **kwargs):
+            assert kwargs == {'source_service':'api_workflow'}
+            self.connection = grpc.aio.insecure_channel('127.0.0.1:'+str(port))
+        def channel(self, name):
+            assert name == 'orchestrator'
+            return self.connection
+        async def close_all(self): await self.connection.close()
+    registry.GrpcClients = Clients
+    try:
+        service = WorkflowServiceImpl()
+        normalized = await service._graph(graph(),VerifiedContext('alice'))
+        assert len(normalized['nodes']) == 2 and calls == [('text','1.0.0')]
+        invalid = graph()
+        invalid.nodes[0].plugin_id = 'unknown'
+        await reject(service._graph(invalid,VerifiedContext('alice')),grpc.StatusCode.INVALID_ARGUMENT)
+    finally:
+        await server.stop(0)
+asyncio.run(main())
+''')
 
 RPC = PREFIX + r'''
 from generated.protos.server import index_pb2_grpc as rpc

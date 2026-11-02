@@ -79,6 +79,11 @@ def _parse_service_yaml(path: Path) -> tuple[str, list[str]] | None:
                 targets.append("infra_config")
             if "infra_tas" not in targets:
                 targets.append("infra_tas")
+        user_auth = svc.get('user_auth', {})
+        if isinstance(user_auth, dict) and user_auth.get('enabled'):
+            auth_service = user_auth.get('auth_service')
+            if auth_service and auth_service not in targets:
+                targets.append(auth_service)
 
         return source_name, targets
     except Exception:

@@ -3,8 +3,21 @@ package execution.v1;
 
 service ExecutionService {
   rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
+  rpc Restart(RestartRequest) returns (RestartResponse);
+  rpc GetDetails(ExecutionRequest) returns (ExecutionDetails);
+  rpc GetNodeDetails(NodeDetailsRequest) returns (NodeDetails);
+  rpc GetNodeLogs(NodeLogsRequest) returns (NodeLogsResponse);
+  rpc DownloadNodeLog(NodeLogRequest) returns (stream NodeLogChunk);
   rpc GetStatus(ExecutionRequest) returns (ExecutionStatus);
+  rpc ListExecutions(ListExecutionsRequest) returns (ListExecutionsResponse);
   rpc Cancel(CancelRequest) returns (CancelResponse);
+  // Pause revokes the execution lease. Resume replays completed outputs and
+  // restarts unfinished nodes; it does not suspend an external process in place.
+  rpc Pause(ExecutionRequest) returns (ControlResponse);
+  rpc Resume(ExecutionRequest) returns (ControlResponse);
+  // Only FAILED executions: invalidate this node and its descendants, preserve
+  // other completed checkpoints, renew the owner's delegated credential.
+  rpc RetryNode(RetryNodeRequest) returns (ControlResponse);
   rpc StreamEvents(EventRequest) returns (stream ExecutionEvent);
 }
 message StartWorkflowRequest {
@@ -21,8 +34,17 @@ message StartWorkflowResponse {
   int64 started_at = 5;
 }
 message ExecutionRequest { string execution_id = 1; }
+message ListExecutionsRequest { int32 page_size = 1; int32 offset = 2; }
+message ExecutionSummary {
+  string execution_id = 1; string snapshot_id = 2; string state = 3;
+  int32 total_progress_percent = 4; int64 started_at = 5; int64 finished_at = 6;
+  string parent_execution_id = 7;
+}
+message ListExecutionsResponse { repeated ExecutionSummary executions = 1; bool has_more = 2; }
 message CancelRequest { string execution_id = 1; string reason = 2; }
 message CancelResponse { bool success = 1; string state = 2; }
+message ControlResponse { bool success = 1; string state = 2; }
+message RetryNodeRequest { string execution_id = 1; string node_id = 2; }
 message NodeStatus {
   string node_id = 1; string plugin_id = 2; string state = 3;
   int32 progress_percent = 4; string progress_message = 5;
@@ -40,3 +62,40 @@ message ExecutionEvent {
   int64 timestamp = 4; string message = 5; int32 progress_percent = 6;
   map<string,string> metadata = 7; int64 sequence = 8;
 }
+
+message RestartRequest { string execution_id = 1; string request_key = 2; }
+message GraphEdge { string from_node_id = 1; string from_output = 2; string to_node_id = 3; string to_input = 4; }
+message NodeDetailsRequest { string execution_id = 1; string node_id = 2; int32 page_size = 3; int32 offset = 4; }
+message ArtifactInfo { string name = 1; string file_id = 2; int64 size_bytes = 3; }
+message NodeAttempt {
+    string id = 1; int32 number = 2; int64 fence = 3; string state = 4;
+    int64 started_at = 5; int64 finished_at = 6; string error_message = 7;
+    int64 bytes_streamed_in = 8; int64 bytes_streamed_out = 9; int64 chunks_processed = 10;
+    int64 execution_time_ms = 11; repeated ArtifactInfo artifacts = 12;
+    string container_id = 13; string worker_id = 14; string image = 15;
+    int64 log_bytes = 16; bool logs_truncated = 17;
+}
+message NodeDetails {
+    string node_id = 1; string plugin_id = 2; string plugin_version = 3; string state = 4;
+    string parameters_json = 5; string input_mapping_json = 6;
+    repeated GraphEdge incoming_edges = 7; repeated NodeAttempt attempts = 8;
+    bool has_more_attempts = 9; bool checkpoint_ready = 10;
+    string name = 11; string description = 12;
+}
+message ExecutionDetails {
+    ExecutionStatus status = 1; string workflow_id = 2; string parent_execution_id = 3;
+    string graph_json = 4; map<string,string> initial_inputs = 5; repeated NodeDetails nodes = 6;
+}
+message NodeLogRequest { string execution_id = 1; string node_id = 2; int32 attempt_number = 3; }
+message NodeLogsRequest {
+    string execution_id = 1; string node_id = 2; int32 attempt_number = 3;
+    int64 after_sequence = 4; int32 page_size = 5;
+}
+message NodeLogEntry {
+    int64 sequence = 1; int64 timestamp = 2; string level = 3; string stream = 4;
+    string message = 5; map<string,string> fields = 6;
+}
+message NodeLogsResponse { repeated NodeLogEntry entries = 1; int64 next_sequence = 2; bool has_more = 3; bool truncated = 4; }
+message NodeLogChunk { bytes data = 1; int64 sequence = 2; bool is_last = 3; string filename = 4; bool truncated = 5; }
+
+message RestartResponse { string execution_id = 1; string parent_execution_id = 2; string snapshot_id = 3; string state = 4; int64 started_at = 5; }

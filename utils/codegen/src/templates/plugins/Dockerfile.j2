@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
     ca-certificates \
+    {% for package in plugin.system_packages %}{{ package }} \
+    {% endfor %}
     && rm -rf /var/lib/apt/lists/*
 
 COPY generated/requirements.txt /app/requirements.txt

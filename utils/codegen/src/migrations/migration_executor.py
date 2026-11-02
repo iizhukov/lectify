@@ -1,4 +1,5 @@
 import re
+from contextlib import asynccontextmanager
 
 from pathlib import Path
 from typing import Set, List, Dict, Any, Tuple
@@ -17,13 +18,24 @@ class MigrationExecutor:
         self.db_url = db_url
         self.migrations_dir = migrations_dir
         self.alembic_helper = AlembicHelper(migrations_dir, db_url)
+
+    @asynccontextmanager
+    async def _migration_connection(self,engine):
+        # Keep the lock in its own transaction while the registry commits each
+        # applied migration. Transaction locks also work through transaction
+        # poolers and disappear when the process/connection dies.
+        async with engine.connect() as guard:
+            if engine.dialect.name=='postgresql':
+                await guard.execute(text('SELECT pg_advisory_xact_lock(:key)'),{'key':0x434f444547454e})
+            async with engine.connect() as connection:
+                yield connection
     
     async def migrate(self) -> MigrationResult:
         result = MigrationResult()
         engine = create_async_engine(self.db_url)
         
         try:
-            async with engine.connect() as conn:
+            async with self._migration_connection(engine) as conn:
                 await self._ensure_migrations_table(conn)
                 applied_names = await self._get_applied_migrations(conn)
                 
@@ -55,7 +67,7 @@ class MigrationExecutor:
         engine = create_async_engine(self.db_url)
         
         try:
-            async with engine.connect() as conn:
+            async with self._migration_connection(engine) as conn:
                 await self._ensure_migrations_table(conn)
                 to_rollback = await self._get_migrations_to_rollback(conn, steps)
                 
@@ -84,7 +96,7 @@ class MigrationExecutor:
         engine = create_async_engine(self.db_url)
         
         try:
-            async with engine.connect() as conn:
+            async with self._migration_connection(engine) as conn:
                 await self._ensure_migrations_table(conn)
                 all_migrations = self._get_all_migrations()
                 applied_names = await self._get_applied_migrations(conn)

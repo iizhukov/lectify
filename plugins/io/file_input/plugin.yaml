@@ -1,0 +1,13 @@
+plugin:
+  name: file_input
+  version: 0.1.0
+  description: Read an owned file selected as an external pipeline input
+  category: io
+  inputs:
+    - name: file_id
+      type: stream/text
+      buffer: {strategy: full, chunk_size_bytes: 128}
+  outputs:
+    - {name: data, type: stream/binary}
+  permissions:
+    storage: {enabled: true, upload_artifacts: false}

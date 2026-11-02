@@ -1,0 +1,94 @@
+# Auto-generated — DO NOT EDIT MANUALLY
+"""Bounded process diagnostics and common credential redaction."""
+import asyncio
+import json
+import os
+from pathlib import Path
+import re
+
+_SECRET=re.compile(r'(token|secret|password|private.?key|authorization|credential|api.?key)',re.I)
+_PEM=re.compile(r'-----BEGIN [^-]*PRIVATE KEY-----.*?(?:-----END [^-]*PRIVATE KEY-----|\Z)',re.S)
+_AUTH=re.compile(r'(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]+')
+_URL_AUTH=re.compile(r'([a-z][a-z0-9+.-]*://[^:@/\s]+:)[^@/\s]+(@)',re.I)
+_ASSIGN=re.compile(r'(?i)([\"\']?(?:[\w.-]*(?:token|password|secret|api_key|private_key))[\"\']?\s*[:=]\s*[\"\']?)([^\s\"\',;}]+)')
+
+
+def secret_values(environment=None):
+    values=set()
+    def visit(data):
+        if isinstance(data,dict):
+            for key,value in data.items():
+                if _SECRET.search(str(key)) and isinstance(value,str) and len(value)>=4: values.add(value)
+                elif isinstance(value,(dict,list)): visit(value)
+        elif isinstance(data,list):
+            for value in data: visit(value)
+    for key,value in (os.environ if environment is None else environment).items():
+        if isinstance(value,(dict,list)):
+            visit(value); continue
+        if not isinstance(value,str): continue
+        if _SECRET.search(key) and len(value)>=4: values.add(value)
+        if value.startswith('{') and len(value)<=1048576:
+            try: visit(json.loads(value))
+            except (ValueError,RecursionError): pass
+    return values
+
+
+def sanitize(text,secrets=(),*,truncated=False):
+    text=_PEM.sub('[REDACTED PRIVATE KEY]',str(text))
+    for value in sorted(secrets,key=len,reverse=True):
+        text=text.replace(value,'[REDACTED]')
+        if truncated:
+            for size in range(min(len(value)-1,len(text)),3,-1):
+                if text.endswith(value[:size]):
+                    text=text[:-size]+'[REDACTED]'; break
+    text=_AUTH.sub(r'\1[REDACTED]',text)
+    text=_URL_AUTH.sub(r'\1[REDACTED]\2',text)
+    text=_ASSIGN.sub(r'\1[REDACTED]',text)
+    return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]','',text).replace('\x00','\\0')
+
+
+def sanitize_fields(fields,secrets=()):
+    return {key:'[REDACTED]' if _SECRET.search(key) else sanitize(value,secrets) for key,value in fields.items()}
+
+
+async def emit(sink,text,*,stream,tool='',truncated=False,secrets=()):
+    text=sanitize(text,secrets,truncated=truncated)
+    for offset in range(0,len(text),3000):
+        await sink('INFO',text[offset:offset+3000],dict(stream=stream,tool=tool))
+    if truncated: await sink('WARNING','Diagnostic output truncated',dict(stream=stream,tool=tool,truncated='true'))
+
+
+async def report_file_log(sidecar,path,*,tool,stream='stderr',limit=65536):
+    """Read only a bounded prefix, redact before splitting into transport chunks."""
+    with Path(path).open('rb') as file: data=file.read(limit+1)
+    async def sink(level,message,fields): await sidecar.log(level,message,**fields)
+    await emit(sink,data[:limit].decode('utf-8',errors='replace'),stream=stream,tool=tool,
+        truncated=len(data)>limit,secrets=secret_values())
+
+
+class ProcessLogs:
+    def __init__(self,sink=None,environment=None,limit=65536):
+        self.sink,self.limit=sink,limit
+        self.secrets=secret_values(environment)
+        self.buffers={}; self.tasks=[]; self.incomplete=False
+    def attach(self,process):
+        async def collect(stream,name):
+            data=bytearray(); self.buffers[name]=data
+            while chunk:=await stream.read(8192):
+                remaining=self.limit-len(data)
+                data.extend(chunk[:max(0,remaining)])
+                if len(chunk)>remaining: self.incomplete=True
+        self.tasks=[asyncio.create_task(collect(process.stdout,'stdout')),asyncio.create_task(collect(process.stderr,'stderr'))]
+    async def finish(self):
+        results=await asyncio.gather(*self.tasks,return_exceptions=True)
+        if any(isinstance(result,BaseException) for result in results): self.incomplete=True
+        if self.sink is None:
+            self.incomplete=self.incomplete or any(self.buffers.values())
+            return
+        try:
+            async with asyncio.timeout(5):
+                for stream,data in self.buffers.items():
+                    await emit(self.sink,data.decode('utf-8',errors='replace'),stream=stream,
+                        truncated=self.incomplete,secrets=self.secrets)
+        except (Exception,asyncio.CancelledError):
+            self.incomplete=True

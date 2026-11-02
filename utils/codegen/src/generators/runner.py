@@ -124,7 +124,7 @@ def run_plugin(manifest: PluginManifest, output_path: Path, docker: bool = False
 def run_plugins(docker: bool = False) -> None:
     plugins = load_valid_plugins()
     for plugin in plugins:
-        plugin_path = get_plugin_path(plugin.plugin.name)
+        plugin_path = get_plugin_path(plugin.plugin.name+'@'+plugin.plugin.version)
         run_plugin(plugin, plugin_path / "generated/", docker=docker)
 
 

@@ -84,6 +84,16 @@ class SidecarAgentClient:
         finally:
             call.cancel()
 
+    async def get_file_info(self, file_id: str) -> Dict[str, Any]:
+        if not isinstance(file_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',file_id):
+            raise ValueError('A bounded opaque file ID is required')
+        stub = await self._get_stub()
+        result = await stub.GetFileInfo(pb.FileInfoRequest(file_id=file_id),timeout=self.timeout,metadata=self._metadata)
+        if result.file_id != file_id or result.size_bytes < 0:
+            raise RuntimeError('Invalid agent file metadata')
+        return dict(file_id=result.file_id,filename=result.filename,content_type=result.content_type,
+                    size_bytes=result.size_bytes,sha256=result.sha256)
+
     async def read_file(self, file_id: str, chunk_size_bytes: int = 65536) -> AsyncIterator[bytes]:
         if not isinstance(file_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", file_id):
             raise ValueError("A bounded opaque file ID is required")
@@ -147,17 +157,18 @@ class SidecarAgentClient:
         }
 
     async def fetch_prompt(
-        self, prompt_id: str, variables: Optional[Dict[str, str]] = None,
+        self, prompt_id: str, variables: Optional[Dict[str, str]] = None, *, raw_template: bool = False,
     ) -> Dict[str, str]:
         stub = await self._get_stub()
         result = await stub.FetchPrompt(
-            pb.FetchPromptRequest(prompt_id=prompt_id, variables=variables or {}),
+            pb.FetchPromptRequest(prompt_id=prompt_id, variables=variables or {}, raw_template=raw_template),
             timeout=self.timeout, metadata=self._metadata,
         )
         return {
             "prompt_id": result.prompt_id, "system_prompt": result.system_prompt,
             "user_prompt_template": result.user_prompt_template,
             "rendered_user_prompt": result.rendered_user_prompt,
+            "variables": list(result.variables),
         }
 
     async def report_progress(self, percent: int, message: str) -> None:

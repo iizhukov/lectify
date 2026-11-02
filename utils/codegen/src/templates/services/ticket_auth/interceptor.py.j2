@@ -4,6 +4,8 @@
 # ---------------------------------------------------------------------------
 
 import time
+import math
+import jwt
 import uuid
 import structlog
 import grpc.aio
@@ -147,7 +149,7 @@ class TicketAuthClientInterceptor(grpc.aio.UnaryUnaryClientInterceptor,
         self._source_service = source_service
         self._target_service = target_service
         self._client = TicketAuthClient()
-        self._ticket_cache: dict[str, tuple[str, float]] = {}
+        self._ticket_cache: dict[str, tuple[str, float, float]] = {}
 
     async def close(self) -> None:
         self._ticket_cache.clear()
@@ -256,9 +258,10 @@ class TicketAuthClientInterceptor(grpc.aio.UnaryUnaryClientInterceptor,
         cached = self._ticket_cache.get(self._target_service)
 
         if cached:
-            ticket, expires_at = cached
-            if now < expires_at:
+            ticket, expires_at, epoch_expiry = cached
+            if now < expires_at and time.time() < epoch_expiry:
                 return ticket
+            self._ticket_cache.pop(self._target_service, None)
 
         try:
             s = get_settings()
@@ -268,10 +271,17 @@ class TicketAuthClientInterceptor(grpc.aio.UnaryUnaryClientInterceptor,
             )
 
             if ticket:
-                self._ticket_cache[self._target_service] = (
-                    ticket,
-                    now + max(s.ticket_auth.ticket_ttl - 10, 10),
-                )
+                # The server may grant a shorter TTL. Wall time can advance
+                # while the VM's monotonic clock is suspended. Inspect exp only
+                # for cache eviction; the receiving service verifies the JWT.
+                try:
+                    expiry = jwt.decode(ticket, options={'verify_signature': False})['exp']
+                except (jwt.InvalidTokenError, KeyError, TypeError):
+                    expiry = 0
+                if type(expiry) in (int,float) and math.isfinite(expiry):
+                    usable = min(s.ticket_auth.ticket_ttl, expiry-time.time())-10
+                    if usable>0:
+                        self._ticket_cache[self._target_service] = (ticket,now+usable,expiry-10)
                 
             return ticket
         except Exception as exc:

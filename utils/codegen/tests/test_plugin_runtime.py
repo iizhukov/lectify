@@ -15,6 +15,7 @@ from generated.protos.plugins import index_pb2 as pb
 from generated.protos.plugins import index_pb2_grpc as rpc
 
 closed = []
+cleaned = []
 class Sidecar:
     def __init__(self, **kwargs): self.assignment = kwargs
     async def __aenter__(self): return self
@@ -23,10 +24,17 @@ class Handler:
     def __init__(self, **kwargs): self.value = b''
     async def on_start(self): pass
     async def process_buffer(self, value):
+        if value == b'unavail': raise grpc.aio.AioRpcError(grpc.StatusCode.UNAVAILABLE,(),(),'secret internal detail')
         if value == b'fail': raise RuntimeError('secret internal detail')
         if value == b'wrong': return {'undeclared': value}
+        if value == b'stream':
+            async def outputs():
+                for _ in range(100):
+                    yield {'result': b'chunk'}
+            return outputs()
         return {'result': value.upper()}
     async def on_finish(self): pass
+    async def on_cleanup(self): cleaned.append(True)
 
 async def main():
     server = grpc.aio.server()
@@ -50,6 +58,7 @@ async def main():
                 ([pb.DataChunk(stream_name='input', payload=b'hello')], grpc.StatusCode.INVALID_ARGUMENT),
                 ([pb.DataChunk(stream_name='input', payload=b'123456789')], grpc.StatusCode.RESOURCE_EXHAUSTED),
                 ([pb.DataChunk(stream_name='input', payload=b'fail', is_last=True)], grpc.StatusCode.INTERNAL),
+                ([pb.DataChunk(stream_name='input', payload=b'unavail', is_last=True)], grpc.StatusCode.UNAVAILABLE),
                 ([pb.DataChunk(stream_name='input', payload=b'wrong', is_last=True)], grpc.StatusCode.INVALID_ARGUMENT),
                 ([pb.DataChunk(stream_name='input', sequence_number=i, payload=b'12345678') for i in range(3)], grpc.StatusCode.RESOURCE_EXHAUSTED),
                 ([pb.DataChunk(stream_name='input', is_last=True), pb.DataChunk(stream_name='input', sequence_number=1)], grpc.StatusCode.INVALID_ARGUMENT),
@@ -60,7 +69,11 @@ async def main():
                     assert error.code() == expected, error
                     assert 'secret internal detail' not in error.details()
                 else: raise AssertionError('Expected rejection')
-            assert len(closed) == 9
+            assert len(closed) == 10
+            assert len(cleaned) == 10
+            streamed = await run([pb.DataChunk(stream_name='input',payload=b'stream',is_last=True)])
+            assert b''.join(item.payload for item in streamed) == b'chunk'*100
+            assert streamed[-1].is_last and streamed[-1].sequence_number == 100
             # Timer flush must happen even if the next input has not arrived.
             runtime.INPUTS['input']['strategy'] = 'time'
             runtime.INPUTS['input']['time_window_ms'] = 100
@@ -112,9 +125,10 @@ async def main():
             before = len(closed)
             call.cancel()
             for _ in range(100):
-                if len(closed) > before: break
+                if len(closed) > before and len(cleaned) > before: break
                 await asyncio.sleep(0.01)
             assert len(closed) == before + 1
+            assert len(cleaned) == before + 1
 
     finally:
         await server.stop(0)

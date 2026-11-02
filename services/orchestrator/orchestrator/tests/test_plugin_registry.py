@@ -20,6 +20,18 @@ def request(manifest):
 
 
 @pytest.mark.asyncio
+async def test_active_manifest_can_be_resolved_by_pinned_version(test_session):
+    service = OrchestratorServiceImpl()
+    await service.RegisterPluginManifest(request('plugin: {name: plugin}'), context(admin=True))
+    response = await service.GetPluginManifest(pb.GetPluginManifestRequest(
+        plugin_id='plugin', version='0.1.0'), context())
+    assert json.loads(response.manifest_json)['plugin']['name'] == 'plugin'
+    with pytest.raises(MockRpcError) as error:
+        await service.GetPluginManifest(pb.GetPluginManifestRequest(plugin_id='plugin',version='2'),context())
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+@pytest.mark.asyncio
 async def test_registered_version_is_semantically_idempotent_and_immutable(test_session):
     service = OrchestratorServiceImpl()
     original = 'plugin:\n  name: plugin\n  version: 0.1.0\n'

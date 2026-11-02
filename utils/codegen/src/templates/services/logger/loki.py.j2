@@ -229,7 +229,7 @@ def init_loki_agent(queue: asyncio.Queue):
 
         settings = get_settings()
         loki_port = getattr(settings, "LOKI_PORT", 3100)
-        loki_url = f"http://localhost:{loki_port}"
+        loki_url = os.environ.get('LOKI_URL', f"http://localhost:{loki_port}")
 
         _loki_agent = LokiAgent(
             queue=queue,

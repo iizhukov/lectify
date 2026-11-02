@@ -6,6 +6,7 @@ from generated.plugin_runtime_client import PluginRuntimeClient
 from generated.plugin_control_client import PluginControlClient
 from generated.protos.plugins import index_pb2 as pb
 from generated.stream_router import StreamChunkData
+from generated.observability.operations import operation, transfer
 
 
 class RuntimeStreamDispatcher:
@@ -18,6 +19,10 @@ class RuntimeStreamDispatcher:
         self.assignments = assignments
         self._clients = {}
         self._tasks = {}
+        self._incomplete_logs={}
+
+    def take_incomplete_logs(self,execution_id,node_id):
+        return self._incomplete_logs.pop((execution_id,node_id),False)
 
     async def stream_node(self, *, execution_id, node, inputs, ownership, initial_inputs):
         key = (execution_id, node['id'])
@@ -25,6 +30,9 @@ class RuntimeStreamDispatcher:
             raise RuntimeError('Node runtime is already active')
         task = asyncio.current_task()
         self._tasks[key] = task
+        observation = operation('plugin', node.get('plugin_id','unknown'))
+        observation.__enter__()
+        agent=None
         try:
             async with self.assignments(execution_id=execution_id, node=node,
                     ownership=ownership, initial_inputs=initial_inputs) as assignment:
@@ -42,13 +50,18 @@ class RuntimeStreamDispatcher:
                         self._clients[key] = client
                         async def frames():
                             async for frame in inputs:
+                                transfer('plugin',node.get('plugin_id','unknown'),'input',len(frame.payload))
                                 yield pb.DataChunk(stream_name=frame.stream_name, sequence_number=frame.sequence,
                                     payload=frame.payload, is_last=frame.is_last, metadata=frame.metadata)
                         async with aclosing(client.process(frames(), assignment['outputs'])) as outputs:
                             async for frame in outputs:
+                                transfer('plugin',node.get('plugin_id','unknown'),'output',len(frame.payload))
                                 yield StreamChunkData(stream_name=frame.stream_name, sequence=frame.sequence_number,
                                     payload=frame.payload, is_last=frame.is_last, metadata=dict(frame.metadata))
         finally:
+            if agent is not None and getattr(agent,'logs_incomplete',False): self._incomplete_logs[key]=True
+            import sys
+            observation.__exit__(*sys.exc_info())
             if self._tasks.get(key) is task:
                 self._clients.pop(key, None)
                 self._tasks.pop(key, None)

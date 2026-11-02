@@ -12,6 +12,8 @@ def sources(source, target):
     for name in ('generated', 'src'):
         shutil.copytree(source / name, target / name,
             ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    if (source / 'service.yaml').exists():
+        shutil.copy(source / 'service.yaml', target / 'service.yaml')
 
 
 def main():

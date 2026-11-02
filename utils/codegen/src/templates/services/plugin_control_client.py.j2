@@ -23,6 +23,7 @@ class PluginControlClient:
         self._metadata = (('authorization','Bearer '+token),('x-execution-id',execution_id),('x-node-id',node_id))
         self.timeout = timeout
         self._parameters_supported = False
+        self.logs_incomplete=False
 
     async def close(self):
         await self._channel.close()
@@ -61,10 +62,12 @@ class PluginControlClient:
         result = await self._stub.Stop(self._command(command_id),metadata=self._metadata,timeout=self.timeout)
         if result.state != 'STOPPED':
             raise RuntimeError('Plugin runtime did not enter STOPPED state')
+        self.logs_incomplete=result.logs_incomplete
         return result
 
     async def status(self):
-        result = await self._stub.Status(pb.ControlStatusRequest(),metadata=self._metadata,timeout=self.timeout)
+        result = await self._stub.Status(pb.ControlStatusRequest(),metadata=self._metadata,timeout=self.timeout,
+            wait_for_ready=True)
         if result.state not in ('READY','STARTING','RUNNING','STOPPING','STOPPED','FAILED','EXITED'):
             raise RuntimeError('Invalid plugin runtime control state')
         return result

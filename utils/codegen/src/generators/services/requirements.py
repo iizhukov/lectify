@@ -33,6 +33,8 @@ def _base_requirements(svc) -> list[str]:
         ]
     if svc.http.enabled:
         deps.append("httpx>=0.27.0")
+    if svc.logging.loki.enabled:
+        deps.append('aiohttp>=3.9.0')
     if svc.plugin_runtime_client.enabled:
         deps.append('PyYAML>=6.0.2')
         deps.append('cryptography>=41.0.0')

@@ -12,6 +12,9 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+import os
+import socket
 
 from generated.settings import get_settings  # type: ignore
 from generated.logger import get_logger  # type: ignore
@@ -24,13 +27,15 @@ def _create_resource() -> Resource:
     s = get_settings()
     return Resource.create({
         SERVICE_NAME: s.service_name,
+        'service.instance.id': os.environ.get('OTEL_SERVICE_INSTANCE_ID', socket.gethostname()),
     })
 
 
 def configure_tracing() -> None:
     s = get_settings()
 
-    provider = TracerProvider(resource=_create_resource())
+    provider = TracerProvider(resource=_create_resource(),
+        sampler=ParentBased(TraceIdRatioBased(s.observability.trace_sampling_rate)))
     exporter = OTLPSpanExporter(
         endpoint=s.observability.otlp_endpoint,
         insecure=True,

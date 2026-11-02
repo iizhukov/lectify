@@ -47,6 +47,11 @@ class Auth(auth_rpc.AuthServiceServicer):
         return auth_pb.AuthenticateResponse(valid=True,user_id='owner' if request.access_token=='delegated-token' else 'other')
 class File(file_rpc.FileServiceServicer):
     corrupt=False
+    async def GetFile(self,request,context):
+        owner(context);calls.append('metadata')
+        assert request.id=='owned-file'
+        return file_pb.File(id=request.id,filename='source.txt',content_type='text/plain',
+            size_bytes=19,sha256=hashlib.sha256(b'original file bytes').hexdigest())
     async def Download(self,request,context):
         owner(context);calls.append('read')
         assert request.id=='owned-file'
@@ -66,7 +71,7 @@ class File(file_rpc.FileServiceServicer):
 class Prompt(prompt_rpc.PromptServiceServicer):
     async def GetPrompt(self,request,context):
         owner(context);calls.append('prompt')
-        return prompt_pb.Prompt(id=request.id,user_prompt_template='Hello {name}')
+        return prompt_pb.Prompt(id=request.id,user_prompt_template='Hello {name}',variables=['name'])
     async def RenderPrompt(self,request,context):
         owner(context)
         assert request.variables['name']=='World'
@@ -125,9 +130,18 @@ async def main():
     os.environ['LECTIFY_AGENT_TOKEN']='agent-token'
     try:
         async with SidecarAgentClient(f'127.0.0.1:{port}',execution_id='exec',node_id='node') as client:
+            info=await client.get_file_info('owned-file')
+            assert info['content_type']=='text/plain' and info['filename']=='source.txt'
+            before=len(calls)
+            await reject(client.get_file_info('foreign-file'),grpc.StatusCode.PERMISSION_DENIED)
+            assert len(calls)==before
             assert b''.join(await read(client))==b'original file bytes'
             assert (await client.fetch_prompt('owned-prompt',{'name':'World'}))['rendered_user_prompt']=='Hello World'
+            raw=await client.fetch_prompt('owned-prompt',raw_template=True)
+            assert raw['user_prompt_template']=='Hello {name}' and raw['variables']==['name']
+            assert raw['rendered_user_prompt']==''
             assert (await client.save_artifact('result','result.txt','text/plain',b'output'))['file_id']=='saved-file'
+            assert 'artifact' in orchestrator.events
             assert (await client.save_artifact('result','empty.txt','text/plain',b''))['size_bytes']==0
             assert ''.join([item async for item in client.call_llm('small-model',[{'role':'user','content':'input'}],purpose='transform')])=='Actual model text'
             assert await client.transcribe(b'RIFF0000WAVEaudio',model='small-model',language='en')=='Actual transcript'

@@ -48,6 +48,16 @@ def test_canonical_graph_pins_defaults_without_mutating_inputs(validator):
     assert validator.validate_graph(result, schemas) == result
 
 
+def test_required_input_must_have_an_edge_or_external_mapping(validator):
+    schemas = registry()
+    schemas['text@1.0.0']['inputs'][0]['required'] = True
+    source = graph()
+    with pytest.raises(ValueError,match='no source'):
+        validator.validate_graph(source,schemas)
+    source['nodes'][0]['input_mapping'] = [{'target_field':'in','source':'input.text'}]
+    assert validator.validate_graph(source,schemas)['nodes'][0]['input_mapping'][0]['source'] == 'input.text'
+
+
 @pytest.mark.parametrize('case', ['empty', 'duplicate_id', 'duplicate_edge', 'cycle', 'unknown_node',
     'unknown_port', 'wrong_type', 'unknown_plugin', 'unversioned', 'bool_number', 'unknown_parameter',
     'nonfinite', 'large', 'deep', 'mapping_conflict'])

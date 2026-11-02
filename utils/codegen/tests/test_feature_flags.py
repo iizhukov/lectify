@@ -48,6 +48,7 @@ def generated_flags(tmp_path_factory):
             settings._settings_instance = settings.Settings(_env_file=None)
             flags = importlib.import_module("generated.config.flags")
             client = importlib.import_module("generated.config.client")
+            interceptor = importlib.import_module('generated.config.interceptor')
             feature_flag = flags.feature_flag
 
             class SampleFeatureFlags(flags.BaseFeatureFlag):
@@ -62,6 +63,7 @@ def generated_flags(tmp_path_factory):
                 SampleFeatureFlags=SampleFeatureFlags,
                 BaseFeatureFlag=flags.BaseFeatureFlag,
                 BaseFeatureFlags=flags.BaseFeatureFlags,
+                ConfigHandler=interceptor._ConfigProcessingHandler,
             )
     finally:
         # Imported classes retain their module globals. Restore the process import
@@ -157,4 +159,22 @@ class TestConfigClientSyncCache:
         assert get_flag("enable_stripe_v2", service_name="billing") is True
         assert get_flag("unknown_flag", default=False, service_name="billing") is False
         assert get_flag("enable_stripe_v2", default=False, service_name="other_svc") is False
+
+
+@pytest.mark.asyncio
+async def test_config_handler_factories_return_callable_rpc_handlers(generated_flags):
+    async def unary(request, context): return request
+    async def stream(request, context): yield request
+    class Client:
+        async def get_feature_flags(self, name): return {'enabled':True}
+    class Context:
+        def invocation_metadata(self): return [('x-service-name','caller')]
+    handler = SimpleNamespace(request_streaming=False,response_streaming=False,
+        request_deserializer=None,response_serializer=None,unary_unary=unary,unary_stream=stream,
+        stream_unary=unary,stream_stream=stream)
+    wrapped = generated_flags.ConfigHandler(handler,SimpleNamespace(invocation_metadata=[]),Client(),'target')
+    assert await wrapped.unary_unary('request',Context()) == 'request'
+    assert await wrapped.stream_unary('request',Context()) == 'request'
+    assert [item async for item in wrapped.unary_stream('request',Context())] == ['request']
+    assert [item async for item in wrapped.stream_stream('request',Context())] == ['request']
 

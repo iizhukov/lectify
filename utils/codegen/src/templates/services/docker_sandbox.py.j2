@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import hmac
 import re
+import os
 from contextlib import asynccontextmanager
 
 
@@ -18,6 +19,13 @@ class DockerSandbox:
     assignment credentials. The deployment selects the Docker context.
     """
     def __init__(self, *, runner=None, context=None):
+        try:
+            self.memory_mib = int(os.environ.get('CODEGEN_SANDBOX_MEMORY_MIB','512'))
+            self.tmpfs_mib = int(os.environ.get('CODEGEN_SANDBOX_TMPFS_MIB','64'))
+        except ValueError:
+            raise ValueError('Invalid trusted sandbox resource limits') from None
+        if not 128<=self.memory_mib<=8192 or not 16<=self.tmpfs_mib<=self.memory_mib-64:
+            raise ValueError('Invalid trusted sandbox resource limits')
         if context is not None and (not isinstance(context,str)
                 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',context)):
             raise ValueError('Invalid trusted Docker context')
@@ -78,8 +86,8 @@ class DockerSandbox:
         arguments = ['create', '--pull=never', '--name', name, '--label', 'lectify.managed=true',
             '--label', 'lectify.attempt=' + attempt_id,
             '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
-            '--pids-limit=128', '--memory=512m', '--cpus=1', '--user=1000:1000',
-            '--network', network, '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000',
+            '--pids-limit=128', '--memory='+str(self.memory_mib)+'m', '--cpus=1', '--user=1000:1000',
+            '--network', network, '--tmpfs', '/tmp:rw,noexec,nosuid,size='+str(self.tmpfs_mib)+'m,uid=1000,gid=1000',
             '--log-driver=none']
         for alias in network_aliases:
             arguments.extend(('--network-alias',alias))
@@ -134,6 +142,15 @@ class DockerSandbox:
     async def start(self, container_id):
         self._validate_id(container_id)
         await self._runner('start', container_id)
+
+    async def verify_managed(self, container_id):
+        self._validate_id(container_id)
+        value = await self._runner('inspect', '--format',
+            '{% raw %}{{.Id}} {{index .Config.Labels "lectify.managed"}} {{index .Config.Labels "lectify.attempt"}}{% endraw %}', container_id)
+        parts = value.split()
+        if len(parts) != 3 or parts[0] != container_id or parts[1] != 'true':
+            raise DockerCommandError('Container is not managed by this platform')
+        self._validate_attempt(parts[2])
 
     @asynccontextmanager
     async def allocated(self, **assignment):

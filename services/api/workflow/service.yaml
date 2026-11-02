@@ -4,6 +4,10 @@ service:
   version: 0.1.0
   description: Owned workflow and node templates with immutable execution snapshots
   active: true
+  grpc_client:
+    enabled: true
+    services: [orchestrator]
+  ticket_auth: {enabled: true, tas_service: infra_tas}
   grpc:
     enabled: true
     port: 10024

@@ -1,0 +1,17 @@
+plugin:
+  name: input
+  version: 1.0.0
+  description: Файловый вход с проверкой MIME и передачей данных по именованным портам
+  category: io
+  inputs:
+    - name: file_id
+      type: stream/text
+      buffer: {strategy: full, chunk_size_bytes: 128}
+  outputs:
+    - {name: data, type: stream/binary}
+    - {name: text, type: stream/text}
+    - {name: metadata, type: stream/json}
+  parameters:
+    - {name: input_type, type: string, default: any}
+  permissions:
+    storage: {enabled: true, upload_artifacts: false}

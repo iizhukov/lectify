@@ -16,6 +16,31 @@ from utils import load_plugin_manifest, validate_plugin_manifest, PluginManifest
 from cli import main as cli_main
 
 
+def test_versioned_plugin_paths_do_not_overwrite_another_version(tmp_path,monkeypatch):
+    from utils import get_plugin_path
+    monkeypatch.setenv('CODEGEN_ROOT',str(tmp_path))
+    for version in ('0.1.0','1.0.0'):
+        path=tmp_path/'plugins'/'example'/version
+        path.mkdir(parents=True)
+        (path/'plugin.yaml').write_text(yaml.safe_dump({'plugin':{'name':'example','version':version}}))
+    assert get_plugin_path('example@0.1.0').name=='0.1.0'
+    assert get_plugin_path('example@1.0.0').name=='1.0.0'
+    with pytest.raises(ValueError,match='ambiguous'): get_plugin_path('example')
+    with pytest.raises(ValueError,match='not found'): get_plugin_path('example@2.0.0')
+
+
+def test_native_dependencies_are_bounded_and_do_not_change_legacy_canonical_manifests():
+    from templates import env
+    model=PluginManifest.model_validate({'plugin':{'name':'legacy'}})
+    assert 'system_packages' not in model.model_dump(mode='json')['plugin']
+    for value in (['--option'],['pkg; command'],['pkg','pkg'],['../file']):
+        with pytest.raises(ValueError): PluginConfig(name='invalid',system_packages=value)
+    plugin=PluginConfig(name='native',system_packages=['texlive-latex-base','poppler-utils'])
+    for template in ('plugins/Dockerfile.j2','plugins/Dockerfile.controlled.j2'):
+        rendered=env.get_template(template).render(plugin=plugin)
+        assert 'texlive-latex-base' in rendered and 'poppler-utils' in rendered
+
+
 def test_plugin_manifest_model():
     manifest_data = {
         "plugin": {

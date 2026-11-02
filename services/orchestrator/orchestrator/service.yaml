@@ -30,6 +30,7 @@ service:
   grpc_client:
     enabled: true
     services:
+      - orchestrator_worker
       - infra_tas
       - infra_config
 

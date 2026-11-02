@@ -96,3 +96,15 @@ def test_make_creates_migration_from_service_models(tmp_path: Path) -> None:
     content = migration_path.read_text(encoding="utf-8")
     assert "def upgrade" in content
     assert "op.create_table(\n        'users'" in content
+
+
+def test_alembic_config_keeps_connection_url_in_memory_and_preserves_user_file(tmp_path):
+    from migrations.alembic_helper import AlembicHelper
+    existing=tmp_path/'alembic.ini'; existing.write_text('user-owned configuration\n')
+    directory=tmp_path/'migrations'; directory.mkdir()
+    helper=AlembicHelper(directory,'postgresql+asyncpg://example:test%40password@localhost/example')
+    config=helper.get_config()
+    assert config.get_main_option('sqlalchemy.url')=='postgresql+psycopg2://example:test%40password@localhost/example'
+    assert config.config_file_name is None
+    assert existing.read_text()=='user-owned configuration\n'
+    assert not list(directory.glob('*.ini'))

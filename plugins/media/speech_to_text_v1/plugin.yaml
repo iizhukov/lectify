@@ -1,0 +1,26 @@
+plugin:
+  name: speech_to_text
+  version: 1.0.0
+  description: Транскрипция с разбиением аудио по времени и размеру закодированного чанка
+  category: media
+  inputs:
+    - name: audio
+      type: stream/audio
+      buffer: {strategy: size, chunk_size_bytes: 65536}
+  outputs:
+    - {name: transcript, type: stream/text}
+    - {name: output, type: artifact/file}
+    - {name: metadata, type: stream/json}
+  parameters:
+    - {name: model, type: string, default: openai/gpt-4o-mini-transcribe}
+    - {name: language, type: string, default: ru}
+    - {name: chunk_duration_minutes, type: int, default: 20}
+    - {name: max_chunk_bytes, type: int, default: 7340032}
+    - {name: max_chunks, type: int, default: 128}
+    - {name: tool_timeout, type: int, default: 120}
+  permissions:
+    llm:
+      enabled: true
+      allowed_models: [openai/gpt-4o-mini-transcribe]
+      allowed_purposes: [stt]
+    storage: {enabled: true, upload_artifacts: true}

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy import select, update, or_
 
-from src.engine.dispatch import guard_execution_write
+from src.engine.dispatch import guard_execution_write,database_epoch
 from src.models import ContainerAttemptModel, WorkflowNodeExecutionModel, WorkflowExecutionModel, WorkflowDispatchModel
 
 
@@ -157,11 +157,12 @@ async def launch_container(factory, sandbox, *, execution_id, node_id, owner, fe
 
 
 
-async def cleanup_created_containers(factory, sandbox, *, limit=100):
+async def cleanup_created_containers(factory, sandbox, *, limit=100,execution_id=None):
     """Reconcile confirmed containers after terminal state or fence replacement.
 
-    CREATING attempts need a separate uncertain-outcome policy: absence from
-    Docker while create is in flight cannot prove that it will remain absent.
+    Missing CREATING attempts remain observable: a delayed Create may still
+    produce a container. Repeated probes remove it once it appears; they never
+    declare an uncertain outcome clean just because Docker currently has no ID.
     """
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError('Invalid cleanup batch limit')
@@ -170,15 +171,16 @@ async def cleanup_created_containers(factory, sandbox, *, limit=100):
         rows = list((await session.scalars(select(ContainerAttemptModel).join(
             WorkflowExecutionModel, WorkflowExecutionModel.id == ContainerAttemptModel.execution_id,
         ).join(WorkflowDispatchModel, WorkflowDispatchModel.execution_id == ContainerAttemptModel.execution_id).where(
-            ContainerAttemptModel.state == 'CREATED', ContainerAttemptModel.container_id.is_not(None),
+            ContainerAttemptModel.state.in_(('PREPARED','CREATING','CREATED')),
             ContainerAttemptModel.daemon_id == daemon_id,
+            *([ContainerAttemptModel.execution_id==execution_id] if execution_id is not None else []),
             or_(WorkflowExecutionModel.state.in_(('COMPLETED','FAILED','CANCELLED')),
                 WorkflowDispatchModel.fence > ContainerAttemptModel.fence),
-        ).order_by(ContainerAttemptModel.created_at, ContainerAttemptModel.id).limit(limit))).all())
+        ).order_by(ContainerAttemptModel.cleanup_checked_at,ContainerAttemptModel.created_at, ContainerAttemptModel.id).limit(limit))).all())
     cleaned = 0
     for row in rows:
         try:
-            await sandbox.reconcile(execution_id=row.execution_id, node_id=row.node_id,
+            removed = row.state=='PREPARED' or await sandbox.reconcile(execution_id=row.execution_id, node_id=row.node_id,
                 fence=row.fence, role=row.role, attempt_id=row.id)
         except (RuntimeError, TimeoutError, OSError):
             # Preserve the durable job on daemon/ownership failures. The next
@@ -186,9 +188,10 @@ async def cleanup_created_containers(factory, sandbox, *, limit=100):
             continue
         async with factory() as session:
             result = await session.execute(update(ContainerAttemptModel).where(
-                ContainerAttemptModel.id == row.id, ContainerAttemptModel.state == 'CREATED',
+                ContainerAttemptModel.id == row.id, ContainerAttemptModel.state == row.state,
                 ContainerAttemptModel.container_id == row.container_id,
-            ).values(state='CLEANED'))
+            ).values(state='CLEANED' if removed or row.state!='CREATING' else 'CREATING',
+                cleanup_checked_at=database_epoch(session)))
             await session.commit()
-            cleaned += result.rowcount
+            if removed or row.state!='CREATING': cleaned += result.rowcount
     return cleaned

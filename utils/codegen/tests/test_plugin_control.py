@@ -41,12 +41,16 @@ async def main():
         else: raise AssertionError('FIFO assignment accepted')
     finally: os.environ.pop('LECTIFY_AGENT_ASSIGNMENT_FILE')
     os.environ['AGENT_ONLY_SECRET'] = 'not-in-child'
-    child = ('import os,time,json;from pathlib import Path;'
+    captured=[]
+    async def log_sink(level,message,fields): captured.append((message,fields))
+    child = ('import os,time,json,sys;from pathlib import Path;'
+        'print("runtime stdout "+os.environ["RUNTIME_TOKEN"],flush=True);'
+        'print("runtime stderr diagnostic",file=sys.stderr,flush=True);'
         'Path("spawns").open("a").write(str(os.getpid())+"\\n");'
         'Path("child.json.tmp").write_text(json.dumps(dict(os.environ)));'
         'Path("child.json.tmp").replace("child.json");time.sleep(60)')
     controller = PluginController('execution','node',[sys.executable,'-c',child],
-        {'EXECUTION_ID':'wrong','NODE_ID':'wrong','PLUGIN_MODE':'pipe'},str(Path.cwd()))
+        {'EXECUTION_ID':'wrong','NODE_ID':'wrong','PLUGIN_MODE':'pipe','RUNTIME_TOKEN':'runtime-fixture-sensitive-value'},str(Path.cwd()),log_sink=log_sink)
     class Proxy(rpc.PluginAgentServiceServicer): assignment = ('execution','node')
     config = ServerConfig('p'*48,'execution','node','127.0.0.1:0',control_token='c'*48)
     owned = []
@@ -103,6 +107,10 @@ async def main():
             except RuntimeError as error: assert str(error) == 'consumer failed'
             else: raise AssertionError('Consumer error lost')
             assert (await client.status()).state == 'STOPPED'
+            text=''.join(message for message,_ in captured)
+            assert 'runtime stdout' in text and 'runtime stderr diagnostic' in text
+            assert 'runtime-fixture-sensitive-value' not in text and '[REDACTED]' in text
+            assert {fields['stream'] for _,fields in captured}=={'stdout','stderr'}
             for _ in range(2): assert (await client.stop('stop-one')).state == 'STOPPED'
             assert (await client.status()).state == 'STOPPED'
             await rejected(client.start('start-one'),grpc.StatusCode.FAILED_PRECONDITION)

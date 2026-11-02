@@ -1,0 +1,11 @@
+service:
+  name: orchestrator_worker
+  version: 0.1.0
+  description: Host agent managing local plugin containers
+  active: true
+  grpc: {enabled: true, port: 10042}
+  grpc_transport: {enabled: true}
+  ticket_auth: {enabled: true, tas_service: infra_tas}
+  plugin_runtime_client: {enabled: true}
+  observability: {enabled: true}
+  testing: {generated_fixtures: false}

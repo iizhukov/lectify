@@ -1,0 +1,12 @@
+plugin:
+  name: prompt_selector
+  version: 1.0.0
+  description: Выбор доступного пользователю промпта для передачи по DAG
+  category: io
+  inputs: []
+  outputs:
+    - {name: prompt, type: stream/prompt}
+  parameters:
+    - {name: prompt_id, type: string, required: true}
+  permissions:
+    llm: {enabled: true, allowed_models: [], allowed_purposes: []}

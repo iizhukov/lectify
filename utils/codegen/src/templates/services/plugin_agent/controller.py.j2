@@ -7,6 +7,7 @@ import grpc
 from generated.protos.plugins import index_pb2 as pb, index_pb2_grpc as rpc
 from generated.process_supervisor import stop_process_groups
 from generated.json_data import canonical_json_object
+from generated.runtime_logs import ProcessLogs
 
 
 async def _settle(task):
@@ -26,7 +27,7 @@ async def _settle(task):
 
 class PluginController(rpc.PluginControlServiceServicer):
     """One immutable assignment, one start, cleanup owned independently of RPCs."""
-    def __init__(self, execution_id, node_id, command, environment, cwd=None):
+    def __init__(self, execution_id, node_id, command, environment, cwd=None,log_sink=None):
         if (not isinstance(command,(list,tuple)) or not 1 <= len(command) <= 32
                 or any(not isinstance(arg,str) or not arg or len(arg)>4096 or '\x00' in arg for arg in command)):
             raise ValueError('A trusted runtime command argument vector is required')
@@ -47,21 +48,24 @@ class PluginController(rpc.PluginControlServiceServicer):
         self._state, self._command_id = 'READY', None
         self._parameters = None
         self._process = self._starting = self._stopping = self._monitor = None
+        self._logs=ProcessLogs(log_sink,self._environment)
 
     def _status(self):
         if self._process is not None and self._process.returncode is not None and self._state in ('STARTING','RUNNING'):
             self._state = 'EXITED'
         return pb.ControlStatus(state=self._state,exit_code=(self._process.returncode or 0) if self._process else 0,
-            supports_parameters=True)
+            supports_parameters=True,logs_incomplete=self._logs.incomplete)
 
     async def _spawn(self):
         try:
             self._process = await asyncio.create_subprocess_exec(*self._command,cwd=self._cwd,
-                env=self._environment,start_new_session=True)
+                env=self._environment,start_new_session=True,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+            self._logs.attach(self._process)
             if self._state != 'STOPPING':
                 self._state = 'RUNNING'
             async def monitor():
                 await self._process.wait()
+                await self._logs.finish()
                 if self._state not in ('STOPPING','STOPPED'):
                     self._state = 'EXITED'
             self._monitor = asyncio.create_task(monitor())
@@ -99,7 +103,8 @@ class PluginController(rpc.PluginControlServiceServicer):
         if self._starting is not None:
             await self._starting
         if self._process is not None:
-            await stop_process_groups([self._process],[self._monitor] if self._monitor else [])
+            await stop_process_groups([self._process])
+            if self._monitor is not None: await self._monitor
         self._state = 'STOPPED'
 
     async def close(self):

@@ -17,6 +17,37 @@ SPEC = dict(execution_id='execution', node_id='node', fence=1,
 
 
 @pytest.mark.asyncio
+async def test_host_resource_configuration_is_bounded(monkeypatch):
+    commands=[]
+    async def runner(*args):
+        commands.append(args)
+        return 'b'*64
+    monkeypatch.setenv('CODEGEN_SANDBOX_MEMORY_MIB','1024')
+    monkeypatch.setenv('CODEGEN_SANDBOX_TMPFS_MIB','384')
+    await sandbox_class()(runner=runner).create(**SPEC)
+    assert '--memory=1024m' in commands[0]
+    assert any('size=384m' in item for item in commands[0])
+    for memory,tmpfs in [('bad','64'),('128','128'),('9000','64'),('512','8')]:
+        monkeypatch.setenv('CODEGEN_SANDBOX_MEMORY_MIB',memory)
+        monkeypatch.setenv('CODEGEN_SANDBOX_TMPFS_MIB',tmpfs)
+        with pytest.raises(ValueError): sandbox_class()(runner=runner)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('labels', ['false ' + 'b'*32, 'true invalid', 'true ' + 'b'*32])
+async def test_host_agent_verifies_platform_ownership_before_container_control(labels):
+    async def runner(*args):
+        assert args[:2] == ('inspect', '--format')
+        return 'a'*64 + ' ' + labels
+    sandbox = sandbox_class()(runner=runner)
+    if labels == 'true ' + 'b'*32:
+        await sandbox.verify_managed('a'*64)
+    else:
+        with pytest.raises((ValueError, RuntimeError)):
+            await sandbox.verify_managed('a'*64)
+
+
+@pytest.mark.asyncio
 async def test_explicit_worker_context_scopes_every_daemon_operation():
     commands = []
     async def runner(*args):

@@ -104,3 +104,29 @@ async def test_required_background_credentials_fail_closed_without_key(monkeypat
     with pytest.raises(MockRpcError) as error:
         await OrchestratorServiceImpl(Runner()).StartExecution(request,context())
     assert error.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+@pytest.mark.asyncio
+async def test_resume_refreshes_only_owners_credential_and_keeps_failed_transition_atomic(test_session):
+    from src.models import WorkflowExecutionModel,WorkflowNodeExecutionModel
+    from unittest.mock import AsyncMock
+    now=[100]
+    store=ExecutionCredentials(CredentialCipher(Fernet.generate_key(),clock=lambda:now[0]))
+    service=OrchestratorServiceImpl(Runner(),credential_store=store)
+    service.dispatch_pending=AsyncMock(return_value=0)
+    row=WorkflowExecutionModel(id='paused-credential',workflow_id='workflow',user_id='user',state='PAUSED',
+        graph_json={'nodes':[{'id':'node'}],'edges':[]})
+    test_session.add(row); await test_session.flush()
+    test_session.add_all([WorkflowDispatchModel(execution_id=row.id,state='PAUSED',fence=2),
+        WorkflowNodeExecutionModel(execution_id=row.id,node_id='node',plugin_id='plugin')])
+    await test_session.commit()
+    admin=context('la_admin'); admin.lectify_principal=SimpleNamespace(user_id='admin',is_admin=True,access_expires_at=1000)
+    with pytest.raises(MockRpcError) as error:
+        await service.ResumeExecution(pb.ResumeExecutionRequest(execution_id=row.id),admin)
+    assert error.value.code()==grpc.StatusCode.PERMISSION_DENIED
+    await test_session.refresh(row); assert row.state=='PAUSED'
+    assert await test_session.get(ExecutionCredentialModel,row.id) is None
+    assert (await service.ResumeExecution(pb.ResumeExecutionRequest(execution_id=row.id),context('la_fresh'))).success
+    credential=await test_session.get(ExecutionCredentialModel,row.id)
+    assert store._cipher.open(credential.ciphertext,execution_id=row.id,owner_id='user',expires_at=1000)=='la_fresh'
+    assert b'la_fresh' not in credential.ciphertext

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import json
 import re
 import uuid
+from google.protobuf.json_format import MessageToDict,ParseDict
 
 import grpc
 
@@ -70,6 +71,7 @@ class ExecutionServiceImpl(ExecutionServiceBase):
                 await context.abort(grpc.StatusCode.UNAVAILABLE,'Invalid workflow snapshot identity')
             execution_id = str(uuid.uuid5(uuid.NAMESPACE_URL,json.dumps(['lectify-execution',user,snapshot.id])))
             graph = orch_pb.WorkflowGraph(nodes=[orch_pb.WorkflowNode(id=node.id,plugin_id=node.plugin_id,
+                name=node.name,description=node.description,
                 plugin_version=node.plugin_version,parameters_json=node.parameters_json,prompt_id=node.prompt_id,
                 input_mapping_json=json.dumps([dict(target_field=item.target_field,source=item.source,transform=item.transform)
                     for item in node.input_mapping],ensure_ascii=False)) for node in snapshot.graph.nodes],
@@ -101,6 +103,60 @@ class ExecutionServiceImpl(ExecutionServiceBase):
                     chunks_processed=node.chunks_processed,execution_time_ms=node.execution_time_ms,
                     error_message=node.error_message,output_artifacts=node.output_artifacts) for node in result.nodes])
 
+    async def Restart(self,request,context):
+        await self._id(request.execution_id,context)
+        if not 1<=len(request.request_key)<=128:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Restart request key is required')
+        async with self._backends(context) as (clients,metadata,_):
+            result=await orch_rpc.OrchestratorServiceStub(clients.channel('orchestrator')).RestartExecution(
+                orch_pb.RestartExecutionRequest(execution_id=request.execution_id,request_key=request.request_key),metadata=metadata,timeout=self.timeout)
+            if result.parent_execution_id!=request.execution_id or result.execution_id==request.execution_id:
+                await context.abort(grpc.StatusCode.UNAVAILABLE,'Invalid restart provenance')
+            return pb.RestartResponse(execution_id=result.execution_id,parent_execution_id=result.parent_execution_id,
+                snapshot_id=result.workflow_id,state=orch_pb.ExecutionState.Name(result.state),started_at=result.started_at)
+
+    async def GetDetails(self,request,context):
+        return await self._details_call('GetExecutionDetails',orch_pb.GetExecutionStatusRequest,pb.ExecutionDetails,request,context)
+
+    async def GetNodeDetails(self,request,context):
+        await self._id(request.node_id,context)
+        return await self._details_call('GetNodeDetails',orch_pb.NodeDetailsRequest,pb.NodeDetails,request,context,
+            node_id=request.node_id,page_size=request.page_size,offset=request.offset)
+
+    async def GetNodeLogs(self,request,context):
+        await self._id(request.node_id,context)
+        return await self._details_call('GetNodeLogs',orch_pb.NodeLogsRequest,pb.NodeLogsResponse,request,context,
+            node_id=request.node_id,attempt_number=request.attempt_number,after_sequence=request.after_sequence,page_size=request.page_size)
+
+    async def _details_call(self,method,request_class,response_class,request,context,**fields):
+        await self._id(request.execution_id,context)
+        async with self._backends(context) as (clients,metadata,_):
+            result=await getattr(orch_rpc.OrchestratorServiceStub(clients.channel('orchestrator')),method)(
+                request_class(execution_id=request.execution_id,**fields),metadata=metadata,timeout=self.timeout)
+            if method=='GetExecutionDetails' and result.status.execution_id!=request.execution_id:
+                await context.abort(grpc.StatusCode.UNAVAILABLE,'Invalid execution response scope')
+            if method=='GetNodeDetails' and result.node_id!=request.node_id:
+                await context.abort(grpc.StatusCode.UNAVAILABLE,'Invalid node response scope')
+            return ParseDict(MessageToDict(result,preserving_proto_field_name=True),response_class())
+
+    async def DownloadNodeLog(self,request,context):
+        await self._id(request.execution_id,context); await self._id(request.node_id,context)
+        async with self._backends(context) as (clients,metadata,_):
+            call=orch_rpc.OrchestratorServiceStub(clients.channel('orchestrator')).DownloadNodeLog(
+                orch_pb.NodeLogRequest(execution_id=request.execution_id,node_id=request.node_id,attempt_number=request.attempt_number),
+                metadata=metadata,timeout=self.timeout)
+            sequence,total,closed=0,0,False
+            try:
+                async for frame in call:
+                    if closed or frame.sequence!=sequence or len(frame.data)>65536:
+                        await context.abort(grpc.StatusCode.DATA_LOSS,'Invalid node log stream')
+                    total+=len(frame.data)
+                    if total>4194304+65536: await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'Node log exceeds download limit')
+                    sequence+=1; closed=frame.is_last
+                    yield pb.NodeLogChunk(data=frame.data,sequence=frame.sequence,is_last=frame.is_last,filename=frame.filename,truncated=frame.truncated)
+                if not closed: await context.abort(grpc.StatusCode.DATA_LOSS,'Node log stream ended without EOF')
+            finally: call.cancel()
+
     async def Cancel(self, request, context):
         await self._id(request.execution_id,context)
         if len(request.reason)>4096:
@@ -110,6 +166,40 @@ class ExecutionServiceImpl(ExecutionServiceBase):
             result = await stub.CancelExecution(orch_pb.CancelExecutionRequest(execution_id=request.execution_id,
                 reason=request.reason),metadata=metadata,timeout=self.timeout)
             return pb.CancelResponse(success=result.success,state=orch_pb.ExecutionState.Name(result.state))
+
+    async def Pause(self,request,context):
+        return await self._control('PauseExecution',orch_pb.PauseExecutionRequest,request,context)
+
+    async def Resume(self,request,context):
+        return await self._control('ResumeExecution',orch_pb.ResumeExecutionRequest,request,context)
+
+    async def RetryNode(self,request,context):
+        await self._id(request.node_id,context)
+        return await self._control('RetryNode',orch_pb.RetryNodeRequest,request,context,node_id=request.node_id)
+
+    async def _control(self,method,message,request,context,**fields):
+        await self._id(request.execution_id,context)
+        async with self._backends(context) as (clients,metadata,_):
+            stub=orch_rpc.OrchestratorServiceStub(clients.channel('orchestrator'))
+            result=await getattr(stub,method)(message(execution_id=request.execution_id,**fields),metadata=metadata,timeout=self.timeout)
+            state=orch_pb.NodeState.Name(result.state) if method=='RetryNode' else orch_pb.ExecutionState.Name(result.state)
+            return pb.ControlResponse(success=result.success,state=state)
+
+    async def ListExecutions(self, request, context):
+        size = request.page_size or 20
+        if not 1 <= size <= 100 or not 0 <= request.offset <= 10000:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Invalid execution pagination')
+        async with self._backends(context) as (clients,metadata,_):
+            stub = orch_rpc.OrchestratorServiceStub(clients.channel('orchestrator'))
+            result = await stub.ListExecutions(orch_pb.ListExecutionsRequest(page_size=size,offset=request.offset),
+                metadata=metadata,timeout=self.timeout)
+            if len(result.executions)>size:
+                await context.abort(grpc.StatusCode.UNAVAILABLE, 'Invalid execution list response')
+            return pb.ListExecutionsResponse(has_more=result.has_more,executions=[pb.ExecutionSummary(
+                execution_id=row.execution_id,snapshot_id=row.workflow_id,state=row.state,
+                parent_execution_id=row.parent_execution_id,
+                total_progress_percent=row.total_progress_percent,started_at=row.started_at,finished_at=row.finished_at)
+                for row in result.executions])
 
     async def StreamEvents(self, request, context):
         await self._id(request.execution_id,context)

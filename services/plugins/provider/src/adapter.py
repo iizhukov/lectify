@@ -126,8 +126,9 @@ class PolzaAdapter:
     async def transcribe(self, body, metadata, policy):
         async def encoded_json():
             # Multiples of three keep each base64 fragment independently concatenable.
-            prefix = json.dumps({'model': metadata.model, 'language': metadata.language or 'auto',
-                'response_format': 'json'}, separators=(',', ':'))[:-1]
+            fields={'model':metadata.model,'response_format':'json'}
+            if metadata.language and metadata.language!='auto': fields['language']=metadata.language
+            prefix = json.dumps(fields, separators=(',', ':'))[:-1]
             yield (prefix + ',"file":"data:' + metadata.content_type + ';base64,').encode()
             while True:
                 chunk = await run_blocking(body.read, 49152)

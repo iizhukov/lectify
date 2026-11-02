@@ -79,10 +79,12 @@ class WorkflowServiceImpl(WorkflowServiceBase):
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, 'Resource is read only')
 
     async def _validate_graph(self, graph, context):
-        if self._registry_provider is None:
-            await context.abort(grpc.StatusCode.UNAVAILABLE, 'Plugin registry validation is not configured')
         try:
-            schemas = self._registry_provider(graph)
+            if self._registry_provider is None:
+                from src.registry import registry_schemas
+                schemas = registry_schemas(graph, context)
+            else:
+                schemas = self._registry_provider(graph)
             if inspect.isawaitable(schemas):
                 schemas = await asyncio.wait_for(schemas, timeout=5)
             return validate_graph(graph, schemas)

@@ -1,0 +1,15 @@
+plugin:
+  name: text_output
+  version: 0.1.0
+  description: Persist pipeline text as a downloadable artifact
+  category: io
+  inputs:
+    - name: text
+      type: stream/text
+      buffer: {strategy: full}
+  outputs:
+    - {name: result, type: artifact/file}
+  parameters:
+    - {name: filename, type: string, default: result.txt}
+  permissions:
+    storage: {enabled: true, upload_artifacts: true}

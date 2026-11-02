@@ -5,6 +5,8 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg ca-certificates \
+    {% for package in plugin.system_packages %}{{ package }} \
+    {% endfor %}
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=lectify_agent /generated/requirements.txt /tmp/agent-requirements.txt
@@ -13,6 +15,7 @@ RUN pip install --no-cache-dir -r /tmp/agent-requirements.txt -r /tmp/runtime-re
 
 COPY --from=lectify_agent /generated/ /agent/generated/
 COPY --from=lectify_agent /src/ /agent/src/
+COPY --from=lectify_agent /service.yaml /agent/service.yaml
 COPY generated/ /runtime/generated/
 COPY src/ /runtime/src/
 

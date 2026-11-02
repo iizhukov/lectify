@@ -60,6 +60,7 @@ async def expect(awaitable, code):
     try: await awaitable
     except grpc.aio.AioRpcError as error:
         assert error.code()==code, error
+        assert 'secret backend detail' not in error.details()
     else: raise AssertionError('Expected scoped denial')
 
 async def collect(call): return [part async for part in call]
@@ -107,6 +108,12 @@ async def main():
             await client.report_metrics({'latency':1},{'items':1})
             await client.log('info','working')
         assert set(backends.calls)=={'llm','stt','file','prompt','artifact','progress','metrics','log'}
+        async def denied(**fields):
+            raise grpc.aio.AioRpcError(grpc.StatusCode.PERMISSION_DENIED,(),(),'secret backend detail')
+        proxy.backends=SimpleNamespace(report_progress=denied)
+        async with grpc.aio.insecure_channel(address) as channel:
+            stub=rpc.PluginAgentServiceStub(channel)
+            await expect(stub.ReportProgress(pb.ReportProgressRequest(percent=1),metadata=authorized),grpc.StatusCode.PERMISSION_DENIED)
         # Missing backend port cannot pretend a durable operation succeeded.
         proxy.backends=SimpleNamespace()
         async with grpc.aio.insecure_channel(address) as channel:

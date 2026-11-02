@@ -1,0 +1,15 @@
+plugin:
+  name: file_output
+  version: 0.1.0
+  description: Persist binary pipeline output as a downloadable file
+  category: io
+  inputs:
+    - name: data
+      type: stream/binary
+      buffer: {strategy: full}
+  outputs:
+    - {name: result, type: artifact/file}
+  parameters:
+    - {name: filename, type: string, default: result.bin}
+  permissions:
+    storage: {enabled: true, upload_artifacts: true}

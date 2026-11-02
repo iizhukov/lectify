@@ -1,0 +1,30 @@
+plugin:
+  name: text_to_latex
+  version: 1.0.0
+  description: LaTeX-конспект с определением предмета и промптом из библиотеки
+  category: ai
+  inputs:
+    - name: text
+      type: stream/text
+      buffer: {strategy: full}
+    - name: prompt
+      type: stream/prompt
+      required: false
+      buffer: {strategy: full}
+  outputs:
+    - {name: latex, type: stream/text}
+    - {name: output, type: artifact/file}
+    - {name: metadata, type: stream/json}
+  parameters:
+    - {name: subject, type: string, default: auto}
+    - {name: segments, type: int, default: 3}
+    - {name: model, type: string, default: openai/gpt-4o-mini}
+    - {name: max_tokens, type: int, default: 4096}
+    - {name: timeout, type: int, default: 120}
+    - {name: values, type: dict, default: {}}
+  permissions:
+    llm:
+      enabled: true
+      allowed_models: [openai/gpt-4o-mini, gpt-4o, deepseek-chat]
+      allowed_purposes: [subject, latex]
+    storage: {enabled: true, upload_artifacts: true}

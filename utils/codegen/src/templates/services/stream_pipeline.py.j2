@@ -7,7 +7,7 @@ from generated.stream_dag import WorkflowDAG, DAGValidationError
 from generated.stream_router import StreamRouter, StreamChunkData
 
 
-async def run_streaming_graph(execution_id, nodes, edges, run_node, *, on_node_complete=None):
+async def run_streaming_graph(execution_id, nodes, edges, run_node, *, on_node_complete=None, initial_inputs=None):
     """run_node(node, inputs) returns validated output frames from its runtime.
 
     Subscriptions precede every producer. Runtime RPCs may reside on different
@@ -19,13 +19,27 @@ async def run_streaming_graph(execution_id, nodes, edges, run_node, *, on_node_c
     router = StreamRouter(execution_id)
     incoming = {node['id']: {} for node in nodes}
     outgoing = {node['id']: {} for node in nodes}
+    external = {node['id']: {} for node in nodes}
     subscriptions = []
     tasks = []
     try:
+        for node in nodes:
+            for mapping in node.get('input_mapping', []):
+                name, source = mapping['target_field'], mapping['source']
+                if (not source.startswith('input.') or mapping.get('transform', 'passthrough') != 'passthrough'
+                        or name in external[node['id']]):
+                    raise DAGValidationError('Invalid external input mapping')
+                key = source[len('input.'):]
+                if initial_inputs is None or key not in initial_inputs:
+                    raise DAGValidationError('Required external input is missing')
+                value = initial_inputs[key]
+                if not isinstance(value, str) or len(value.encode('utf-8')) > 65536:
+                    raise DAGValidationError('External text input exceeds limit')
+                external[node['id']][name] = value.encode('utf-8')
         for edge in edges:
             destination = incoming[edge['to_node_id']]
             name = edge['to_input']
-            if name in destination:
+            if name in destination or name in external[edge['to_node_id']]:
                 raise DAGValidationError('Each stream input must have exactly one source')
             channel = router.get_or_create_channel(edge['from_node_id'], edge['from_output'])
             queue = channel.subscribe()
@@ -40,6 +54,9 @@ async def run_streaming_graph(execution_id, nodes, edges, run_node, *, on_node_c
             sequences = {}
 
             async def inputs():
+                for name, payload in external[node_id].items():
+                    consumed.add(name)
+                    yield StreamChunkData(stream_name=name, payload=payload, is_last=True, sequence=0)
                 reads = {asyncio.create_task(queue.get()):name
                     for name, queue in incoming[node_id].items()}
                 try:
@@ -71,7 +88,7 @@ async def run_streaming_graph(execution_id, nodes, edges, run_node, *, on_node_c
                         channel = outgoing[node_id].get(name)
                         if channel is not None:
                             await channel.publish(frame)
-                if consumed != set(incoming[node_id]):
+                if consumed != set(incoming[node_id]) | set(external[node_id]):
                     raise ValueError('Node stopped before consuming its input streams')
                 if not set(outgoing[node_id]) <= ended:
                     raise ValueError('Node output stream was truncated')

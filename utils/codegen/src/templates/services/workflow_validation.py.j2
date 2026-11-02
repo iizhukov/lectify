@@ -119,7 +119,7 @@ def validate_graph(graph, registry_schemas):
     nodes, edges = graph.get('nodes'), graph.get('edges')
     if not isinstance(nodes, list) or not 1 <= len(nodes) <= 256 or not isinstance(edges, list) or len(edges) > 1024:
         raise ValueError('Graph node or edge limit exceeded')
-    result, ports = [], {}
+    result, ports, required = [], {}, {}
     for node in nodes:
         if not isinstance(node, dict) or set(node) - {'id', 'plugin_id', 'plugin_version', 'name', 'description', 'parameters', 'input_mapping', 'prompt_id'}:
             raise ValueError('Invalid node')
@@ -135,6 +135,7 @@ def validate_graph(graph, registry_schemas):
         if schema.get('name') != plugin or schema.get('version') != version:
             raise RegistryUnavailableError('Registry snapshot identity mismatch')
         inputs, outputs = _ports(schema, 'inputs'), _ports(schema, 'outputs')
+        required[node_id] = {port['name'] for port in schema['inputs'] if port.get('required') is True}
         name, description, prompt = node.get('name', ''), node.get('description', ''), node.get('prompt_id', '')
         if not isinstance(name, str) or len(name) > 200 or not isinstance(description, str) or len(description) > 4096:
             raise ValueError('Node text exceeds limit')
@@ -185,6 +186,9 @@ def validate_graph(graph, registry_schemas):
         adjacency[source].append(target)
         degree[target] += 1
         normalized_edges.append(dict(edge))
+    for node_id, names in required.items():
+        if names - ports[node_id][2] - {port for target, port in targets if target == node_id}:
+            raise ValueError('Required plugin input has no source')
     ready, visited = deque(node for node, count in degree.items() if not count), 0
     while ready:
         node = ready.popleft()

@@ -1,0 +1,67 @@
+# Auto-generated — DO NOT EDIT MANUALLY
+"""Reusable operation metrics. Callers supply bounded operation/implementation names."""
+import time
+from contextlib import contextmanager
+from opentelemetry import metrics
+
+_meter = metrics.get_meter('application.operations')
+_active = _meter.create_up_down_counter('application.operation.active')
+_completed = _meter.create_counter('application.operation.completed')
+_duration = _meter.create_histogram('application.operation.duration', unit='s')
+_bytes = _meter.create_counter('application.operation.bytes', unit='By')
+_chunks = _meter.create_counter('application.operation.chunks')
+_reports = _meter.create_counter('application.reported.counter')
+_gauges = {}
+_report_keys = set()
+
+
+def _observe(options):
+    from opentelemetry.metrics import Observation
+    return [Observation(value, {'implementation':implementation,'metric':name})
+        for (implementation,name),value in list(_gauges.items())]
+
+
+_meter.create_observable_gauge('application.reported.gauge',callbacks=[_observe])
+
+
+def report(implementation, gauges, counters):
+    for group, values in (('gauge',gauges),('counter',counters)):
+        for name,value in values.items():
+            key = (implementation,name,group)
+            if key not in _report_keys and len(_report_keys) >= 1024:
+                continue
+            _report_keys.add(key)
+            if group == 'gauge':
+                _gauges[implementation,name] = value
+            else:
+                _reports.add(value,{'implementation':implementation,'metric':name})
+
+
+def completion(kind, outcome, seconds):
+    labels = {'operation':kind, 'implementation':'default', 'outcome':outcome}
+    _completed.add(1,labels)
+    _duration.record(seconds,labels)
+
+
+@contextmanager
+def operation(kind, implementation='default'):
+    attributes = {'operation':kind, 'implementation':implementation}
+    start, outcome = time.monotonic(), 'completed'
+    _active.add(1, attributes)
+    try:
+        yield
+    except BaseException as error:
+        import asyncio
+        outcome = 'cancelled' if isinstance(error, (asyncio.CancelledError, GeneratorExit)) else 'failed'
+        raise
+    finally:
+        labels = dict(attributes, outcome=outcome)
+        _completed.add(1, labels)
+        _duration.record(time.monotonic() - start, labels)
+        _active.add(-1, attributes)
+
+
+def transfer(kind, implementation, direction, size):
+    attributes = {'operation':kind, 'implementation':implementation, 'direction':direction}
+    _bytes.add(size, attributes)
+    _chunks.add(1, attributes)

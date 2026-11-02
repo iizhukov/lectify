@@ -4,6 +4,7 @@ from contextlib import aclosing
 import math
 import tempfile
 import time
+import os
 
 import grpc
 import httpx
@@ -24,7 +25,11 @@ class ProviderServiceImpl(ProviderServiceBase):
 
     def _backend(self):
         if self._adapter is None:
-            self._adapter = PolzaAdapter(get_http_client(), get_settings().http.bearer_token.get_secret_value())
+            endpoint = os.environ.get('LECTIFY_PROVIDER_TEST_ENDPOINT')
+            if endpoint is not None and os.environ.get('LECTIFY_ALLOW_TEST_PROVIDER') != '1':
+                raise ProviderFailure('configuration')
+            self._adapter = PolzaAdapter(get_http_client(), get_settings().http.bearer_token.get_secret_value(),
+                test_endpoint=endpoint)
         return self._adapter
 
     async def _scope(self, request, context):

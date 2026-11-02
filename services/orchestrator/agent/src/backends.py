@@ -146,15 +146,30 @@ class RPCBackends:
             finally:
                 call.cancel()
 
-    async def fetch_prompt(self, *, owner_id, execution_id, node_id, prompt_id, variables):
+    async def get_file_info(self, *, owner_id, execution_id, node_id, file_id):
+        async with self._verified(owner_id) as (clients,metadata):
+            stub = file_rpc.FileServiceStub(self._channel(clients,'api_file'))
+            result = await stub.GetFile(file_pb.FileRequest(id=file_id),metadata=metadata,timeout=self.timeout)
+            if result.id != file_id or result.size_bytes < 0:
+                raise RuntimeError('Invalid file service metadata')
+            return dict(file_id=result.id,filename=result.filename,content_type=result.content_type,
+                        size_bytes=result.size_bytes,sha256=result.sha256)
+
+    async def fetch_prompt(self, *, owner_id, execution_id, node_id, prompt_id, variables, raw_template=False):
         async with self._verified(owner_id) as (clients, metadata):
             stub = prompt_rpc.PromptServiceStub(self._channel(clients, 'api_prompt'))
             prompt = await stub.GetPrompt(prompt_pb.GetPromptRequest(id=prompt_id),
                                           timeout=self.timeout, metadata=metadata)
+            if raw_template:
+                if variables:
+                    raise ValueError('Raw template fetching does not render variables')
+                return dict(prompt_id=prompt.id,system_prompt=prompt.system_prompt,
+                    user_prompt_template=prompt.user_prompt_template,rendered_user_prompt='',variables=list(prompt.variables))
             rendered = await stub.RenderPrompt(prompt_pb.RenderPromptRequest(id=prompt_id, variables=variables),
                                                 timeout=self.timeout, metadata=metadata)
             return dict(prompt_id=prompt.id, system_prompt=rendered.system_prompt,
-                        user_prompt_template=prompt.user_prompt_template, rendered_user_prompt=rendered.user_prompt)
+                        user_prompt_template=prompt.user_prompt_template, rendered_user_prompt=rendered.user_prompt,
+                        variables=list(prompt.variables))
 
     async def save_artifact(self, *, owner_id, execution_id, node_id, artifact_name, filename, content_type, data):
         async with self._verified(owner_id) as (clients, metadata):
@@ -171,6 +186,8 @@ class RPCBackends:
             result = await stub.Upload(frames(), timeout=self.timeout, metadata=metadata)
             if result.size_bytes != len(data) or result.sha256 != checksum or not result.id:
                 raise RuntimeError('File service did not confirm artifact persistence')
+            await self._emit(owner_id=owner_id,execution_id=execution_id,node_id=node_id,
+                event_type='artifact',payload=dict(artifact_name=artifact_name,file_id=result.id,size_bytes=result.size_bytes))
             return dict(file_id=result.id, size_bytes=result.size_bytes)
 
     async def _emit(self, *, owner_id, execution_id, node_id, event_type, payload):

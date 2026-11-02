@@ -1,7 +1,7 @@
 import json
 import keyword
 from typing import Any, Literal
-from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator, model_serializer
 
 
 BufferStrategy = Literal["size", "time", "delimiter", "full"]
@@ -102,6 +102,22 @@ class PluginConfig(BaseModel):
     category: str = Field(default="general",max_length=64)
     language: Literal["python", "go", "rust", "nodejs"] = "python"
     active: bool = True
+    system_packages: list[str] = Field(default_factory=list,max_length=64)
+
+    @field_validator('system_packages')
+    @classmethod
+    def validate_system_packages(cls, values):
+        import re
+        if len(values)!=len(set(values)) or any(not re.fullmatch(r'[a-z0-9][a-z0-9+.-]{0,127}',v) for v in values):
+            raise ValueError('System packages must be unique package names without options')
+        return values
+
+    @model_serializer(mode='wrap')
+    def serialize(self, handler):
+        result=handler(self)
+        # Preserve canonical manifests and image hashes for existing versions.
+        if not self.system_packages: result.pop('system_packages',None)
+        return result
 
     inputs: list[PluginInputConfig] = Field(default_factory=list)
     outputs: list[PluginOutputConfig] = Field(default_factory=list)

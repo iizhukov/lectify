@@ -5,6 +5,7 @@ import time
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import select
 from src.engine.dispatch import claim
 from src.engine.launch import prepare_launch
 from src.engine.grants import assignment_policy,assignment_grants,_same_data
@@ -51,6 +52,27 @@ async def test_policy_uses_saved_owner_and_exact_node_capabilities(test_session,
         with pytest.raises(PermissionError):
             await assignment_policy(test_session,**{**assignment,**change})
     await test_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_file_input_grant_is_bound_to_the_committed_external_file(test_session,assignment):
+    node = dict(assignment['node'],plugin_id='file_input',parameters={},
+        input_mapping=[{'target_field':'file_id','source':'input.selected','transform':'passthrough'}])
+    execution = await test_session.get(WorkflowExecutionModel,'grants')
+    execution.graph_json = {'nodes':[node]}
+    execution.initial_inputs = {'selected':'owned-file'}
+    model = await test_session.scalar(select(WorkflowNodeExecutionModel).where(
+        WorkflowNodeExecutionModel.execution_id == 'grants'))
+    model.plugin_id = 'file_input'
+    test_session.add(PluginRegistryModel(id='file_input',version='0.1.0',name='file_input',
+        manifest_yaml='plugin: {name: file_input, permissions: {storage: {enabled: true}}}'))
+    await test_session.commit()
+    policy = await assignment_policy(test_session,**dict(assignment,node=node))
+    assert policy['file_ids'] == ['owned-file']
+    forged = deepcopy(node)
+    forged['input_mapping'][0]['source'] = 'input.other'
+    with pytest.raises(PermissionError,match='committed graph'):
+        await assignment_policy(test_session,**dict(assignment,node=forged))
 
 
 @pytest.mark.asyncio

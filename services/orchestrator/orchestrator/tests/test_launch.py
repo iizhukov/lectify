@@ -195,3 +195,28 @@ async def test_durable_intent_and_identity_are_committed_before_external_actions
     async with factory() as session:
         assert await session.scalar(select(ContainerAttemptModel.state).where(
             ContainerAttemptModel.execution_id == 'ordered')) == 'CLEANED'
+
+
+@pytest.mark.asyncio
+async def test_uncertain_create_remains_observed_until_late_container_appears(test_session):
+    from src.engine.launch import cleanup_created_containers
+    from generated.db.connection import get_session_factory
+    test_session.add(WorkflowExecutionModel(id='late',workflow_id='workflow',state='PAUSED'))
+    await test_session.flush()
+    test_session.add(WorkflowDispatchModel(execution_id='late',state='PAUSED',fence=2))
+    attempt=ContainerAttemptModel(id='f'*32,execution_id='late',node_id='node',fence=1,role='plugin',
+        image='registry/plugin@sha256:'+'a'*64,daemon_id='daemon',state='CREATING')
+    test_session.add(attempt); await test_session.commit()
+    class Sandbox:
+        found=False
+        async def daemon_identity(self): return 'daemon'
+        async def reconcile(self,**scope):
+            assert scope['attempt_id']==attempt.id and scope['fence']==1
+            return self.found
+    sandbox=Sandbox(); factory=get_session_factory()
+    assert await cleanup_created_containers(factory,sandbox,execution_id='late')==0
+    await test_session.refresh(attempt)
+    assert attempt.state=='CREATING' and attempt.cleanup_checked_at>0
+    sandbox.found=True
+    assert await cleanup_created_containers(factory,sandbox,execution_id='late')==1
+    await test_session.refresh(attempt); assert attempt.state=='CLEANED'

@@ -11,6 +11,8 @@ from sqlalchemy import select
 from generated.protos.server import index_pb2 as pb
 from src.engine.dispatch import guard_execution_write,database_epoch
 from src.models import NodeEventModel, WorkflowDispatchModel, WorkflowNodeExecutionModel,ExecutionCredentialModel,WorkflowExecutionModel
+from src.models import WorkflowNodeAttemptModel
+from src.engine.attempts import LOG_LIMIT
 
 _ID = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.:-]*$')
 _METRIC = re.compile(r'^[A-Za-z_:][A-Za-z0-9_:]{0,127}$')
@@ -136,6 +138,17 @@ async def report_node_event(factory, request, context):
             WorkflowNodeExecutionModel.node_id == request.node_id))).scalar_one_or_none()
         if node is None or node.state not in ('PROVISIONING','BUFFERING','PROCESSING'):
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Node assignment is not active')
+        if request.kind=='log':
+            attempt=await session.scalar(select(WorkflowNodeAttemptModel).where(WorkflowNodeAttemptModel.execution_id==request.execution_id,
+                WorkflowNodeAttemptModel.node_id==request.node_id,WorkflowNodeAttemptModel.fence==request.fence))
+            if attempt is not None:
+                size=len(json.dumps(payload,ensure_ascii=False).encode())
+                if attempt.log_bytes+size>LOG_LIMIT:
+                    attempt.logs_truncated=True
+                    await session.commit()
+                    return pb.ReportNodeEventResponse(accepted=True,event_id=request.event_id)
+                attempt.log_bytes+=size
+                if payload['fields'].get('truncated')=='true': attempt.logs_truncated=True
         if request.kind == 'progress':
             if node.state != 'PROCESSING':
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Node is not processing')
@@ -158,4 +171,7 @@ async def report_node_event(factory, request, context):
         await session.flush()
         sequence = event.sequence
         await session.commit()
+        if request.kind == 'metrics':
+            from generated.observability.operations import report
+            report(node.plugin_id,payload['gauges'],payload['counters'])
     return pb.ReportNodeEventResponse(accepted=True,event_id=request.event_id,sequence=sequence)

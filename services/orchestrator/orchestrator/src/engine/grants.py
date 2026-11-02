@@ -6,7 +6,7 @@ from sqlalchemy import select
 from generated.plugin_manifest import parse_plugin_manifest
 from generated.json_data import same_json_data as _same_data
 from src.engine.dispatch import guard_execution_write
-from src.models import WorkflowExecutionModel, WorkflowNodeExecutionModel, PluginRegistryModel, ContainerAttemptModel
+from src.models import WorkflowExecutionModel, WorkflowNodeExecutionModel, PluginRegistryModel, ContainerAttemptModel,ExecutionCredentialModel
 
 
 async def assignment_policy(session, *, execution_id, node, ownership, placement):
@@ -40,12 +40,24 @@ async def assignment_policy(session, *, execution_id, node, ownership, placement
     file_ids, prompt_ids = [], []
     if plugin['permissions']['storage']['enabled']:
         file_id = node.get('parameters',{}).get('file_id')
+        if plugin['name'] in ('file_input','input'):
+            bindings = [item for item in node.get('input_mapping', []) if item['target_field'] == 'file_id']
+            if len(bindings) != 1 or not bindings[0]['source'].startswith('input.'):
+                raise ValueError('File input requires one external file ID binding')
+            file_id = execution.initial_inputs.get(bindings[0]['source'][len('input.'):])
+            if not file_id:
+                raise ValueError('External file ID is required')
         if file_id:
             if not isinstance(file_id,str) or len(file_id)>128 or '\x00' in file_id:
                 raise ValueError('Invalid assigned file ID')
             file_ids.append(file_id)
-    if plugin['permissions']['llm']['enabled'] and node.get('prompt_id'):
-        prompt_id = node['prompt_id']
+    prompt_id = node.get('prompt_id')
+    if plugin['name'] == 'prompt_selector':
+        selected = node.get('parameters',{}).get('prompt_id')
+        if prompt_id and selected != prompt_id:
+            raise ValueError('Conflicting prompt assignment')
+        prompt_id = selected
+    if plugin['permissions']['llm']['enabled'] and prompt_id:
         if not isinstance(prompt_id,str) or len(prompt_id)>128 or '\x00' in prompt_id:
             raise ValueError('Invalid assigned prompt ID')
         prompt_ids.append(prompt_id)
@@ -68,6 +80,8 @@ def assignment_grants(factory, provision, *, credentials=None):
                 policy['report_token'] = await credentials.report_capability(session,execution_id=execution_id,
                     owner_id=policy['owner_id'],ownership=ownership)
                 policy.update(lease_owner=ownership[0],fence=ownership[1])
+                credential = await session.get(ExecutionCredentialModel,execution_id)
+                policy['credential_expires_at'] = credential.expires_at
             await session.commit()
         async with provision(policy=policy,placement=dict(placement),ownership=ownership) as grant:
             yield grant

@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import time
+from contextlib import aclosing
 
 import grpc
 from pydantic import ValidationError
@@ -67,6 +68,7 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
 
     async def ProcessStream(self, request_iterator, context):
         pending_read = None
+        handler = None
         try:
             params = PluginParameters.model_validate(json.loads(os.environ.get('PLUGIN_PARAMETERS', '{}')))
             plugin_context = PluginContext(
@@ -92,6 +94,16 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
                                            payload=payload[offset:offset + self.max_chunk_bytes])
                         output_sequences[name] += 1
 
+            async def output_frames(result):
+                if hasattr(result, '__aiter__'):
+                    async with aclosing(result) as outputs:
+                        async for item in outputs:
+                            for frame in frames(item):
+                                yield frame
+                else:
+                    for frame in frames(result):
+                        yield frame
+
             async with self.sidecar_factory(execution_id=self.assignment[0], node_id=self.assignment[1]) as sidecar:
                 handler = self.handler_factory(context=plugin_context, sidecar=sidecar)
                 if len(INPUTS) > 1 and not hasattr(handler, 'process_input'):
@@ -102,11 +114,11 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
                         return await handler.process_input(name, data)
                     return await handler.process_buffer(data)
 
-                for frame in frames(await handler.on_start()):
+                async for frame in output_frames(await handler.on_start()):
                     yield frame
                 if not INPUTS and hasattr(handler, 'produce'):
                     async for output in handler.produce():
-                        for frame in frames(output):
+                        async for frame in output_frames(output):
                             yield frame
                 iterator = request_iterator.__aiter__()
                 pending_read = asyncio.create_task(anext(iterator))
@@ -123,7 +135,7 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
                                 data = await buffer.flush()
                                 buffer._last_flush_time = time.monotonic()
                                 if data is not None:
-                                    for frame in frames(await process(name, data)):
+                                    async for frame in output_frames(await process(name, data)):
                                         yield frame
                         continue
                     try:
@@ -146,7 +158,7 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
                         stream_name=name, payload=chunk.payload, is_last=chunk.is_last,
                     ))
                     for batch in batches:
-                        for frame in frames(await process(name, batch)):
+                        async for frame in output_frames(await process(name, batch)):
                             yield frame
                     if chunk.is_last:
                         closed.add(name)
@@ -158,9 +170,9 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
                     if name not in closed:
                         data = await buffer.flush()
                         if data is not None:
-                            for frame in frames(await process(name, data)):
+                            async for frame in output_frames(await process(name, data)):
                                 yield frame
-                for frame in frames(await handler.on_finish()):
+                async for frame in output_frames(await handler.on_finish()):
                     yield frame
                 for name in sorted(OUTPUTS):
                     yield pb.DataChunk(stream_name=name, sequence_number=output_sequences[name], is_last=True)
@@ -172,9 +184,27 @@ class PluginRuntimeService(rpc.PluginRuntimeServiceServicer):
             await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, str(exc))
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except grpc.aio.AioRpcError as error:
+            # Preserve retry/authorization semantics without exposing provider
+            # response bodies or credentials in the downstream status message.
+            await context.abort(error.code(),'Plugin dependency request failed')
+        except Exception as error:
+            # Record safe diagnostic metadata through the generated sidecar API.
+            # Exception messages and locals can contain provider/user credentials.
+            import traceback
+            location = traceback.extract_tb(error.__traceback__)[-1]
+            try:
+                diagnostic = self.sidecar_factory(execution_id=self.assignment[0], node_id=self.assignment[1])
+                if hasattr(diagnostic, 'log'):
+                    async with asyncio.timeout(3), diagnostic as reporter:
+                        await reporter.log('error','Plugin execution failed',error_type=type(error).__name__,
+                            location=location.name+':'+str(location.lineno))
+            except Exception:
+                pass
             await context.abort(grpc.StatusCode.INTERNAL, 'Plugin execution failed')
         finally:
             if pending_read is not None:
                 pending_read.cancel()
                 await asyncio.gather(pending_read, return_exceptions=True)
+            if handler is not None and callable(getattr(handler,'on_cleanup',None)):
+                await handler.on_cleanup()

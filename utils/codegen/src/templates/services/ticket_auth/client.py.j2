@@ -76,7 +76,7 @@ class TicketAuthClient:
         self._tas_pb2_module = pb2_mod
         tas_target = "{{ tas_address }}"
         {% if manifest.service.plugin_agent.enabled %}
-        tas_target = os.environ.get("LECTIFY_AGENT_TAS_ADDRESS", tas_target)
+        tas_target = os.environ.get("LECTIFY_AGENT_TAS_ADDRESS", os.environ.get('LECTIFY_TAS_ADDRESS', tas_target))
         self._tas_channel = create_channel(tas_target, TLSConfig.from_env("LECTIFY_AGENT_BACKEND_TLS"), interceptors=interceptors)
         {% elif manifest.service.grpc_transport.enabled %}
         tas_target = os.environ.get("LECTIFY_TAS_ADDRESS", tas_target)

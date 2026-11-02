@@ -1,0 +1,11 @@
+plugin:
+  name: text_input
+  version: 0.1.0
+  description: External UTF-8 text input for a pipeline
+  category: io
+  inputs:
+    - name: value
+      type: stream/text
+      buffer: {strategy: full}
+  outputs:
+    - {name: text, type: stream/text}

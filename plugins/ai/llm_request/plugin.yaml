@@ -1,0 +1,31 @@
+plugin:
+  name: llm_request
+  version: 1.0.0
+  description: LLM-запрос с промптом из библиотеки, переменными и текстом из DAG
+  category: ai
+  inputs:
+    - name: text
+      type: stream/text
+      required: false
+      buffer: {strategy: full}
+    - name: prompt
+      type: stream/prompt
+      required: false
+      buffer: {strategy: full}
+  outputs:
+    - {name: response, type: stream/text}
+    - {name: result_file, type: artifact/file}
+  parameters:
+    - {name: model, type: string, default: openai/gpt-4o-mini}
+    - {name: temperature, type: float, default: 0.7}
+    - {name: max_tokens, type: int, default: 4096}
+    - {name: timeout, type: int, default: 120}
+    - {name: system_prompt, type: string, default: ''}
+    - {name: user_prompt_template, type: string, default: '{{text}}'}
+    - {name: values, type: dict, default: {}}
+  permissions:
+    llm:
+      enabled: true
+      allowed_purposes: [llm_request]
+      allowed_models: [openai/gpt-4o-mini, gpt-4o, deepseek-chat]
+    storage: {enabled: true, upload_artifacts: true}

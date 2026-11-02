@@ -71,3 +71,4 @@ services/temp
 
 # Local credentials
 .secrets/
+.local/

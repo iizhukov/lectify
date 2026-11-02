@@ -44,7 +44,7 @@ def get_service_proto(service: Path) -> Path:
 def get_service_path(service_name: str) -> Path:
     repo_root = get_repo_root()
     
-    for manifest_path in repo_root.rglob("service.yaml"):
+    for manifest_path in (repo_root / 'services').rglob("service.yaml"):
         try:
             manifest = get_service_manifest(manifest_path)
         except ServiceManifestError:
@@ -187,6 +187,8 @@ def get_plugin_manifest(plugin_path: Path) -> PluginManifest:
 
 def get_plugin_path(plugin_name: str) -> Path:
     repo_root = get_repo_root()
+    name, separator, version = plugin_name.partition('@')
+    matches = []
     for manifest_path in (repo_root / "plugins").rglob("plugin.yaml"):
         try:
             manifest = get_plugin_manifest(manifest_path)
@@ -194,8 +196,13 @@ def get_plugin_path(plugin_name: str) -> Path:
             print(f"[codegen] WARNING: {manifest_path} is invalid")
             continue
 
-        if manifest.plugin.name == plugin_name:
-            return manifest_path.parent
+        if manifest.plugin.name == name and (not separator or manifest.plugin.version == version):
+            matches.append(manifest_path.parent)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(f'Plugin "{plugin_name}" is ambiguous; use a unique name@version')
 
     raise ValueError(f'Plugin "{plugin_name}" not found')
 

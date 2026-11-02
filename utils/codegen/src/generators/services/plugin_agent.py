@@ -15,6 +15,7 @@ class PluginAgentGenerator(BaseGenerator):
         self.write('transport.py', self.render('plugins/transport.py.j2'))
         self.write('process_supervisor.py', self.render('services/process_supervisor.py.j2'))
         self.write('json_data.py', self.render('services/json_data.py.j2'))
+        self.write('runtime_logs.py',self.render('services/runtime_logs.py.j2'))
         if self.svc.plugin_runtime_client.enabled:
             self.write('plugin_runtime_client.py', self.render('services/plugin_runtime_client.py.j2'))
             self.write('plugin_control_client.py', self.render('services/plugin_control_client.py.j2'))

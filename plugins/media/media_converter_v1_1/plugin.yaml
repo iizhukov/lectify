@@ -1,0 +1,21 @@
+plugin:
+  name: media_converter
+  version: 1.1.0
+  description: Конвертация аудио и видео в M4A, MP3 или WAV
+  category: media
+  system_packages: [ffmpeg]
+  inputs:
+    - name: media
+      type: stream/binary
+      buffer: {strategy: size, chunk_size_bytes: 65536}
+  outputs:
+    - {name: audio, type: stream/audio}
+    - {name: metadata, type: stream/json}
+    - {name: output, type: artifact/file}
+  parameters:
+    - {name: format, type: string, default: m4a}
+    - {name: bitrate, type: string, default: 64k}
+    - {name: sample_rate, type: int, default: 44100}
+    - {name: timeout, type: int, default: 120}
+  permissions:
+    storage: {enabled: true, upload_artifacts: true}
